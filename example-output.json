@@ -1,0 +1,191 @@
+{
+  "athleteID": "athlete_example_01",
+  "athleteName": "John Athlete",
+  "testID": "test_12345",
+  "testDate": "2025-12-15",
+  "sport": "cycling",
+  "anthropometry": {
+    "weight_kg": 70,
+    "height_cm": 175,
+    "age": 28,
+    "sex": "male",
+    "bodyFatPercent": 15,
+    "leanBodyMassKg": 59.5,
+    "source": "HUB"
+  },
+  "testType": "ramp",
+  "stages": [
+    {
+      "stage": 1,
+      "duration_min": 5,
+      "HR": 120,
+      "VO2_L_min": 2.2,
+      "lactate_mmol_L": 1.2,
+      "RPE": 3,
+      "power_watts": 150,
+      "speed_pace": null,
+      "RER": 0.78
+    },
+    {
+      "stage": 2,
+      "duration_min": 5,
+      "HR": 135,
+      "VO2_L_min": 2.7,
+      "lactate_mmol_L": 1.5,
+      "RPE": 4,
+      "power_watts": 200,
+      "speed_pace": null,
+      "RER": 0.82
+    },
+    {
+      "stage": 3,
+      "duration_min": 5,
+      "HR": 150,
+      "VO2_L_min": 3.1,
+      "lactate_mmol_L": 2.0,
+      "RPE": 5,
+      "power_watts": 250,
+      "speed_pace": null,
+      "RER": 0.87
+    },
+    {
+      "stage": 4,
+      "duration_min": 5,
+      "HR": 165,
+      "VO2_L_min": 3.5,
+      "lactate_mmol_L": 2.8,
+      "RPE": 6,
+      "power_watts": 300,
+      "speed_pace": null,
+      "RER": 0.92
+    },
+    {
+      "stage": 5,
+      "duration_min": 5,
+      "HR": 175,
+      "VO2_L_min": 3.7,
+      "lactate_mmol_L": 3.6,
+      "RPE": 8,
+      "power_watts": 325,
+      "speed_pace": null,
+      "RER": 0.96
+    },
+    {
+      "stage": 6,
+      "duration_min": 5,
+      "HR": 180,
+      "VO2_L_min": 3.9,
+      "lactate_mmol_L": 4.2,
+      "RPE": 9,
+      "power_watts": 340,
+      "speed_pace": null,
+      "RER": 0.99
+    }
+  ],
+  "VO2max": {
+    "absolute_L_min": 3.9,
+    "relative_ml_kg_min": 55.7,
+    "relative_ml_kg_LBM_min": 65.5,
+    "confidence": "measured"
+  },
+  "thresholds": {
+    "LT1": {
+      "VO2_L_min": 2.6,
+      "HR_bpm": 136,
+      "Power_W": 195,
+      "percent_VO2max": 65.0,
+      "percent_HRmax": 70.0,
+      "confidence": "measured"
+    },
+    "LT2": {
+      "VO2_L_min": 3.7,
+      "HR_bpm": 175,
+      "Power_W": 325,
+      "percent_VO2max": 88.0,
+      "percent_HRmax": 90.0,
+      "confidence": "measured"
+    }
+  },
+  "FatMax": {
+    "HR_bpm": 140,
+    "Power_W": 210,
+    "VO2_L_min": 2.8,
+    "Speed_km_h": null,
+    "confidence": "measured"
+  },
+  "trainingZones": [
+    {
+      "zone": 1,
+      "name": "Active Recovery",
+      "HR_range": "90-136",
+      "VO2_range_L_min": "1.89-2.85",
+      "Power_range_W": "120-175",
+      "description": "Recovery and base aerobic development"
+    },
+    {
+      "zone": 2,
+      "name": "Endurance",
+      "HR_range": "137-149",
+      "VO2_range_L_min": "2.87-3.12",
+      "Power_range_W": "176-204",
+      "description": "Aerobic endurance"
+    },
+    {
+      "zone": 3,
+      "name": "Tempo",
+      "HR_range": "150-175",
+      "VO2_range_L_min": "3.14-3.67",
+      "Power_range_W": "205-308",
+      "description": "Tempo and sustainable pace"
+    },
+    {
+      "zone": 4,
+      "name": "Threshold",
+      "HR_range": "176-183",
+      "VO2_range_L_min": "3.69-3.83",
+      "Power_range_W": "309-341",
+      "description": "Lactate threshold training"
+    },
+    {
+      "zone": 5,
+      "name": "VO2max",
+      "HR_range": "184-194",
+      "VO2_range_L_min": "3.85-4.06",
+      "Power_range_W": "342-408",
+      "description": "VO2max and anaerobic capacity"
+    }
+  ],
+  "HR_drift_percent": 5.0,
+  "energyMix": {
+    "fat_percent": 55,
+    "carb_percent": 45,
+    "confidence": "measured"
+  },
+  "metabolicProfile": {
+    "aerobicCapacity": "High",
+    "fatUtilization": "Moderate",
+    "anaerobicContribution": "High",
+    "durability": "High"
+  },
+  "dataQuality": "Excellent - Direct metabolic measurements with lactate",
+  "dataQualityScore": 14,
+  "curves": {
+    "VO2_vs_stage": [2.2, 2.7, 3.1, 3.5, 3.7, 3.9],
+    "HR_vs_stage": [120, 135, 150, 165, 175, 180],
+    "lactate_vs_stage": [1.2, 1.5, 2.0, 2.8, 3.6, 4.2],
+    "FatMix_vs_stage": [60, 58, 55, 50, 48, 45],
+    "RPE_vs_stage": [3, 4, 5, 6, 8, 9],
+    "Power_vs_stage": [150, 200, 250, 300, 325, 340],
+    "RER_vs_stage": [0.78, 0.82, 0.87, 0.92, 0.96, 0.99]
+  },
+  "validation": {
+    "missingFields": [],
+    "warnings": [],
+    "isComplete": true
+  },
+  "metadata": {
+    "generatedAt": "2025-12-15T18:30:00.000Z",
+    "labVersion": "1.0.0",
+    "calculationEngine": "Asciende Metabolic Lab Engine v1.0"
+  }
+}

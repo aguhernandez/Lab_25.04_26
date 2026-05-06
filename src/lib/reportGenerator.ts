@@ -1,0 +1,1940 @@
+import jsPDF from 'jspdf';
+import type { Athlete, Test, TestDataPoint, TrainingZone } from '../types';
+import type { PhysiologyResults } from './physiology';
+import type { AdvancedMetrics } from '../types';
+import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
+import { getCurrentLanguage } from '../contexts/LanguageContext';
+import type { PreTestData } from './labSession';
+
+function sanitizeForPDF(text: string): string {
+  return text
+    .replace(/\u2013|\u2014/g, '-')
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/\u201c|\u201d/g, '"')
+    .replace(/\u2022/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/\u00b0/g, ' deg')
+    .replace(/\u00b2/g, '2')
+    .replace(/\u00b3/g, '3')
+    .replace(/\u00b5/g, 'u')
+    .replace(/[^\x00-\x7E\xC0-\xFF]/g, (ch) => {
+      const code = ch.charCodeAt(0);
+      if (code > 0x00FF) return '?';
+      return ch;
+    });
+}
+
+function htmlToPlainText(html: string): string {
+  if (!html) return '';
+  return sanitizeForPDF(
+    html
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '- ')
+      .replace(/<\/ul>/gi, '\n')
+      .replace(/<\/ol>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
+const PDF_STRINGS: Record<string, { en: string; es: string }> = {
+  coverSubtitle: { en: 'PERFORMANCE ASSESSMENT REPORT', es: 'INFORME DE EVALUACIÓN DE RENDIMIENTO' },
+  coverDisclaimer: { en: 'For clinical decisions, consult a licensed sports medicine professional.', es: 'Para decisiones clínicas, consulte a un profesional habilitado en medicina del deporte.' },
+  coverEvaluator: { en: 'Evaluator', es: 'Evaluador' },
+  coverLab: { en: 'Asciende Metabolic Lab', es: 'Asciende Metabolic Lab' },
+  pageLabel: { en: 'Page', es: 'Página' },
+
+  secExecutiveSummary: { en: 'Executive Summary', es: 'Resumen Ejecutivo' },
+  secVO2max: { en: 'VO\u2082max & Aerobic Capacity', es: 'VO\u2082max y Capacidad Aeróbica' },
+  secThresholds: { en: 'Lactate Thresholds', es: 'Umbrales de Lactato' },
+  secFatOx: { en: 'Fat Oxidation & FatMax', es: 'Oxidación de Grasas y FatMax' },
+  secZones: { en: 'Training Zones', es: 'Zonas de Entrenamiento' },
+  secEconomy: { en: 'Economy & Power Metrics', es: 'Economía y Métricas de Potencia' },
+  secAnthro: { en: 'Body Composition — Conclusions', es: 'Composición Corporal — Conclusiones' },
+  secAnthroResults: { en: 'Body Composition — Results', es: 'Composición Corporal — Resultados' },
+  secAnthroTargets: { en: 'Body Composition — Targets', es: 'Composición Corporal — Objetivos' },
+  secISAK: { en: 'ISAK Measurement Details', es: 'Detalle de Medidas ISAK' },
+  secComparison: { en: 'Reference Comparison', es: 'Comparación de Referencia' },
+  secHydration: { en: 'Hydration Analysis', es: 'Análisis de Hidratación' },
+  secHeat: { en: 'Heat Adaptation', es: 'Adaptación al Calor' },
+  secRaw: { en: 'Appendix — Raw Stage Data', es: 'Apéndice — Datos de Etapas' },
+  secRec: { en: 'Recommendations', es: 'Recomendaciones' },
+
+  vo2max: { en: 'VO\u2082max', es: 'VO\u2082max' },
+  lt1: { en: 'LT1 (Aerobic Threshold)', es: 'LT1 (Umbral Aeróbico)' },
+  lt2: { en: 'LT2 (Anaerobic Threshold)', es: 'LT2 (Umbral Anaeróbico)' },
+  fatmax: { en: 'FatMax', es: 'FatMax' },
+  hrMax: { en: 'HR max', es: 'FC máx' },
+  hrRest: { en: 'HR rest', es: 'FC reposo' },
+  measured: { en: 'measured', es: 'medido' },
+  estimated: { en: 'estimated', es: 'estimado' },
+  yearsOld: { en: 'years old', es: 'años' },
+  years: { en: 'years', es: 'años' },
+
+  totalKerr: { en: 'Total (Kerr)', es: 'Total (Kerr)' },
+  muscleMass: { en: 'Muscle Mass', es: 'Masa Muscular' },
+  adiposeMass: { en: 'Adipose Mass', es: 'Masa Adiposa' },
+  boneMass: { en: 'Bone Mass', es: 'Masa Ósea' },
+  residualMass: { en: 'Residual Mass', es: 'Masa Residual' },
+  skinMass: { en: 'Skin Mass', es: 'Masa de Piel' },
+  muscleBoneRatio: { en: 'Muscle/Bone Ratio', es: 'Ratio Músculo/Óseo' },
+  ballastIndex: { en: 'Ballast Index', es: 'Índice de Lastre' },
+  bmi: { en: 'BMI', es: 'IMC' },
+  endomorphy: { en: 'Endomorphy', es: 'Endomorfismo' },
+  mesomorphy: { en: 'Mesomorphy', es: 'Mesomorfismo' },
+  ectomorphy: { en: 'Ectomorphy', es: 'Ectomorfismo' },
+  compartment: { en: 'COMPARTMENT', es: 'COMPARTIMENTO' },
+  total: { en: 'TOTAL', es: 'TOTAL' },
+  muscular: { en: 'Muscular', es: 'Muscular' },
+  adipose: { en: 'Adipose', es: 'Adiposa' },
+  bone: { en: 'Bone', es: 'Osea' },
+  residual: { en: 'Residual', es: 'Residual' },
+  skin: { en: 'Skin', es: 'Piel' },
+  bodyMass: { en: 'Body Mass', es: 'Masa Corporal' },
+  stature: { en: 'Stature', es: 'Talla' },
+  bodyFat: { en: 'Body Fat', es: 'Grasa Corporal' },
+  noKerrData: { en: 'No Kerr body composition data available. Complete an ISAK assessment first.', es: 'Sin datos de composición corporal Kerr. Completá primero una evaluación ISAK.' },
+
+  hydrationSessions: { en: 'Hydration Sessions', es: 'Sesiones de Hidratación' },
+  sweatRate: { en: 'Sweat Rate', es: 'Tasa de Sudoración' },
+  dehydration: { en: 'Dehydration', es: 'Deshidratación' },
+  duration: { en: 'Duration', es: 'Duración' },
+  temperature: { en: 'Temperature', es: 'Temperatura' },
+  humidity: { en: 'Humidity', es: 'Humedad' },
+  fluidIntake: { en: 'Fluid Intake', es: 'Ingesta de Líquido' },
+  usgPre: { en: 'USG Pre', es: 'DUE Pre' },
+  usgPost: { en: 'USG Post', es: 'DUE Post' },
+  noHydrationData: { en: 'No hydration sessions recorded.', es: 'Sin sesiones de hidratación registradas.' },
+
+  noPhysiologyData: { en: 'No physiology data available for this section.', es: 'Sin datos de fisiología disponibles para esta sección.' },
+  noData: { en: 'No data available.', es: 'Sin datos disponibles.' },
+
+  zone: { en: 'Zone', es: 'Zona' },
+  hrRange: { en: 'HR Range', es: 'Rango FC' },
+  powerRange: { en: 'Power Range', es: 'Rango Potencia' },
+  description: { en: 'Description', es: 'Descripción' },
+
+  stage: { en: 'Stage', es: 'Etapa' },
+  power: { en: 'Power', es: 'Potencia' },
+  hr: { en: 'HR', es: 'FC' },
+  vo2: { en: 'VO\u2082', es: 'VO\u2082' },
+  rer: { en: 'RER', es: 'RER' },
+  lactate: { en: 'Lactate', es: 'Lactato' },
+  rpe: { en: 'RPE', es: 'RPE' },
+
+  recommendationsText: { en: 'Based on the assessment results, the following training and lifestyle recommendations are provided:', es: 'Con base en los resultados de la evaluación, se proveen las siguientes recomendaciones de entrenamiento y estilo de vida:' },
+};
+
+function tr(key: string): string {
+  const lang = getCurrentLanguage();
+  return PDF_STRINGS[key]?.[lang] ?? PDF_STRINGS[key]?.['en'] ?? key;
+}
+
+export type ReportSection =
+  | 'cover'
+  | 'executive_summary'
+  | 'test_context'
+  | 'anthropometry'
+  | 'anthropometry_results'
+  | 'anthropometry_targets'
+  | 'isak_details'
+  | 'anthropometry_comparison'
+  | 'vo2max'
+  | 'thresholds'
+  | 'fat_oxidation'
+  | 'training_zones'
+  | 'economy_metrics'
+  | 'hydration'
+  | 'heat_adaptation'
+  | 'raw_data'
+  | 'recommendations';
+
+export type ReportStyle = 'scientific' | 'coach' | 'athlete' | 'minimal';
+export type ReportType = 'full' | 'lab' | 'anthropometry' | 'hydration' | 'comparative' | 'custom';
+
+export interface ReportBranding {
+  labName: string;
+  evaluatorName: string;
+  credentials: string;
+  contactInfo: string;
+}
+
+export interface ReportOptions {
+  sections: ReportSection[];
+  style: ReportStyle;
+  branding: ReportBranding;
+  reportNotes?: string;
+  physiologyNotes?: string;
+  anthropometryNotes?: string;
+}
+
+export interface ReportData {
+  athlete: Athlete;
+  test?: Test | null;
+  physiologyResults?: PhysiologyResults | null;
+  dataPoints?: TestDataPoint[];
+  advancedMetrics?: AdvancedMetrics | null;
+  anthropometryMeasurement?: AnthropometryMeasurement | null;
+  kerrResults?: KerrResults | null;
+  hydrationSessions?: HydrationSessionData[];
+  preTestData?: PreTestData | null;
+}
+
+export interface HydrationSessionData {
+  id: string;
+  session_date: string;
+  duration_min: number;
+  pre_weight_kg?: number;
+  post_weight_kg?: number;
+  fluid_intake_ml?: number;
+  sweat_rate_l_h?: number;
+  percent_dehydration?: number;
+  ambient_temp_c?: number;
+  humidity_pct?: number;
+  usg_pre?: number;
+  usg_post?: number;
+}
+
+export interface SectionDefinition {
+  key: ReportSection;
+  label: string;
+  group: string;
+  requiresData: ('physiology' | 'anthropometry' | 'dataPoints' | 'hydration')[];
+}
+
+export const SECTION_DEFINITIONS: SectionDefinition[] = [
+  { key: 'cover', label: 'Cover Page', group: 'General', requiresData: [] },
+  { key: 'executive_summary', label: 'Executive Summary', group: 'General', requiresData: [] },
+  { key: 'test_context', label: 'Condiciones del Test', group: 'General', requiresData: [] },
+  { key: 'anthropometry', label: 'Body Composition — Conclusions', group: 'Anthropometry', requiresData: ['anthropometry'] },
+  { key: 'anthropometry_results', label: 'Body Composition — Results (Z-scores, Table)', group: 'Anthropometry', requiresData: ['anthropometry'] },
+  { key: 'anthropometry_targets', label: 'Body Composition — Targets & Change Summary', group: 'Anthropometry', requiresData: ['anthropometry'] },
+  { key: 'isak_details', label: 'ISAK Measurement Details', group: 'Anthropometry', requiresData: ['anthropometry'] },
+  { key: 'anthropometry_comparison', label: 'Anthropometry Reference Comparison', group: 'Anthropometry', requiresData: ['anthropometry'] },
+  { key: 'vo2max', label: 'VO\u2082max', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'thresholds', label: 'Lactate Thresholds (LT1 / LT2)', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'fat_oxidation', label: 'Fat Oxidation & FatMax', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'training_zones', label: 'Training Zones', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'economy_metrics', label: 'Economy & Power Metrics', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'hydration', label: 'Hydration Analysis', group: 'Environmental', requiresData: ['hydration'] },
+  { key: 'heat_adaptation', label: 'Heat Adaptation Notes', group: 'Environmental', requiresData: [] },
+  { key: 'raw_data', label: 'Appendix: Raw Stage Data', group: 'Data', requiresData: ['dataPoints'] },
+  { key: 'recommendations', label: 'Recommendations', group: 'Conclusions', requiresData: [] },
+];
+
+export const REPORT_TYPE_PRESETS: Record<ReportType, ReportSection[]> = {
+  full: ['cover', 'executive_summary', 'test_context', 'anthropometry', 'isak_details', 'vo2max', 'thresholds', 'fat_oxidation', 'training_zones', 'economy_metrics', 'hydration', 'recommendations'],
+  lab: ['cover', 'executive_summary', 'test_context', 'vo2max', 'thresholds', 'fat_oxidation', 'training_zones', 'economy_metrics', 'raw_data'],
+  anthropometry: ['cover', 'executive_summary', 'anthropometry', 'anthropometry_results', 'anthropometry_targets', 'isak_details', 'anthropometry_comparison'],
+  hydration: ['cover', 'hydration', 'recommendations'],
+  comparative: ['cover', 'executive_summary', 'anthropometry', 'anthropometry_results', 'anthropometry_comparison'],
+  custom: [],
+};
+
+const C = {
+  yellow: '#fdda36',
+  dark: '#514163',
+  darkBg: '#3a2e4a',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray500: '#6b7280',
+  gray700: '#374151',
+  gray900: '#111827',
+  white: '#ffffff',
+  z1: '#3b82f6',
+  z2: '#10b981',
+  z3: '#f59e0b',
+  z4: '#f97316',
+  z5: '#ef4444',
+  adipose: '#fb923c',
+  muscle: '#ef4444',
+  bone: '#9ca3af',
+  skin: '#fcd34d',
+  residual: '#a78bfa',
+};
+
+interface LogoInfo {
+  dataUrl: string;
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
+async function loadLogo(): Promise<LogoInfo | null> {
+  try {
+    const res = await fetch('/logo_transp.png');
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => resolve({ w: 1, h: 1 });
+      img.src = dataUrl;
+    });
+    return { dataUrl, naturalWidth: dims.w, naturalHeight: dims.h };
+  } catch {
+    return null;
+  }
+}
+
+function addLogoImage(doc: jsPDF, logo: LogoInfo, x: number, y: number, maxW: number, maxH: number) {
+  const ratio = logo.naturalWidth / logo.naturalHeight;
+  let w = maxW;
+  let h = w / ratio;
+  if (h > maxH) {
+    h = maxH;
+    w = h * ratio;
+  }
+  const cx = x + (maxW - w) / 2;
+  doc.addImage(logo.dataUrl, 'PNG', cx, y, w, h, undefined, 'FAST');
+}
+
+async function fetchFontAsBase64(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  } catch {
+    return null;
+  }
+}
+
+interface FontSet {
+  kronaOne: string | null;
+  jostRegular: string | null;
+  jostBold: string | null;
+}
+
+async function resolveFontUrl(family: string, weight: number): Promise<string | null> {
+  try {
+    const cssUrl = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`;
+    const res = await fetch(cssUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    const css = await res.text();
+    const match = css.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadFonts(): Promise<FontSet> {
+  const [kronaOneUrl, jostRegularUrl, jostBoldUrl] = await Promise.all([
+    resolveFontUrl('Krona One', 400),
+    resolveFontUrl('Jost', 400),
+    resolveFontUrl('Jost', 700),
+  ]);
+  const [kronaOne, jostRegular, jostBold] = await Promise.all([
+    kronaOneUrl ? fetchFontAsBase64(kronaOneUrl) : Promise.resolve(null),
+    jostRegularUrl ? fetchFontAsBase64(jostRegularUrl) : Promise.resolve(null),
+    jostBoldUrl ? fetchFontAsBase64(jostBoldUrl) : Promise.resolve(null),
+  ]);
+  return { kronaOne, jostRegular, jostBold };
+}
+
+function registerFonts(doc: jsPDF, fonts: FontSet) {
+  try {
+    if (fonts.kronaOne) {
+      doc.addFileToVFS('KronaOne-Regular.ttf', fonts.kronaOne);
+      doc.addFont('KronaOne-Regular.ttf', 'KronaOne', 'normal');
+    }
+    if (fonts.jostRegular) {
+      doc.addFileToVFS('Jost-Regular.ttf', fonts.jostRegular);
+      doc.addFont('Jost-Regular.ttf', 'Jost', 'normal');
+    }
+    if (fonts.jostBold) {
+      doc.addFileToVFS('Jost-Bold.ttf', fonts.jostBold);
+      doc.addFont('Jost-Bold.ttf', 'Jost', 'bold');
+    }
+  } catch {
+    // font registration optional
+  }
+}
+
+const ZONE_COLORS: Record<number, string> = { 1: C.z1, 2: C.z2, 3: C.z3, 4: C.z4, 5: C.z5 };
+
+function hexToRgb(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b];
+}
+
+class PDFBuilder {
+  pdf: jsPDF;
+  y: number;
+  readonly ml = 15;
+  readonly mr = 15;
+  readonly w = 210;
+  readonly h = 297;
+  readonly cw: number;
+  readonly pageBottom = 280;
+  pageNum = 1;
+  private branding: ReportBranding;
+  private athleteName: string;
+  hasKrona = false;
+  hasJost = false;
+
+  constructor(branding: ReportBranding, athleteName: string) {
+    this.pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    this.y = this.ml;
+    this.cw = this.w - this.ml - this.mr;
+    this.branding = branding;
+    this.athleteName = athleteName;
+  }
+
+  setKronaFont(size: number) {
+    if (this.hasKrona) {
+      this.pdf.setFont('KronaOne', 'normal');
+    } else {
+      this.pdf.setFont('helvetica', 'bold');
+    }
+    this.pdf.setFontSize(size);
+  }
+
+  setJostFont(size: number, weight: 'normal' | 'bold' = 'normal') {
+    if (this.hasJost) {
+      this.pdf.setFont('Jost', weight);
+    } else {
+      this.pdf.setFont('helvetica', weight);
+    }
+    this.pdf.setFontSize(size);
+  }
+
+  fill(hex: string) { const [r, g, b] = hexToRgb(hex); this.pdf.setFillColor(r, g, b); }
+  stroke(hex: string) { const [r, g, b] = hexToRgb(hex); this.pdf.setDrawColor(r, g, b); }
+  textColor(hex: string) { const [r, g, b] = hexToRgb(hex); this.pdf.setTextColor(r, g, b); }
+
+  checkPage(needed = 20) {
+    if (this.y + needed > this.pageBottom) {
+      this.pdf.addPage();
+      this.pageNum++;
+      this.y = 20;
+      this.addPageFooter();
+    }
+  }
+
+  addPageFooter() {
+    const footerY = this.h - 8;
+    this.fill(C.gray100);
+    this.pdf.rect(0, footerY - 3, this.w, 11, 'F');
+    this.textColor(C.gray500);
+    this.pdf.setFontSize(7);
+    this.pdf.setFont('helvetica', 'normal');
+    const lab = this.branding.labName || 'Metabolic Lab';
+    this.pdf.text(lab, this.ml, footerY + 2);
+    this.pdf.text(`${tr('pageLabel')} ${this.pageNum}`, this.w / 2, footerY + 2, { align: 'center' });
+    this.pdf.text(this.athleteName, this.w - this.mr, footerY + 2, { align: 'right' });
+  }
+
+  sectionHeader(title: string) {
+    this.checkPage(16);
+    this.fill(C.yellow);
+    this.pdf.rect(this.ml, this.y, 3, 10, 'F');
+    this.fill(C.gray900);
+    this.pdf.rect(this.ml + 3, this.y, this.cw - 3, 10, 'F');
+    this.textColor(C.white);
+    this.setKronaFont(8);
+    this.pdf.text(title.toUpperCase(), this.ml + 7, this.y + 6.5);
+    this.y += 13;
+  }
+
+  metricGrid(items: Array<{ label: string; value: string; unit?: string; note?: string }>, cols = 3) {
+    const colW = this.cw / cols;
+    const boxH = 16;
+    const perRow = cols;
+    for (let i = 0; i < items.length; i += perRow) {
+      const row = items.slice(i, i + perRow);
+      this.checkPage(boxH + 3);
+      row.forEach((item, j) => {
+        const x = this.ml + j * colW;
+        this.fill(C.gray100);
+        this.stroke(C.gray200);
+        this.pdf.setLineWidth(0.3);
+        this.pdf.rect(x, this.y, colW - 1, boxH, 'FD');
+        this.textColor(C.gray500);
+        this.setJostFont(6.5, 'normal');
+        this.pdf.text(item.label.toUpperCase(), x + 3, this.y + 4.5);
+        this.textColor(C.gray900);
+        this.setKronaFont(12);
+        this.pdf.text(item.value, x + 3, this.y + 11);
+        if (item.unit) {
+          this.textColor(C.gray500);
+          this.pdf.setFontSize(7);
+          this.pdf.setFont('helvetica', 'normal');
+          this.pdf.text(item.unit, x + 3 + this.pdf.getTextWidth(item.value) * 13 / 28 + 1, this.y + 11);
+        }
+        if (item.note) {
+          this.textColor(C.gray500);
+          this.pdf.setFontSize(6);
+          this.pdf.text(item.note, x + 3, this.y + 14.5);
+        }
+      });
+      this.y += boxH + 2;
+    }
+  }
+
+  tableHeader(cols: Array<{ label: string; width: number }>) {
+    this.checkPage(10);
+    let x = this.ml;
+    this.fill(C.gray900);
+    this.pdf.rect(this.ml, this.y, this.cw, 8, 'F');
+    this.textColor(C.white);
+    this.setJostFont(7, 'bold');
+    cols.forEach(col => {
+      this.pdf.text(col.label, x + 2, this.y + 5.5);
+      x += col.width;
+    });
+    this.y += 8;
+  }
+
+  tableRow(cols: Array<{ value: string; width: number }>, isEven: boolean, accentColor?: string) {
+    this.checkPage(8);
+    let x = this.ml;
+    if (accentColor) {
+      const [r, g, b] = hexToRgb(accentColor);
+      this.pdf.setFillColor(r, g, b);
+      this.pdf.rect(this.ml, this.y, 3, 7, 'F');
+    }
+    this.fill(isEven ? C.white : C.gray100);
+    this.pdf.rect(this.ml + (accentColor ? 3 : 0), this.y, this.cw - (accentColor ? 3 : 0), 7, 'F');
+    this.textColor(C.gray700);
+    this.setJostFont(8, 'normal');
+    cols.forEach((col, i) => {
+      const tx = i === 0 ? x + (accentColor ? 5 : 2) : x + 2;
+      this.pdf.text(col.value, tx, this.y + 5);
+      x += col.width;
+    });
+    this.stroke(C.gray200);
+    this.pdf.setLineWidth(0.2);
+    this.pdf.line(this.ml, this.y + 7, this.ml + this.cw, this.y + 7);
+    this.y += 7;
+  }
+
+  paragraph(text: string, fontSize = 8.5) {
+    this.checkPage(10);
+    this.textColor(C.gray700);
+    this.setJostFont(fontSize, 'normal');
+    const lines = this.pdf.splitTextToSize(sanitizeForPDF(text), this.cw);
+    lines.forEach((line: string) => {
+      this.checkPage(6);
+      this.setJostFont(fontSize, 'normal');
+      this.pdf.text(line, this.ml, this.y);
+      this.y += 5;
+    });
+    this.y += 2;
+  }
+
+  label(text: string, note?: string) {
+    this.checkPage(7);
+    this.textColor(C.gray500);
+    this.setJostFont(7, 'bold');
+    this.pdf.text(text.toUpperCase(), this.ml, this.y);
+    if (note) {
+      this.textColor(C.gray500);
+      this.setJostFont(6.5, 'normal');
+      this.pdf.text(note, this.ml + this.pdf.getTextWidth(text.toUpperCase()) + 2, this.y);
+    }
+    this.y += 5;
+  }
+
+  spacer(h = 4) { this.y += h; }
+
+  horizontalBar(value: number, max: number, color: string, x: number, y: number, w: number, h: number) {
+    this.fill(C.gray200);
+    this.pdf.rect(x, y, w, h, 'F');
+    const bw = Math.max(0, Math.min(1, value / max)) * w;
+    this.fill(color);
+    this.pdf.rect(x, y, bw, h, 'F');
+  }
+
+  get doc() { return this.pdf; }
+}
+
+function val(v: number | null | undefined, decimals = 0): string {
+  if (v === null || v === undefined) return '—';
+  return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v));
+}
+
+function renderCover(b: PDFBuilder, data: ReportData, options: ReportOptions, logo: LogoInfo | null) {
+  const { athlete, test } = data;
+  const { branding } = options;
+
+  b.fill(C.white);
+  b.doc.rect(0, 0, 210, 297, 'F');
+
+  b.fill(C.dark);
+  b.doc.rect(0, 0, 8, 297, 'F');
+
+  b.fill(C.yellow);
+  b.doc.rect(8, 0, 4, 297, 'F');
+
+  if (logo) {
+    try {
+      addLogoImage(b.doc, logo, 120, 18, 75, 55);
+    } catch {
+      // logo optional
+    }
+  }
+
+  b.textColor(C.dark);
+  b.setKronaFont(24);
+  const labName = branding.labName || 'ASCIENDE';
+  b.doc.text(labName.toUpperCase(), 22, 40);
+
+  b.textColor(C.dark);
+  b.setKronaFont(11);
+  b.doc.text('METABOLIC LAB', 22, 50);
+
+  b.fill(C.yellow);
+  b.doc.rect(22, 56, 80, 1, 'F');
+
+  b.textColor(C.gray500);
+  b.setJostFont(9, 'normal');
+  b.doc.text(tr('coverSubtitle'), 22, 65);
+
+  if (logo) {
+    try {
+      b.doc.saveGraphicsState();
+      b.doc.setGState(b.doc.GState({ opacity: 0.04 }));
+      addLogoImage(b.doc, logo, 30, 100, 150, 110);
+      b.doc.restoreGraphicsState();
+    } catch {
+      // watermark optional
+    }
+  }
+
+  b.fill(C.dark);
+  b.doc.rect(22, 155, 168, 0.5, 'F');
+
+  b.textColor(C.dark);
+  b.setKronaFont(28);
+  const lines = b.doc.splitTextToSize(athlete.name, 168);
+  let ny = 170;
+  lines.forEach((line: string) => {
+    b.doc.text(line, 22, ny);
+    ny += 12;
+  });
+
+  b.textColor(C.gray500);
+  b.setJostFont(10, 'normal');
+  const sportName = athlete.sport && athlete.sport !== 'other' ? (athlete.sport.charAt(0).toUpperCase() + athlete.sport.slice(1).replace(/_/g, ' ')) : null;
+  const testTypeLabel = test?.test_type ? test.test_type.replace(/_/g, ' ').toUpperCase() : '';
+  const parts: string[] = [];
+  if (sportName) parts.push(`Sport: ${sportName}`);
+  if (testTypeLabel) parts.push(testTypeLabel);
+  if (parts.length > 0) b.doc.text(parts.join('   ·   '), 22, ny + 4);
+
+  if (athlete.date_of_birth) {
+    const age = new Date().getFullYear() - new Date(athlete.date_of_birth).getFullYear();
+    b.doc.text(`${age} years`, 22, ny + 12);
+  }
+
+  if (test?.test_date) {
+    b.textColor(C.gray500);
+    b.doc.setFontSize(9);
+    b.doc.text(new Date(test.test_date).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' }), 22, ny + 20);
+  }
+
+  const infoLines: string[] = [];
+  if (branding.evaluatorName) infoLines.push(`${tr('coverEvaluator')}: ${branding.evaluatorName}`);
+  if (branding.credentials) infoLines.push(branding.credentials);
+  if (branding.contactInfo) infoLines.push(branding.contactInfo);
+
+  b.fill(C.gray100);
+  b.doc.rect(22, 255, 168, infoLines.length > 0 ? infoLines.length * 6 + 10 : 16, 'F');
+  b.fill(C.yellow);
+  b.doc.rect(22, 255, 3, infoLines.length > 0 ? infoLines.length * 6 + 10 : 16, 'F');
+
+  b.textColor(C.dark);
+  b.doc.setFontSize(8.5);
+  b.doc.setFont('helvetica', 'normal');
+  let iy = 263;
+  if (infoLines.length > 0) {
+    infoLines.forEach(line => {
+      b.doc.text(line, 29, iy);
+      iy += 6;
+    });
+  } else {
+    b.doc.text(tr('coverLab'), 29, iy);
+  }
+
+  b.textColor(C.gray500);
+  b.doc.setFontSize(7);
+  b.doc.text(tr('coverDisclaimer'), 22, 289);
+
+  b.doc.addPage();
+  b.y = 20;
+  b.pageNum = 2;
+  b.addPageFooter();
+}
+
+function renderExecutiveSummary(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secExecutiveSummary'));
+  const { physiologyResults: r, kerrResults: k, athlete } = data;
+
+  const items: Array<{ label: string; value: string; unit?: string; note?: string }> = [];
+
+  if (r?.vo2max) {
+    items.push({ label: 'VO\u2082max', value: val(r.vo2max), unit: 'ml/kg/min', note: r.vo2max_confidence !== 'measured' ? `(${r.vo2max_confidence})` : undefined });
+  }
+  if (r?.lt1_hr) {
+    items.push({ label: 'LT1 Heart Rate', value: val(r.lt1_hr), unit: 'bpm' });
+  }
+  if (r?.lt2_hr) {
+    items.push({ label: 'LT2 Heart Rate', value: val(r.lt2_hr), unit: 'bpm' });
+  }
+  if (r?.hrmax) {
+    items.push({ label: 'HR Max', value: val(r.hrmax), unit: 'bpm', note: r.hrmax_confidence !== 'measured' ? '(estimated)' : undefined });
+  }
+  if (r?.lt1_power) items.push({ label: 'LT1 Power', value: val(r.lt1_power), unit: 'W' });
+  if (r?.lt2_power) items.push({ label: 'LT2 Power', value: val(r.lt2_power), unit: 'W' });
+  if (r?.fatmax_hr) items.push({ label: 'FatMax HR', value: val(r.fatmax_hr), unit: 'bpm' });
+  if (r?.pam_watts) items.push({ label: 'PAM', value: val(r.pam_watts), unit: 'W' });
+  if (r?.vam_kmh) items.push({ label: 'VAM', value: r.vam_kmh.toFixed(1), unit: 'km/h' });
+
+  if (k) {
+    items.push({ label: 'Muscle Mass', value: k.muscle_mass_kg.toFixed(1), unit: 'kg' });
+    items.push({ label: 'Adipose Mass', value: k.adipose_mass_kg.toFixed(1), unit: 'kg' });
+    items.push({ label: 'Bone Mass', value: k.bone_mass_kg.toFixed(1), unit: 'kg' });
+  } else if (athlete.body_fat_percent) {
+    items.push({ label: 'Body Fat', value: athlete.body_fat_percent.toFixed(1), unit: '%' });
+  }
+
+  if (athlete.weight_kg) items.push({ label: 'Body Mass', value: athlete.weight_kg.toFixed(1), unit: 'kg' });
+  if (athlete.height_cm) items.push({ label: 'Stature', value: String(Math.round(athlete.height_cm)), unit: 'cm' });
+
+  if (items.length === 0) {
+    b.paragraph('No key metrics available for this report.');
+    return;
+  }
+
+  b.metricGrid(items, 3);
+
+  if (r?.data_quality) {
+    b.spacer(2);
+    b.textColor(C.gray500);
+    b.doc.setFontSize(7.5);
+    b.doc.setFont('helvetica', 'italic');
+    b.doc.text(`Data quality: ${r.data_quality}`, b.ml, b.y);
+    b.y += 6;
+  }
+  b.spacer(4);
+}
+
+type VO2Card = { label: string; value: string; unit?: string; color: string };
+
+function renderVO2CardRow(b: PDFBuilder, metrics: VO2Card[]) {
+  if (metrics.length === 0) return;
+  b.checkPage(28);
+  const cardW = (b.cw - (metrics.length - 1) * 3) / metrics.length;
+  metrics.forEach((metric, i) => {
+    const cx = b.ml + i * (cardW + 3);
+    const [cr, cg, cb] = hexToRgb(metric.color);
+    b.fill(C.gray100);
+    b.doc.rect(cx, b.y, cardW, 22, 'F');
+    b.doc.setFontSize(7.5);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(C.gray500);
+    b.doc.text(metric.label, cx + 3, b.y + 5);
+    b.doc.setFontSize(13);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(metric.color);
+    b.doc.text(metric.value, cx + 3, b.y + 14);
+    if (metric.unit) {
+      b.doc.setFontSize(7);
+      b.doc.setFont('helvetica', 'normal');
+      b.textColor(C.gray500);
+      b.doc.text(metric.unit, cx + 3 + b.doc.getTextWidth(metric.value) * 13 / 28 + 1, b.y + 14);
+    }
+    b.doc.setFillColor(cr, cg, cb);
+    b.doc.circle(cx + cardW - 5, b.y + 16, 2.5, 'F');
+  });
+  b.y += 26;
+}
+
+function renderVO2max(b: PDFBuilder, data: ReportData, style: ReportStyle) {
+  b.sectionHeader(tr('secVO2max'));
+  const r = data.physiologyResults;
+  if (!r) { b.paragraph('No physiology data available.'); return; }
+
+  const k = data.kerrResults as any;
+  const vo2_ml_min = r.vo2max_ml_min;
+
+  let vo2_ffm: number | null = null;
+  let vo2_muscle: number | null = null;
+  if (vo2_ml_min && k) {
+    const adiposeKg = k.adipose_mass_kg;
+    const muscleKg = k.muscle_mass_kg;
+    const weightKg = k.structured_weight_kg || data.athlete.weight_kg;
+    if (weightKg && adiposeKg != null && adiposeKg >= 0) {
+      const ffmKg = weightKg - adiposeKg;
+      if (ffmKg > 0) vo2_ffm = vo2_ml_min / ffmKg;
+    }
+    if (muscleKg != null && muscleKg > 0) {
+      vo2_muscle = vo2_ml_min / muscleKg;
+    }
+  }
+
+  const row1: VO2Card[] = [];
+  if (r.vo2max) row1.push({ label: 'VO\u2082max (total body)', value: val(r.vo2max), unit: 'ml/kg/min', color: '#10B981' });
+  if (vo2_ml_min) row1.push({ label: 'VO\u2082max (absolute)', value: (vo2_ml_min / 1000).toFixed(2), unit: 'L/min', color: '#3B82F6' });
+  if (r.vo2max_ml_kg_lbm_min) row1.push({ label: 'VO\u2082max (LBM)', value: val(r.vo2max_ml_kg_lbm_min, 1), unit: 'ml/kgLBM/min', color: '#F59E0B' });
+  if (r.hrmax) row1.push({ label: 'HRmax', value: val(r.hrmax), unit: 'bpm', color: '#EF4444' });
+
+  const row2: VO2Card[] = [];
+  if (vo2_ffm) row2.push({ label: 'VO\u2082max / Fat-Free Mass', value: vo2_ffm.toFixed(1), unit: 'ml/kgFFM/min', color: '#059669' });
+  if (vo2_muscle) row2.push({ label: 'VO\u2082max / Muscle Mass', value: vo2_muscle.toFixed(1), unit: 'ml/kgMM/min', color: '#0284C7' });
+
+  renderVO2CardRow(b, row1);
+  if (row2.length > 0) {
+    b.spacer(2);
+    renderVO2CardRow(b, row2);
+  }
+
+  b.spacer(2);
+
+  if (style === 'scientific' || style === 'coach') {
+    b.label('Metabolic Profile');
+    b.paragraph(`Aerobic capacity: ${r.metabolic_profile.aerobic_capacity}`);
+    b.paragraph(`Fat utilization: ${r.metabolic_profile.fat_utilization}`);
+    b.paragraph(`Anaerobic contribution: ${r.metabolic_profile.anaerobic_contribution}`);
+  }
+  b.spacer(4);
+}
+
+function renderThresholds(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secThresholds'));
+  const r = data.physiologyResults;
+  if (!r) { b.paragraph('No threshold data available.'); return; }
+
+  const cols = [
+    { label: 'THRESHOLD', width: 38 },
+    { label: 'HR (bpm)', width: 28 },
+    { label: 'POWER (W)', width: 28 },
+    { label: 'VO\u2082 (ml/kg/min)', width: 38 },
+    { label: '% VO\u2082max', width: 28 },
+    { label: '% HRmax', width: 22 },
+  ];
+  b.tableHeader(cols);
+
+  if (r.lt1_hr) {
+    b.tableRow([
+      { value: 'LT1 (Aerobic Threshold)', width: 38 },
+      { value: val(r.lt1_hr), width: 28 },
+      { value: val(r.lt1_power), width: 28 },
+      { value: val(r.lt1_vo2, 1), width: 38 },
+      { value: r.lt1_percent_vo2max ? `${r.lt1_percent_vo2max}%` : '—', width: 28 },
+      { value: r.lt1_percent_hrmax ? `${r.lt1_percent_hrmax}%` : '—', width: 22 },
+    ], true);
+  }
+
+  if (r.lt2_hr) {
+    b.tableRow([
+      { value: 'LT2 (Anaerobic Threshold)', width: 38 },
+      { value: val(r.lt2_hr), width: 28 },
+      { value: val(r.lt2_power), width: 28 },
+      { value: val(r.lt2_vo2, 1), width: 38 },
+      { value: r.lt2_percent_vo2max ? `${r.lt2_percent_vo2max}%` : '—', width: 28 },
+      { value: r.lt2_percent_hrmax ? `${r.lt2_percent_hrmax}%` : '—', width: 22 },
+    ], false);
+  }
+
+  if (r.fatmax_hr) {
+    b.tableRow([
+      { value: 'FatMax (Max Fat Oxidation)', width: 38 },
+      { value: val(r.fatmax_hr), width: 28 },
+      { value: val(r.fatmax_power), width: 28 },
+      { value: val(r.fatmax_vo2, 1), width: 38 },
+      { value: '—', width: 28 },
+      { value: '—', width: 22 },
+    ], true);
+  }
+
+  b.spacer(4);
+}
+
+function renderFatOxidation(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secFatOx'));
+  const r = data.physiologyResults;
+  if (!r?.fatmax_hr) { b.paragraph('FatMax data not available. Include RER measurements during testing.'); return; }
+
+  const items: Array<{ label: string; value: string; unit?: string }> = [
+    { label: 'FatMax HR', value: val(r.fatmax_hr), unit: 'bpm' },
+    { label: 'FatMax Power', value: val(r.fatmax_power), unit: 'W' },
+    { label: 'FatMax VO\u2082', value: val(r.fatmax_vo2, 1), unit: 'ml/kg/min' },
+  ];
+  b.metricGrid(items.filter(i => i.value !== '—'), 3);
+  b.spacer(2);
+  b.paragraph('FatMax is the exercise intensity at which the rate of fat oxidation is maximal. Training near this intensity optimizes fat utilization and improves metabolic efficiency.');
+  b.spacer(4);
+}
+
+function renderTrainingZones(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secZones'));
+  const r = data.physiologyResults;
+  if (!r?.training_zones?.length) { b.paragraph('No training zones available.'); return; }
+
+  const hasPower = r.training_zones.some(z => z.power_min || z.power_max);
+  const hasPace = r.training_zones.some(z => z.pace_min || z.pace_max);
+
+  const cols = [
+    { label: 'ZONE', width: 12 },
+    { label: 'NAME', width: 40 },
+    { label: 'HR RANGE (bpm)', width: 38 },
+    ...(hasPower ? [{ label: 'POWER (W)', width: 35 }] : []),
+    ...(hasPace ? [{ label: 'PACE', width: 30 }] : []),
+    { label: 'PURPOSE', width: hasPower || hasPace ? 35 : 70 },
+  ];
+  b.tableHeader(cols);
+
+  r.training_zones.forEach((zone: TrainingZone, i: number) => {
+    const color = ZONE_COLORS[zone.zone] || C.gray500;
+    const row: Array<{ value: string; width: number }> = [
+      { value: `Z${zone.zone}`, width: 12 },
+      { value: zone.name, width: 40 },
+      { value: `${zone.hr_min} – ${zone.hr_max}`, width: 38 },
+    ];
+    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min} – ${zone.power_max}` : '—', width: 35 });
+    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min} – ${zone.pace_max}` : '—', width: 30 });
+    row.push({ value: zone.description || '', width: hasPower || hasPace ? 35 : 70 });
+    b.tableRow(row, i % 2 === 0, color);
+  });
+
+  b.spacer(4);
+}
+
+function renderEconomy(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secEconomy'));
+  const r = data.physiologyResults;
+  if (!r) { b.paragraph('No data available.'); return; }
+
+  const items: Array<{ label: string; value: string; unit?: string; note?: string }> = [];
+  if (r.pam_watts) items.push({ label: 'PAM (Peak Aerobic Power)', value: val(r.pam_watts), unit: 'W' });
+  if (r.vam_kmh) items.push({ label: 'VAM (Velocity at VO\u2082max)', value: r.vam_kmh.toFixed(1), unit: 'km/h' });
+  if (r.hr_drift_percent != null) items.push({ label: 'HR Drift', value: r.hr_drift_percent.toFixed(1), unit: '%' });
+
+  const adv = data.advancedMetrics;
+  if (adv?.movementEconomy?.cycling?.watts_per_kg_lbm && r.lt2_power && data.athlete.weight_kg) {
+    const wpkg = (r.lt2_power / data.athlete.weight_kg).toFixed(2);
+    items.push({ label: 'W/kg at LT2', value: wpkg, unit: 'W/kg' });
+  }
+  if (adv?.movementEconomy?.cycling?.watts_per_kg_lbm) {
+    items.push({ label: 'W/kg LBM at LT2', value: adv.movementEconomy.cycling.watts_per_kg_lbm.toFixed(2), unit: 'W/kg LBM' });
+  }
+  if (adv?.movementEconomy?.running?.cost_per_km_ml_o2_kg) {
+    items.push({ label: 'Running Economy', value: adv.movementEconomy.running.cost_per_km_ml_o2_kg.toFixed(1), unit: 'ml/kg/km' });
+  }
+
+  if (items.length === 0) { b.paragraph('Economy metrics require power meter or VO\u2082 data.'); return; }
+  b.metricGrid(items, 3);
+  b.spacer(4);
+}
+
+function drawPieChart(b: PDFBuilder, components: Array<{ label: string; kg: number; pct: number; color: string }>, totalMass: number) {
+  b.checkPage(85);
+  const pieX = b.ml + 38;
+  const pieY = b.y + 40;
+  const pieR = 36;
+  let startAngle = -Math.PI / 2;
+  const steps = 60;
+
+  components.forEach(comp => {
+    if (comp.pct <= 0) return;
+    const sweep = (comp.pct / 100) * 2 * Math.PI;
+    const [cr, cg, cb] = hexToRgb(comp.color);
+    b.doc.setFillColor(cr, cg, cb);
+    b.doc.setDrawColor(255, 255, 255);
+    b.doc.setLineWidth(0.2);
+    for (let i = 0; i < steps; i++) {
+      const a1 = startAngle + (sweep / steps) * i;
+      const a2 = startAngle + (sweep / steps) * (i + 1);
+      b.doc.triangle(pieX, pieY, pieX + pieR * Math.cos(a1), pieY + pieR * Math.sin(a1), pieX + pieR * Math.cos(a2), pieY + pieR * Math.sin(a2), 'F');
+    }
+    if (comp.pct >= 5) {
+      const mid = startAngle + sweep / 2;
+      b.doc.setTextColor(255, 255, 255);
+      b.doc.setFontSize(7);
+      b.doc.setFont('helvetica', 'bold');
+      b.doc.text(`${comp.pct.toFixed(1)}%`, pieX + pieR * 0.62 * Math.cos(mid), pieY + pieR * 0.62 * Math.sin(mid), { align: 'center' });
+    }
+    startAngle += sweep;
+  });
+
+  const lx = b.ml + 85;
+  let ly = b.y + 4;
+  b.doc.setFontSize(7.5);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray500);
+  b.doc.text('COMPARTMENT', lx, ly);
+  b.doc.text('kg', lx + 55, ly, { align: 'right' });
+  b.doc.text('%', lx + 70, ly, { align: 'right' });
+  ly += 4;
+  b.fill(C.gray200);
+  b.doc.rect(lx, ly, 70, 0.3, 'F');
+  ly += 5;
+
+  components.forEach((comp, i) => {
+    const [cr, cg, cb] = hexToRgb(comp.color);
+    b.doc.setFillColor(cr, cg, cb);
+    b.doc.circle(lx + 2, ly - 1.5, 2, 'F');
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(8.5);
+    b.textColor(C.gray700);
+    b.doc.text(comp.label, lx + 7, ly);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.gray900);
+    b.doc.text(comp.kg.toFixed(2), lx + 55, ly, { align: 'right' });
+    b.doc.text(comp.pct.toFixed(1), lx + 70, ly, { align: 'right' });
+    ly += i < components.length - 1 ? 8 : 4;
+  });
+
+  b.fill(C.gray200);
+  b.doc.rect(lx, ly, 70, 0.3, 'F');
+  ly += 5;
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray900);
+  b.doc.text('TOTAL', lx + 7, ly);
+  b.doc.text(totalMass.toFixed(3), lx + 55, ly, { align: 'right' });
+  b.doc.text('100.0', lx + 70, ly, { align: 'right' });
+  b.y += 84;
+}
+
+function renderAnthropometry(b: PDFBuilder, data: ReportData, _style: ReportStyle) {
+  b.sectionHeader(tr('secAnthro'));
+  const k = data.kerrResults;
+
+  if (!k) {
+    if (data.athlete.weight_kg || data.athlete.body_fat_percent) {
+      const items: Array<{ label: string; value: string; unit?: string }> = [];
+      if (data.athlete.weight_kg) items.push({ label: 'Body Mass', value: data.athlete.weight_kg.toFixed(1), unit: 'kg' });
+      if (data.athlete.height_cm) items.push({ label: 'Stature', value: String(Math.round(data.athlete.height_cm)), unit: 'cm' });
+      if (data.athlete.body_fat_percent) items.push({ label: 'Body Fat', value: data.athlete.body_fat_percent.toFixed(1), unit: '%' });
+      b.metricGrid(items, 3);
+    } else {
+      b.paragraph(tr('noKerrData'));
+    }
+    return;
+  }
+
+  const totalMass = k.structured_weight_kg || (k.skin_mass_kg + k.adipose_mass_kg + k.muscle_mass_kg + k.residual_mass_kg + k.bone_mass_kg);
+  const components: Array<{ label: string; kg: number; pct: number; color: string }> = [
+    { label: 'Muscular', kg: k.muscle_mass_kg, pct: k.muscle_mass_pct, color: '#10B981' },
+    { label: 'Adipose', kg: k.adipose_mass_kg, pct: k.adipose_mass_pct, color: '#EF4444' },
+    { label: 'Bone', kg: k.bone_mass_kg, pct: k.bone_mass_pct, color: '#3B82F6' },
+    { label: 'Residual', kg: k.residual_mass_kg, pct: k.residual_mass_pct, color: '#6B7280' },
+    { label: 'Skin', kg: k.skin_mass_kg, pct: k.skin_mass_pct, color: '#F59E0B' },
+  ];
+
+  drawPieChart(b, components, totalMass);
+
+  b.spacer(6);
+
+  const cardItems: Array<{ label: string; value: string; unit?: string }> = [
+    { label: 'Somatotype', value: `${k.somatotype_endomorphy.toFixed(1)} – ${k.somatotype_mesomorphy.toFixed(1)} – ${k.somatotype_ectomorphy.toFixed(1)}` },
+    { label: 'BMI', value: k.bmi.toFixed(1), unit: 'kg/m²' },
+    { label: 'Surface Area', value: k.surface_area_m2.toFixed(3), unit: 'm²' },
+  ];
+  b.metricGrid(cardItems, 3);
+
+  b.spacer(4);
+}
+
+function computeSum6Skinfolds(data: ReportData): number | null {
+  const m = data.anthropometryMeasurement as any;
+  if (m) {
+    const t = m.triceps_sf_mm_median ?? m.triceps_sf_mm;
+    const sub = m.subscapular_sf_mm_median ?? m.subscapular_sf_mm;
+    const sup = m.supraspinale_sf_mm_median ?? m.supraspinale_sf_mm;
+    const ab = m.abdominal_sf_mm_median ?? m.abdominal_sf_mm;
+    const ft = m.front_thigh_sf_mm_median ?? m.front_thigh_sf_mm;
+    const mc = m.medial_calf_sf_mm_median ?? m.medial_calf_sf_mm;
+    if (t && sub && sup && ab && ft && mc) return Number(t) + Number(sub) + Number(sup) + Number(ab) + Number(ft) + Number(mc);
+  }
+  const k = data.kerrResults;
+  if (k && k.sum_6_skinfolds > 0) return k.sum_6_skinfolds;
+  return null;
+}
+
+function renderAnthropometryResults(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secAnthroResults'));
+  const k = data.kerrResults;
+  if (!k) { b.paragraph(tr('noKerrData')); return; }
+
+  b.doc.setFontSize(8);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray500);
+  b.doc.text('Z-SCORES (PHANTOM REFERENCE)', b.ml, b.y);
+  b.y += 6;
+
+  const zItems = [
+    { label: 'Adipose', z: k.adipose_mass_z_score, inverted: true },
+    { label: 'Muscle', z: k.muscle_mass_z_score, inverted: false },
+    { label: 'Residual', z: k.residual_mass_z_score, inverted: false },
+    { label: 'Bone', z: k.bone_mass_z_score, inverted: false },
+  ];
+
+  b.checkPage(28);
+  const cardW = (b.cw - 9) / 4;
+  zItems.forEach((item, i) => {
+    const cx = b.ml + i * (cardW + 3);
+    const isGood = item.inverted ? item.z <= 0 : item.z >= 0;
+    b.fill(C.gray100);
+    b.doc.rect(cx, b.y, cardW, 22, 'F');
+    b.doc.setFontSize(7.5);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(C.gray500);
+    b.doc.text(item.label, cx + 3, b.y + 5);
+    b.doc.setFontSize(13);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(isGood ? '#059669' : '#DC2626');
+    b.doc.text(`${item.z > 0 ? '+' : ''}${item.z.toFixed(2)}`, cx + 3, b.y + 15);
+    b.doc.setFontSize(8);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(isGood ? '#059669' : '#DC2626');
+    b.doc.text(isGood ? '↑' : '↓', cx + cardW - 6, b.y + 15);
+  });
+  b.y += 26;
+
+  b.spacer(4);
+  b.doc.setFontSize(8);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray500);
+  b.doc.text('ALL COMPARTMENTS', b.ml, b.y);
+  b.y += 6;
+
+  b.checkPage(60);
+  const colKg = b.ml + b.cw - 60;
+  const colPct = b.ml + b.cw - 32;
+  const colZ = b.ml + b.cw;
+  b.doc.setFontSize(8);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray500);
+  b.doc.text('Compartment', b.ml, b.y);
+  b.doc.text('kg', colKg, b.y, { align: 'right' });
+  b.doc.text('%', colPct, b.y, { align: 'right' });
+  b.doc.text('Z-score', colZ, b.y, { align: 'right' });
+  b.y += 2;
+  b.fill(C.gray200);
+  b.doc.rect(b.ml, b.y, b.cw, 0.4, 'F');
+  b.y += 5;
+
+  const rows = [
+    { name: 'Muscle', kg: k.muscle_mass_kg, pct: k.muscle_mass_pct, z: k.muscle_mass_z_score, color: '#10B981' },
+    { name: 'Adipose', kg: k.adipose_mass_kg, pct: k.adipose_mass_pct, z: k.adipose_mass_z_score, color: '#EF4444' },
+    { name: 'Bone', kg: k.bone_mass_kg, pct: k.bone_mass_pct, z: k.bone_mass_z_score, color: '#3B82F6' },
+    { name: 'Residual', kg: k.residual_mass_kg, pct: k.residual_mass_pct, z: k.residual_mass_z_score, color: '#6B7280' },
+    { name: 'Skin', kg: k.skin_mass_kg, pct: k.skin_mass_pct, z: k.skin_mass_z_score, color: '#F59E0B' },
+  ];
+
+  rows.forEach(row => {
+    b.checkPage(10);
+    const [cr, cg, cb] = hexToRgb(row.color);
+    b.doc.setFillColor(cr, cg, cb);
+    b.doc.circle(b.ml + 2, b.y - 1.5, 2, 'F');
+    b.doc.setFont('helvetica', 'bold');
+    b.doc.setFontSize(8.5);
+    b.textColor(C.gray900);
+    b.doc.text(row.name, b.ml + 8, b.y);
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.text(row.kg.toFixed(2), colKg, b.y, { align: 'right' });
+    b.doc.text(`${row.pct.toFixed(1)}%`, colPct, b.y, { align: 'right' });
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(row.z >= 0 ? '#059669' : '#DC2626');
+    b.doc.text(`${row.z > 0 ? '+' : ''}${row.z.toFixed(2)}`, colZ, b.y, { align: 'right' });
+    b.y += 2;
+    b.fill(C.gray100);
+    b.doc.rect(b.ml, b.y, b.cw, 0.3, 'F');
+    b.y += 6;
+  });
+
+  const hasBoneBreakdown = k.bone_mass_head_kg > 0 || k.bone_mass_body_kg > 0;
+  if (hasBoneBreakdown) {
+    const boneRows = [
+      { name: '↳ Bone (head)', kg: k.bone_mass_head_kg, pct: k.bone_mass_head_pct, z: k.bone_mass_head_z_score },
+      { name: '↳ Bone (body)', kg: k.bone_mass_body_kg, pct: k.bone_mass_body_pct, z: k.bone_mass_body_z_score },
+    ];
+    boneRows.forEach(row => {
+      b.checkPage(8);
+      b.fill(C.gray100);
+      b.doc.rect(b.ml, b.y - 3, b.cw, 7, 'F');
+      b.doc.setFont('helvetica', 'normal');
+      b.doc.setFontSize(7.5);
+      b.textColor(C.gray500);
+      b.doc.text(row.name, b.ml + 10, b.y);
+      b.doc.text(row.kg.toFixed(3), colKg, b.y, { align: 'right' });
+      b.doc.text(`${row.pct.toFixed(2)}%`, colPct, b.y, { align: 'right' });
+      b.doc.text(`${row.z > 0 ? '+' : ''}${row.z.toFixed(2)}`, colZ, b.y, { align: 'right' });
+      b.y += 7;
+    });
+  }
+
+  b.spacer(4);
+
+  b.checkPage(24);
+  b.fill(C.gray100);
+  b.doc.rect(b.ml, b.y, b.cw, 22, 'F');
+  b.doc.setFontSize(7.5);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray500);
+  b.doc.text('STRUCTURED WEIGHT VS GROSS WEIGHT', b.ml + 4, b.y + 5);
+  const sw3ColW = (b.cw - 8) / 3;
+  const sw3Labels = ['Structured weight', 'Difference (Gross − Struct.)', 'Technical Error (%)'];
+  const sw3Vals = [
+    `${k.structured_weight_kg.toFixed(3)} kg`,
+    `${k.structured_weight_diff_kg > 0 ? '+' : ''}${k.structured_weight_diff_kg.toFixed(3)} kg`,
+    `${k.structured_weight_diff_pct > 0 ? '+' : ''}${k.structured_weight_diff_pct.toFixed(2)}%`,
+  ];
+  const sw3Colors = [
+    C.gray900,
+    Math.abs(k.structured_weight_diff_kg) <= 1 ? '#059669' : '#D97706',
+    Math.abs(k.structured_weight_diff_pct) <= 2 ? '#059669' : '#D97706',
+  ];
+  sw3Labels.forEach((lbl, i) => {
+    const cx = b.ml + 4 + i * sw3ColW;
+    b.doc.setFontSize(7);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(C.gray500);
+    b.doc.text(lbl, cx, b.y + 11);
+    b.doc.setFontSize(10);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(sw3Colors[i]);
+    b.doc.text(sw3Vals[i], cx, b.y + 19);
+  });
+  b.y += 26;
+
+  b.spacer(4);
+
+  b.checkPage(28);
+  const sum6 = computeSum6Skinfolds(data);
+  const metCards = [
+    { label: 'Sum 6 Skinfolds', value: sum6 !== null ? `${sum6.toFixed(1)} mm` : '—', bg: '#FFFBEB', border: '#FCD34D', textC: '#92400E' },
+    { label: 'Muscle/Bone Ratio', value: k.muscle_bone_ratio.toFixed(2), bg: '#ECFDF5', border: '#6EE7B7', textC: '#065F46' },
+    { label: 'Ballast Index', value: `${k.ballast_index.toFixed(1)}%`, bg: '#EFF6FF', border: '#BFDBFE', textC: '#1E40AF' },
+    { label: 'Adipose/Muscle Ratio', value: k.adipose_muscle_ratio.toFixed(2), bg: C.gray100, border: C.gray200, textC: C.gray700 },
+  ];
+  const mcW = (b.cw - 9) / 4;
+  metCards.forEach((mc, i) => {
+    const cx = b.ml + i * (mcW + 3);
+    const [bgR, bgG, bgB] = hexToRgb(mc.bg);
+    const [bdR, bdG, bdB] = hexToRgb(mc.border);
+    b.doc.setFillColor(bgR, bgG, bgB);
+    b.doc.setDrawColor(bdR, bdG, bdB);
+    b.doc.setLineWidth(0.4);
+    b.doc.roundedRect(cx, b.y, mcW, 22, 2, 2, 'FD');
+    b.doc.setFontSize(7);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(mc.textC);
+    b.doc.text(mc.label, cx + 3, b.y + 6);
+    b.doc.setFontSize(11);
+    b.doc.setFont('helvetica', 'bold');
+    b.doc.text(mc.value, cx + 3, b.y + 16);
+  });
+  b.y += 26;
+
+  b.spacer(4);
+}
+
+function renderAnthropometryTargets(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secAnthroTargets'));
+  const k = data.kerrResults;
+  const m = data.anthropometryMeasurement;
+  if (!k) { b.paragraph(tr('noKerrData')); return; }
+
+  b.doc.setFontSize(8.5);
+  b.doc.setFont('helvetica', 'normal');
+  b.textColor(C.gray500);
+  b.doc.text('Current body composition values and Phantom-based reference targets.', b.ml, b.y);
+  b.y += 8;
+
+  const stature = m?.stature_cm ? Number(m.stature_cm) : null;
+
+  const tblRows = [
+    { label: 'Adipose Mass', current: `${k.adipose_mass_kg.toFixed(2)} kg (${k.adipose_mass_pct.toFixed(1)}%)`, z: k.adipose_mass_z_score, note: 'Lower is generally better for performance' },
+    { label: 'Muscle Mass', current: `${k.muscle_mass_kg.toFixed(2)} kg (${k.muscle_mass_pct.toFixed(1)}%)`, z: k.muscle_mass_z_score, note: 'Higher is generally better for performance' },
+    { label: 'Bone Mass', current: `${k.bone_mass_kg.toFixed(2)} kg (${k.bone_mass_pct.toFixed(1)}%)`, z: k.bone_mass_z_score, note: 'Within normal range is ideal' },
+    { label: 'Residual Mass', current: `${k.residual_mass_kg.toFixed(2)} kg (${k.residual_mass_pct.toFixed(1)}%)`, z: k.residual_mass_z_score, note: 'Organ/visceral mass' },
+    { label: 'Skin Mass', current: `${k.skin_mass_kg.toFixed(2)} kg (${k.skin_mass_pct.toFixed(1)}%)`, z: k.skin_mass_z_score, note: 'Skin tissue' },
+  ];
+
+  b.checkPage(12);
+  b.fill(C.darkBg);
+  b.doc.rect(b.ml, b.y, b.cw, 7, 'F');
+  b.doc.setFontSize(7.5);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.white);
+  b.doc.text('Compartment', b.ml + 3, b.y + 4.5);
+  b.doc.text('Current Value', b.ml + 60, b.y + 4.5);
+  b.doc.text('Z-score (Phantom)', b.ml + 110, b.y + 4.5);
+  b.doc.text('Interpretation', b.ml + 148, b.y + 4.5);
+  b.y += 9;
+
+  tblRows.forEach((row, i) => {
+    const rowH = 9;
+    b.checkPage(rowH + 2);
+    b.fill(i % 2 === 0 ? C.gray100 : C.white);
+    b.doc.rect(b.ml, b.y, b.cw, rowH, 'F');
+    b.doc.setFontSize(8);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.gray900);
+    b.doc.text(row.label, b.ml + 3, b.y + 5.5);
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.text(row.current, b.ml + 60, b.y + 5.5);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(row.z >= 0 ? '#059669' : '#DC2626');
+    b.doc.text(`${row.z > 0 ? '+' : ''}${row.z.toFixed(2)}`, b.ml + 110, b.y + 5.5);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(C.gray500);
+    b.doc.setFontSize(7);
+    b.doc.text(row.note, b.ml + 148, b.y + 5.5);
+    b.y += rowH;
+  });
+
+  if (stature) {
+    b.spacer(6);
+    b.checkPage(30);
+    b.fill(C.gray100);
+    b.doc.rect(b.ml, b.y, b.cw, 28, 'F');
+    const adiposeDelta = 0;
+    const muscleDelta = 0;
+    b.doc.setFontSize(8.5);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.gray900);
+    b.doc.text('Change Summary', b.ml + 4, b.y + 7);
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(8);
+    b.textColor(C.gray700);
+    const sumLines = [
+      `Adipose Mass: ${k.adipose_mass_kg.toFixed(2)} kg  |  Z: ${k.adipose_mass_z_score > 0 ? '+' : ''}${k.adipose_mass_z_score.toFixed(2)}  |  Sum 6 Skinfolds: ${computeSum6Skinfolds(data) !== null ? computeSum6Skinfolds(data)!.toFixed(1) + ' mm' : '—'}`,
+      `Muscle Mass: ${k.muscle_mass_kg.toFixed(2)} kg  |  Z: ${k.muscle_mass_z_score > 0 ? '+' : ''}${k.muscle_mass_z_score.toFixed(2)}  |  Muscle/Bone Ratio: ${k.muscle_bone_ratio.toFixed(2)}`,
+      `Net change (Adipose + Muscle): ${(adiposeDelta + muscleDelta).toFixed(2)} kg`,
+    ];
+    sumLines.forEach((line, j) => {
+      b.doc.text(line, b.ml + 4, b.y + 14 + j * 5.5);
+    });
+    b.y += 32;
+  }
+
+  b.spacer(4);
+}
+
+function renderISAKDetails(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secISAK'));
+  const m = data.anthropometryMeasurement;
+  if (!m) { b.paragraph('No ISAK measurement data available.'); return; }
+
+  const date = m.measurement_date ? new Date(m.measurement_date).toLocaleDateString() : '—';
+  const tech = m.technician_name || '—';
+
+  b.textColor(C.gray500);
+  b.doc.setFontSize(8);
+  b.doc.text(`Date: ${date}  ·  Technician: ${tech}`, b.ml, b.y);
+  b.y += 7;
+
+  type ISAKItem = { key: string; label: string; unit: string; isSimple?: boolean };
+
+  const categories: Array<{ title: string; items: ISAKItem[] }> = [
+    {
+      title: 'Basic Measurements',
+      items: [
+        { key: 'body_mass_kg', label: 'Body Mass', unit: 'kg', isSimple: true },
+        { key: 'stature_cm', label: 'Stature', unit: 'cm', isSimple: true },
+        { key: 'sitting_height_cm', label: 'Sitting Height', unit: 'cm', isSimple: true },
+      ]
+    },
+    {
+      title: 'Skinfolds (mm)',
+      items: [
+        { key: 'triceps_sf_mm', label: 'Triceps', unit: 'mm' },
+        { key: 'subscapular_sf_mm', label: 'Subscapular', unit: 'mm' },
+        { key: 'biceps_sf_mm', label: 'Biceps', unit: 'mm' },
+        { key: 'supraspinale_sf_mm', label: 'Supraspinale', unit: 'mm' },
+        { key: 'abdominal_sf_mm', label: 'Abdominal', unit: 'mm' },
+        { key: 'front_thigh_sf_mm', label: 'Front Thigh', unit: 'mm' },
+        { key: 'medial_calf_sf_mm', label: 'Medial Calf', unit: 'mm' },
+        { key: 'iliac_crest_sf_mm', label: 'Iliac Crest', unit: 'mm' },
+      ]
+    },
+    {
+      title: 'Girths (cm)',
+      items: [
+        { key: 'arm_flexed_girth_cm', label: 'Arm Flexed', unit: 'cm' },
+        { key: 'chest_girth_cm', label: 'Chest', unit: 'cm' },
+        { key: 'waist_girth_cm', label: 'Waist', unit: 'cm' },
+        { key: 'thigh_upper_girth_cm', label: 'Thigh Upper', unit: 'cm' },
+        { key: 'calf_max_girth_cm', label: 'Calf Max', unit: 'cm' },
+        { key: 'gluteal_girth_cm', label: 'Gluteal', unit: 'cm' },
+      ]
+    },
+    {
+      title: 'Breadths (cm)',
+      items: [
+        { key: 'humerus_diameter_cm', label: 'Humerus Diameter', unit: 'cm' },
+        { key: 'femur_diameter_cm', label: 'Femur Diameter', unit: 'cm' },
+        { key: 'biacromial_breadth_cm', label: 'Biacromial Breadth', unit: 'cm' },
+        { key: 'biiliocristal_breadth_cm', label: 'Biiliocristal Breadth', unit: 'cm' },
+      ]
+    },
+  ];
+
+  categories.forEach(cat => {
+    const available = cat.items.filter(item =>
+      item.isSimple ? m[item.key] != null : m[`${item.key}_median`] != null
+    );
+    if (available.length === 0) return;
+
+    b.checkPage(12);
+    b.label(cat.title);
+    const cols = [{ label: 'MEASUREMENT', width: 70 }, { label: 'VALUE', width: 30 }, { label: 'UNIT', width: 25 }];
+    b.tableHeader(cols);
+    available.forEach((item, i) => {
+      const raw = item.isSimple ? m[item.key] : m[`${item.key}_median`];
+      const displayVal = raw != null ? Number(raw).toFixed(2) : '—';
+      b.tableRow([{ value: item.label, width: 70 }, { value: displayVal, width: 30 }, { value: item.unit, width: 25 }], i % 2 === 0);
+    });
+    b.spacer(4);
+  });
+}
+
+function renderHydration(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secHydration'));
+  const sessions = data.hydrationSessions;
+  if (!sessions?.length) { b.paragraph('No hydration session data available.'); return; }
+
+  const latest = sessions[0];
+  const items: Array<{ label: string; value: string; unit?: string }> = [];
+  if (latest.sweat_rate_l_h != null) items.push({ label: 'Sweat Rate', value: latest.sweat_rate_l_h.toFixed(2), unit: 'L/h' });
+  if (latest.percent_dehydration != null) items.push({ label: 'Dehydration', value: latest.percent_dehydration.toFixed(1), unit: '%' });
+  if (latest.ambient_temp_c != null) items.push({ label: 'Ambient Temp', value: String(latest.ambient_temp_c), unit: '°C' });
+  if (latest.usg_pre != null) items.push({ label: 'USG Pre', value: latest.usg_pre.toFixed(3) });
+  if (latest.usg_post != null) items.push({ label: 'USG Post', value: latest.usg_post.toFixed(3) });
+  if (latest.duration_min) items.push({ label: 'Duration', value: String(latest.duration_min), unit: 'min' });
+
+  if (items.length > 0) b.metricGrid(items, 3);
+
+  if (sessions.length > 1) {
+    b.spacer(2);
+    b.label(`All Sessions (${sessions.length} total)`);
+    const cols = [
+      { label: 'DATE', width: 35 },
+      { label: 'SWEAT RATE (L/h)', width: 40 },
+      { label: 'DEHYDRATION (%)', width: 40 },
+      { label: 'TEMP (°C)', width: 30 },
+      { label: 'DURATION (min)', width: 35 },
+    ];
+    b.tableHeader(cols);
+    sessions.slice(0, 10).forEach((s, i) => {
+      b.tableRow([
+        { value: s.session_date ? new Date(s.session_date).toLocaleDateString() : '—', width: 35 },
+        { value: s.sweat_rate_l_h != null ? s.sweat_rate_l_h.toFixed(2) : '—', width: 40 },
+        { value: s.percent_dehydration != null ? s.percent_dehydration.toFixed(1) : '—', width: 40 },
+        { value: s.ambient_temp_c != null ? String(s.ambient_temp_c) : '—', width: 30 },
+        { value: s.duration_min ? String(s.duration_min) : '—', width: 35 },
+      ], i % 2 === 0);
+    });
+  }
+  b.spacer(4);
+}
+
+function renderRawData(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secRaw'));
+  const pts = data.dataPoints;
+
+  if (!pts?.length) {
+    const r = data.physiologyResults;
+    if (r?.stage_analysis && r.stage_analysis.length > 0) {
+      const stages = r.stage_analysis;
+      const hasPower = stages.some(s => s.power_watts);
+      const hasVO2 = stages.some(s => s.vo2_ml_kg_min);
+      const hasLactate = stages.some(s => s.lactate);
+
+      const cols = [
+        { label: 'STAGE', width: 16 },
+        { label: 'HR (bpm)', width: 25 },
+        ...(hasPower ? [{ label: 'POWER (W)', width: 28 }] : []),
+        ...(hasVO2 ? [{ label: 'VO\u2082 (ml/kg/min)', width: 35 }] : []),
+        ...(hasLactate ? [{ label: 'LACTATE (mmol/L)', width: 37 }] : []),
+      ];
+      b.tableHeader(cols);
+
+      stages.forEach((s, i) => {
+        const row: Array<{ value: string; width: number }> = [
+          { value: String(s.stage_number || i + 1), width: 16 },
+          { value: s.heart_rate ? String(Math.round(s.heart_rate)) : '—', width: 25 },
+        ];
+        if (hasPower) row.push({ value: s.power_watts != null ? String(Math.round(s.power_watts)) : '—', width: 28 });
+        if (hasVO2) row.push({ value: s.vo2_ml_kg_min != null ? s.vo2_ml_kg_min.toFixed(1) : '—', width: 35 });
+        if (hasLactate) row.push({ value: s.lactate != null ? s.lactate.toFixed(2) : '—', width: 37 });
+        b.tableRow(row, i % 2 === 0);
+      });
+      b.spacer(4);
+    } else {
+      b.paragraph('No stage data available.');
+    }
+    return;
+  }
+
+  const hasPower = pts.some(p => p.power_watts);
+  const hasVO2 = pts.some(p => p.vo2_ml_kg_min);
+  const hasLactate = pts.some(p => p.lactate);
+
+  const cols = [
+    { label: 'STAGE', width: 16 },
+    { label: 'DURATION', width: 24 },
+    { label: 'HR (bpm)', width: 25 },
+    ...(hasPower ? [{ label: 'POWER (W)', width: 28 }] : []),
+    ...(hasVO2 ? [{ label: 'VO\u2082 (ml/kg/min)', width: 35 }] : []),
+    ...(hasLactate ? [{ label: 'LACTATE (mmol/L)', width: 37 }] : []),
+    { label: 'RPE', width: 15 },
+  ];
+  b.tableHeader(cols);
+
+  pts.forEach((p, i) => {
+    const dur = p.duration_seconds ? `${Math.floor(p.duration_seconds / 60)}:${String(p.duration_seconds % 60).padStart(2, '0')}` : '—';
+    const row: Array<{ value: string; width: number }> = [
+      { value: String(p.stage_number), width: 16 },
+      { value: dur, width: 24 },
+      { value: String(p.heart_rate), width: 25 },
+    ];
+    if (hasPower) row.push({ value: p.power_watts != null ? String(Math.round(p.power_watts)) : '—', width: 28 });
+    if (hasVO2) row.push({ value: p.vo2_ml_kg_min != null ? p.vo2_ml_kg_min.toFixed(1) : '—', width: 35 });
+    if (hasLactate) row.push({ value: p.lactate != null ? p.lactate.toFixed(2) : '—', width: 37 });
+    row.push({ value: p.rpe != null ? String(p.rpe) : '—', width: 15 });
+    b.tableRow(row, i % 2 === 0, p.vt1_marker ? C.z2 : p.vt2_marker ? C.z4 : undefined);
+  });
+  b.spacer(3);
+  b.textColor(C.gray500);
+  b.doc.setFontSize(7);
+  b.doc.text('* Green markers = VT1, Orange markers = VT2', b.ml, b.y);
+  b.y += 5;
+  b.spacer(4);
+}
+
+function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOptions) {
+  const style = opts.style;
+  b.sectionHeader(tr('secRec'));
+
+  const noteBlocks: Array<{ label: string; text: string }> = [];
+
+  const physiologyText = opts.physiologyNotes || opts.reportNotes || '';
+  const anthropometryText = opts.anthropometryNotes || data.anthropometryMeasurement?.coach_notes || '';
+
+  if (physiologyText.trim()) {
+    noteBlocks.push({ label: 'Physiology Test Notes', text: htmlToPlainText(physiologyText) });
+  }
+  if (anthropometryText.trim() && anthropometryText.trim() !== physiologyText.trim()) {
+    noteBlocks.push({ label: 'Anthropometry Notes', text: htmlToPlainText(anthropometryText) });
+  }
+
+  if (noteBlocks.length > 0) {
+    b.checkPage(30);
+    b.label('Professional Notes & Conclusions');
+    b.spacer(2);
+
+    const paddingH = 10;
+    const lineH = 5.5;
+    const textWidth = b.cw - paddingH * 2;
+
+    for (const block of noteBlocks) {
+      b.checkPage(20);
+      b.textColor(C.gray500);
+      b.doc.setFont('helvetica', 'bold');
+      b.doc.setFontSize(7.5);
+      b.doc.text(block.label.toUpperCase(), b.ml, b.y);
+      b.y += 5;
+
+      const paragraphs = block.text.split('\n');
+      const allLines: string[] = [];
+      for (const para of paragraphs) {
+        if (para.trim() === '') {
+          allLines.push('');
+        } else {
+          b.doc.setFont('helvetica', 'normal');
+          b.doc.setFontSize(9);
+          const wrapped = b.doc.splitTextToSize(para, textWidth);
+          allLines.push(...wrapped);
+        }
+      }
+
+      const topPad = 8;
+      const botPad = 8;
+      const availableOnPage = () => b.pageBottom - b.y - topPad - botPad;
+      let lineIndex = 0;
+      let isFirstChunk = true;
+      while (lineIndex < allLines.length) {
+        const linesPerPage = Math.max(1, Math.floor(availableOnPage() / lineH));
+        const chunk = allLines.slice(lineIndex, lineIndex + linesPerPage);
+        const chunkH = chunk.length * lineH + topPad + botPad;
+        b.fill(C.yellow);
+        b.doc.rect(b.ml, b.y, b.cw, chunkH, 'F');
+        b.textColor(C.gray900);
+        chunk.forEach((line: string, j: number) => {
+          b.doc.setFont('helvetica', 'normal');
+          b.doc.setFontSize(9);
+          b.doc.text(line, b.ml + paddingH, b.y + topPad + 3 + j * lineH);
+        });
+        b.y += chunkH + (isFirstChunk ? 2 : 0);
+        lineIndex += chunk.length;
+        isFirstChunk = false;
+        if (lineIndex < allLines.length) {
+          b.doc.addPage();
+          b.pageNum++;
+          b.y = 20;
+          b.addPageFooter();
+        }
+      }
+      b.spacer(6);
+    }
+  }
+
+  const r = data.physiologyResults;
+
+  const recs: string[] = [];
+
+  if (r) {
+    if (r.lt1_hr && r.lt2_hr) {
+      const lt1Pct = r.lt1_percent_hrmax || 0;
+      const lt2Pct = r.lt2_percent_hrmax || 0;
+      if (lt2Pct - lt1Pct < 10) {
+        recs.push('The gap between LT1 and LT2 is narrow. Focus on polarized training to widen the aerobic base and push LT2 higher.');
+      } else {
+        recs.push('Good LT1–LT2 separation. Maintain aerobic base volume while incorporating threshold intervals near LT2 to continue progression.');
+      }
+    }
+    if (r.vo2max && r.vo2max < 45) {
+      recs.push('VO\u2082max is below the performance threshold for competitive endurance sport. Prioritize high-intensity interval training (3–4 sessions/week) alongside aerobic base building.');
+    } else if (r.vo2max && r.vo2max >= 60) {
+      recs.push('Excellent VO\u2082max. Focus on improving lactate threshold efficiency and neuromuscular power to maximize race performance.');
+    }
+    if (r.fatmax_hr && r.lt1_hr && r.fatmax_hr < r.lt1_hr - 5) {
+      recs.push('FatMax is significantly below LT1. Incorporate Zone 2 training sessions specifically targeting the FatMax intensity to improve metabolic flexibility.');
+    }
+    if (r.hr_drift_percent != null && r.hr_drift_percent > 5) {
+      recs.push('HR drift exceeds 5%, indicating cardiovascular drift or dehydration. Ensure adequate pre-exercise hydration and consider pacing adjustments during prolonged efforts.');
+    }
+    if (r.pam_watts && data.athlete.weight_kg) {
+      const wpkg = r.pam_watts / data.athlete.weight_kg;
+      if (data.athlete.sport === 'cycling' && wpkg < 4) {
+        recs.push('W/kg at VO\u2082max is below 4.0. Strength-endurance training targeting peak power output is recommended.');
+      }
+    }
+  }
+
+  const k = data.kerrResults;
+  if (k) {
+    if (k.adipose_mass_pct > 20 && data.athlete.sex !== 'female') {
+      recs.push('Adipose mass percentage is above optimal for performance. A targeted body composition intervention combining caloric management with resistance training may be beneficial.');
+    }
+    if (k.muscle_mass_pct < 35) {
+      recs.push('Muscle mass is below typical performance norms. Consider incorporating resistance training to improve power-to-weight ratio.');
+    }
+  }
+
+  const hydration = data.hydrationSessions;
+  if (hydration?.length && hydration[0].percent_dehydration != null) {
+    if (hydration[0].percent_dehydration > 2) {
+      recs.push('Dehydration levels exceed 2% body mass loss during exercise. Develop a personalized hydration plan targeting fluid intake of approximately ' +
+        (hydration[0].sweat_rate_l_h ? `${(hydration[0].sweat_rate_l_h * 0.8).toFixed(2)} L/h` : '0.5–1.0 L/h') + ' during training.');
+    }
+  }
+
+  if (recs.length === 0) {
+    const missing: string[] = [];
+    if (!data.physiologyResults) missing.push('VO\u2082max & metabolic lab test (VO\u2082max, lactate thresholds, FatMax)');
+    if (!data.kerrResults) missing.push('Body composition assessment (Kerr 5-component anthropometry)');
+    if (!data.hydrationSessions?.length) missing.push('Hydration & sweat rate analysis');
+    missing.push('Environmental physiology / heat adaptation assessment');
+    if (missing.length > 0) {
+      recs.push('No specific recommendations could be generated. The following assessments are missing data:');
+      missing.forEach(m => recs.push('\u2022 ' + m));
+    } else {
+      recs.push('All available data has been reviewed. No critical findings requiring specific recommendations at this time.');
+    }
+  }
+
+  const recPaddingH = 10;
+  const recPaddingV = 6;
+  const recLineH = 5;
+  recs.forEach((rec, i) => {
+    b.doc.setFontSize(8.5);
+    b.doc.setFont('helvetica', 'normal');
+    const lines = b.doc.splitTextToSize(sanitizeForPDF(rec), b.cw - recPaddingH * 2 - 3);
+    const boxH = lines.length * recLineH + recPaddingV * 2;
+    b.checkPage(boxH + 4);
+    b.fill(i % 2 === 0 ? C.gray100 : C.white);
+    b.doc.rect(b.ml, b.y, b.cw, boxH, 'F');
+    b.fill(C.yellow);
+    b.doc.rect(b.ml, b.y, 3, boxH, 'F');
+    b.textColor(C.gray700);
+    lines.forEach((line: string, j: number) => {
+      b.doc.setFont('helvetica', 'normal');
+      b.doc.setFontSize(8.5);
+      b.doc.text(line, b.ml + recPaddingH, b.y + recPaddingV + 3 + j * recLineH);
+    });
+    b.y += boxH + 3;
+  });
+
+  if (style === 'scientific') {
+    b.spacer(4);
+    b.paragraph('Note: These recommendations are generated based on physiological test results and standard exercise science principles. Individual response to training may vary. All recommendations should be interpreted in the context of the athlete\'s overall training history, health status, and performance goals.');
+  }
+  b.spacer(4);
+}
+
+function renderAnthropometryComparison(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader(tr('secComparison'));
+  const k = data.kerrResults;
+  const m = data.anthropometryMeasurement;
+  if (!k) { b.paragraph('No body composition data for comparison.'); return; }
+
+  const sex = (m as any)?.sex || data.athlete.sex || 'male';
+  const sport = data.athlete.sport || 'general';
+  const isFemale = sex === 'female';
+
+  const sportLabel = sport.charAt(0).toUpperCase() + sport.slice(1).replace('_', ' ');
+
+  b.doc.setFontSize(8.5);
+  b.doc.setFont('helvetica', 'normal');
+  b.textColor(C.gray700);
+  const introText = `Comparison against published reference values for ${isFemale ? 'female' : 'male'} ${sportLabel} athletes using the Kerr 5-component model (Phantom stratagem, Ross & Ward 1984).`;
+  const introLines = b.doc.splitTextToSize(introText, b.cw);
+  introLines.forEach((line: string) => { b.doc.text(line, b.ml, b.y); b.y += 5; });
+  b.spacer(2);
+
+  const muscleLow = isFemale ? 35 : 40;
+  const muscleHigh = isFemale ? 47 : 52;
+  const adiposeLow = isFemale ? 14 : 8;
+  const adiposeHigh = isFemale ? 28 : 18;
+  const boneLow = isFemale ? 12 : 13;
+  const boneHigh = isFemale ? 16 : 18;
+
+  const comps = [
+    { label: 'Muscle Mass', value: k.muscle_mass_pct, unit: '%', kg: k.muscle_mass_kg, z: k.muscle_mass_z_score, ref_low: muscleLow, ref_high: muscleHigh, color: '#10B981', ref: 'Kerr et al. (1988)' },
+    { label: 'Adipose Mass', value: k.adipose_mass_pct, unit: '%', kg: k.adipose_mass_kg, z: k.adipose_mass_z_score, ref_low: adiposeLow, ref_high: adiposeHigh, color: '#EF4444', ref: 'Ross & Ward (1984)' },
+    { label: 'Bone Mass', value: k.bone_mass_pct, unit: '%', kg: k.bone_mass_kg, z: k.bone_mass_z_score, ref_low: boneLow, ref_high: boneHigh, color: '#3B82F6', ref: 'Martin et al. (1990)' },
+    { label: 'Residual Mass', value: k.residual_mass_pct, unit: '%', kg: k.residual_mass_kg, z: k.residual_mass_z_score, ref_low: isFemale ? 9 : 10, ref_high: isFemale ? 12 : 13, color: '#6B7280', ref: 'Kerr et al. (1988)' },
+    { label: 'Skin Mass', value: k.skin_mass_pct, unit: '%', kg: k.skin_mass_kg, z: k.skin_mass_z_score, ref_low: 4, ref_high: 8, color: '#F59E0B', ref: 'Kerr et al. (1988)' },
+  ];
+
+  comps.forEach(comp => {
+    b.checkPage(22);
+    const inRange = comp.value >= comp.ref_low && comp.value <= comp.ref_high;
+    const statusColor = inRange ? '#059669' : '#DC2626';
+
+    b.fill(C.gray100);
+    b.doc.rect(b.ml, b.y, b.cw, 18, 'F');
+    const [compR, compG, compB] = hexToRgb(comp.color);
+    b.doc.setFillColor(compR, compG, compB);
+    b.doc.rect(b.ml, b.y, 3, 18, 'F');
+
+    b.doc.setFontSize(8.5);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.gray900);
+    b.doc.text(comp.label, b.ml + 7, b.y + 5);
+
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(7.5);
+    b.textColor(C.gray500);
+    b.doc.text(`Ref: ${comp.ref_low}–${comp.ref_high}%  (${comp.ref})`, b.ml + 7, b.y + 11);
+
+    b.doc.setFont('helvetica', 'bold');
+    b.doc.setFontSize(10);
+    b.textColor(statusColor);
+    b.doc.text(`${comp.value.toFixed(1)}%`, b.ml + 80, b.y + 6);
+    b.doc.setFontSize(8);
+    b.doc.text(`${comp.kg.toFixed(2)} kg`, b.ml + 80, b.y + 13);
+
+    b.doc.setFontSize(8);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(statusColor);
+    b.doc.text(`Z: ${comp.z > 0 ? '+' : ''}${comp.z.toFixed(2)}`, b.ml + 110, b.y + 6);
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(7.5);
+    b.textColor(statusColor);
+    b.doc.text(inRange ? 'Within range' : (comp.value > comp.ref_high ? 'Above reference' : 'Below reference'), b.ml + 110, b.y + 13);
+
+    const barW = 55;
+    const barX = b.ml + b.cw - barW - 5;
+    const barH = 5;
+    const barY = b.y + 7;
+    b.fill(C.gray200);
+    b.doc.rect(barX, barY, barW, barH, 'F');
+    const maxPct = comp.ref_high * 1.5;
+    const refStartX = barX + (comp.ref_low / maxPct) * barW;
+    const refW = Math.max(1, ((comp.ref_high - comp.ref_low) / maxPct) * barW);
+    b.fill('#BBF7D0');
+    b.doc.rect(refStartX, barY, refW, barH, 'F');
+    const valueX = barX + Math.min(1, comp.value / maxPct) * barW;
+    b.fill(statusColor);
+    b.doc.rect(Math.max(barX, Math.min(barX + barW - 3, valueX - 1.5)), barY, 3, barH, 'F');
+
+    b.y += 21;
+  });
+
+  b.spacer(4);
+  b.checkPage(24);
+  b.fill(C.gray100);
+  b.doc.rect(b.ml, b.y, b.cw, 22, 'F');
+  b.doc.setFontSize(7.5);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray700);
+  b.doc.text('Scientific References', b.ml + 4, b.y + 5);
+  const refs = [
+    'Ross WD, Ward R (1984). Proportionality of Olympic Athletes. Med Sport Sci. 18:110-143.',
+    'Kerr DA et al. (1988). 5-Component model of body composition. J Exp Biol. 44:119-124.',
+    'Martin AD et al. (1990). Assessment of body fat using skinfold calipers. Hum Biol.',
+  ];
+  b.doc.setFont('helvetica', 'normal');
+  b.doc.setFontSize(6.5);
+  b.textColor(C.gray500);
+  refs.forEach((ref, i) => {
+    b.doc.text(ref, b.ml + 4, b.y + 11 + i * 4);
+  });
+  b.y += 26;
+
+  b.spacer(4);
+}
+
+function renderTestContext(b: PDFBuilder, data: ReportData) {
+  const p = data.preTestData;
+  const test = data.test;
+
+  const hasContext = p?.test_time || p?.city || p?.elevation_m != null ||
+    p?.outdoor_weather || p?.indoor_temp_c != null || p?.indoor_humidity_percent != null || p?.indoor_conditions_notes;
+
+  if (!hasContext && !test?.test_date) return;
+
+  b.sectionHeader('CONDICIONES DEL TEST');
+
+  const contextItems: Array<{ label: string; value: string; unit?: string }> = [];
+
+  if (test?.test_date) {
+    const dateStr = new Date(test.test_date).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
+    contextItems.push({ label: 'Fecha', value: dateStr });
+  }
+  if (p?.test_time) {
+    contextItems.push({ label: 'Hora del test', value: p.test_time });
+  }
+  if (p?.city) {
+    contextItems.push({ label: 'Ubicación', value: p.city });
+  }
+  if (p?.elevation_m != null) {
+    contextItems.push({ label: 'Altitud', value: String(p.elevation_m), unit: 'm.s.n.m.' });
+  }
+
+  if (contextItems.length > 0) {
+    b.metricGrid(contextItems, Math.min(3, contextItems.length));
+  }
+
+  if (p?.outdoor_weather) {
+    const ow = p.outdoor_weather;
+    b.spacer(2);
+    b.label('Condiciones meteorológicas exteriores');
+
+    const owItems: Array<{ label: string; value: string; unit?: string }> = [];
+    if (ow.temperature_c != null) owItems.push({ label: 'Temperatura exterior', value: ow.temperature_c.toFixed(1), unit: '°C' });
+    if (ow.humidity_percent != null) owItems.push({ label: 'Humedad exterior', value: String(ow.humidity_percent), unit: '%' });
+    if (ow.wind_speed_kmh != null) owItems.push({ label: 'Viento', value: ow.wind_speed_kmh.toFixed(1), unit: 'km/h' });
+    if (ow.pressure_hpa != null) owItems.push({ label: 'Presión', value: ow.pressure_hpa.toFixed(0), unit: 'hPa' });
+
+    if (owItems.length > 0) {
+      b.metricGrid(owItems, Math.min(4, owItems.length));
+    }
+    if (ow.description) {
+      b.paragraph(`Condición: ${ow.description}`);
+    }
+  }
+
+  const hasIndoor = p?.indoor_temp_c != null || p?.indoor_humidity_percent != null || p?.indoor_conditions_notes;
+  if (hasIndoor) {
+    b.spacer(2);
+    b.label('Condiciones internas del laboratorio');
+
+    const indoorItems: Array<{ label: string; value: string; unit?: string }> = [];
+    if (p?.indoor_temp_c != null) indoorItems.push({ label: 'Temperatura Lab', value: p.indoor_temp_c.toFixed(1), unit: '°C' });
+    if (p?.indoor_humidity_percent != null) indoorItems.push({ label: 'Humedad Lab', value: String(p.indoor_humidity_percent), unit: '%' });
+
+    if (indoorItems.length > 0) {
+      b.metricGrid(indoorItems, Math.min(3, indoorItems.length));
+    }
+    if (p?.indoor_conditions_notes) {
+      b.paragraph(p.indoor_conditions_notes);
+    }
+  }
+
+  b.spacer(4);
+}
+
+type SectionRenderer = (b: PDFBuilder, data: ReportData, options: ReportOptions, logo: LogoInfo | null) => void;
+
+const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
+  cover: (b, data, opts, logo) => renderCover(b, data, opts, logo),
+  executive_summary: (b, data) => renderExecutiveSummary(b, data),
+  test_context: (b, data) => renderTestContext(b, data),
+  vo2max: (b, data, opts) => renderVO2max(b, data, opts.style),
+  thresholds: (b, data) => renderThresholds(b, data),
+  fat_oxidation: (b, data) => renderFatOxidation(b, data),
+  training_zones: (b, data) => renderTrainingZones(b, data),
+  economy_metrics: (b, data) => renderEconomy(b, data),
+  anthropometry: (b, data, opts) => renderAnthropometry(b, data, opts.style),
+  anthropometry_results: (b, data) => renderAnthropometryResults(b, data),
+  anthropometry_targets: (b, data) => renderAnthropometryTargets(b, data),
+  isak_details: (b, data) => renderISAKDetails(b, data),
+  anthropometry_comparison: (b, data) => renderAnthropometryComparison(b, data),
+  hydration: (b, data) => renderHydration(b, data),
+  raw_data: (b, data) => renderRawData(b, data),
+  recommendations: (b, data, opts) => renderRecommendations(b, data, opts),
+};
+
+export async function generateReport(data: ReportData, options: ReportOptions): Promise<void> {
+  const [logo, fonts] = await Promise.all([loadLogo(), loadFonts()]);
+  const b = new PDFBuilder(options.branding, data.athlete.name);
+
+  registerFonts(b.doc, fonts);
+  b.hasKrona = !!fonts.kronaOne;
+  b.hasJost = !!fonts.jostRegular;
+
+  b.addPageFooter();
+
+  const hasRecommendations = options.sections.includes('recommendations');
+
+  for (const section of options.sections) {
+    const renderer = SECTION_RENDERERS[section];
+    if (renderer) {
+      renderer(b, data, options, logo);
+    }
+  }
+
+  if (!hasRecommendations && (options.reportNotes?.trim() || options.physiologyNotes?.trim() || options.anthropometryNotes?.trim() || data.anthropometryMeasurement?.coach_notes)) {
+    renderRecommendations(b, data, options);
+  }
+
+  const date = data.test?.test_date
+    ? new Date(data.test.test_date).toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+  const filename = `${data.athlete.name.replace(/\s+/g, '_')}_${date}_report.pdf`;
+  b.doc.save(filename);
+}

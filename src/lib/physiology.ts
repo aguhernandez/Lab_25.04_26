@@ -1,0 +1,1134 @@
+import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics } from '../types';
+import { buildTrainingZonesData, TrainingZonesData } from './trainingZones';
+
+export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
+
+/**
+ * Converts VO2 from ml/kg/min (relative) to L/min (absolute)
+ * @param vo2_ml_kg_min - VO2 in ml/kg/min
+ * @param weight_kg - Body weight in kg
+ * @returns VO2 in L/min
+ */
+function convertVO2ToAbsolute(vo2_ml_kg_min: number, weight_kg: number): number {
+  return (vo2_ml_kg_min * weight_kg) / 1000;
+}
+
+export interface EnergyMix {
+  fat_percent: number;
+  carb_percent: number;
+  fat_grams_per_min: number;
+  carb_grams_per_min: number;
+}
+
+export interface StageAnalysis extends TestDataPoint {
+  vo2_percent_max: number | null;
+  hr_percent_max: number;
+  energy_mix: EnergyMix | null;
+}
+
+export interface PhysiologyResults {
+  vo2max: number | null;
+  vo2max_confidence: ConfidenceLevel;
+  vo2max_ml_kg_min: number | null;
+  vo2max_ml_kg_lbm_min: number | null;
+  vo2max_ml_kg_ffm_min: number | null;
+  vo2max_ml_kg_muscle_min: number | null;
+  vo2max_ml_min: number | null;
+  lt1_hr: number | null;
+  lt1_power: number | null;
+  lt1_pace: string | null;
+  lt1_vo2: number | null;
+  lt1_percent_vo2max: number | null;
+  lt1_percent_hrmax: number | null;
+  lt1_confidence: ConfidenceLevel;
+  lt2_hr: number | null;
+  lt2_power: number | null;
+  lt2_pace: string | null;
+  lt2_vo2: number | null;
+  lt2_percent_vo2max: number | null;
+  lt2_percent_hrmax: number | null;
+  lt2_confidence: ConfidenceLevel;
+  fatmax_hr: number | null;
+  fatmax_power: number | null;
+  fatmax_pace: string | null;
+  fatmax_vo2: number | null;
+  fatmax_confidence: ConfidenceLevel;
+  vam_kmh: number | null;
+  pam_watts: number | null;
+  hr_drift_percent: number | null;
+  hrmax: number;
+  hrmax_confidence: ConfidenceLevel;
+  training_zones: TrainingZone[];
+  zones_data: TrainingZonesData;
+  data_quality: string;
+  data_quality_score: number;
+  metabolic_profile: {
+    aerobic_capacity: string;
+    fat_utilization: string;
+    anaerobic_contribution: string;
+    durability: string;
+  };
+  stage_analysis: StageAnalysis[];
+  has_power: boolean;
+  has_lactate: boolean;
+  has_vo2: boolean;
+  has_rer: boolean;
+  has_pace: boolean;
+}
+
+function normalizeDataPoints(dataPoints: TestDataPoint[]): TestDataPoint[] {
+  return dataPoints.map(p => ({
+    ...p,
+    stage_number: Number(p.stage_number),
+    duration_seconds: Number(p.duration_seconds),
+    heart_rate: Number(p.heart_rate),
+    power_watts: p.power_watts != null ? Number(p.power_watts) : null,
+    vo2_ml_kg_min: p.vo2_ml_kg_min != null ? Number(p.vo2_ml_kg_min) : null,
+    lactate: p.lactate != null ? Number(p.lactate) : null,
+    rpe: p.rpe != null ? Number(p.rpe) : null,
+  }));
+}
+
+function normalizeAthlete(athlete: Athlete): Athlete {
+  return {
+    ...athlete,
+    weight_kg: athlete.weight_kg != null ? Number(athlete.weight_kg) : undefined,
+    height_cm: athlete.height_cm != null ? Number(athlete.height_cm) : undefined,
+    body_fat_percent: athlete.body_fat_percent != null ? Number(athlete.body_fat_percent) : undefined,
+    lean_body_mass_kg: athlete.lean_body_mass_kg != null ? Number(athlete.lean_body_mass_kg) : undefined,
+  };
+}
+
+export function calculatePhysiology(
+  athlete: Athlete,
+  dataPoints: TestDataPoint[]
+): PhysiologyResults {
+  const athlete_ = normalizeAthlete(athlete);
+  const sortedPoints = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
+  // shadow original parameters so all downstream code uses normalized values
+  athlete = athlete_;
+  dataPoints = sortedPoints;
+
+  const has_power = sortedPoints.some(p => p.power_watts !== null && p.power_watts !== undefined);
+  const has_lactate = sortedPoints.some(p => p.lactate !== null && p.lactate !== undefined);
+  const has_vo2 = sortedPoints.some(p => p.vo2_ml_kg_min !== null && p.vo2_ml_kg_min !== undefined);
+  const has_rer = false;
+  const has_pace = sortedPoints.some(p => p.speed_pace !== null && p.speed_pace !== undefined && p.speed_pace !== '');
+
+  const leanBodyMassKg = calculateLeanBodyMass(athlete);
+
+  const { hrmax, hrmax_confidence } = determineHRMax(athlete, sortedPoints);
+
+  const { vo2max, vo2max_ml_kg_min, vo2max_ml_kg_lbm_min, vo2max_ml_kg_ffm_min, vo2max_ml_kg_muscle_min, vo2max_ml_min, vo2max_confidence } = calculateVO2max(
+    athlete,
+    sortedPoints,
+    has_vo2,
+    has_power,
+    leanBodyMassKg
+  );
+
+  const { lt1_hr, lt1_power, lt1_pace, lt1_vo2, lt1_percent_vo2max, lt1_percent_hrmax, lt1_confidence } = calculateLT1(
+    sortedPoints,
+    has_lactate,
+    vo2max,
+    hrmax,
+    athlete.weight_kg || null
+  );
+
+  const { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence } = calculateLT2(
+    sortedPoints,
+    has_lactate,
+    vo2max,
+    hrmax,
+    athlete.weight_kg || null
+  );
+
+  const { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence } = calculateFatMax(
+    sortedPoints,
+    vo2max,
+    hrmax
+  );
+
+  const { vam_kmh, pam_watts } = calculateVAMandPAM(sortedPoints, has_power, athlete.sport);
+
+  const hr_drift_percent = calculateHRDrift(sortedPoints);
+
+  const training_zones = calculateTrainingZones(
+    sortedPoints,
+    lt1_hr,
+    lt2_hr,
+    has_power,
+    has_pace,
+    athlete.sport,
+    hrmax
+  );
+
+  const zones_data = buildTrainingZonesData(
+    lt1_hr,
+    lt2_hr,
+    hrmax,
+    athlete.sport,
+    '5',
+    sortedPoints
+  );
+
+  const { quality_text, quality_score } = assessDataQuality(
+    sortedPoints,
+    has_power,
+    has_lactate,
+    has_vo2,
+    has_rer
+  );
+
+  const metabolic_profile = generateMetabolicProfile(
+    vo2max,
+    lt2_hr,
+    fatmax_hr,
+    hr_drift_percent,
+    hrmax,
+    has_vo2
+  );
+
+  const stage_analysis = generateStageAnalysis(
+    sortedPoints,
+    vo2max,
+    hrmax,
+    has_vo2,
+    athlete.weight_kg || null
+  );
+
+  return {
+    vo2max,
+    vo2max_confidence,
+    vo2max_ml_kg_min,
+    vo2max_ml_kg_lbm_min,
+    vo2max_ml_kg_ffm_min,
+    vo2max_ml_kg_muscle_min,
+    vo2max_ml_min,
+    lt1_hr,
+    lt1_power,
+    lt1_pace,
+    lt1_vo2,
+    lt1_percent_vo2max,
+    lt1_percent_hrmax,
+    lt1_confidence,
+    lt2_hr,
+    lt2_power,
+    lt2_pace,
+    lt2_vo2,
+    lt2_percent_vo2max,
+    lt2_percent_hrmax,
+    lt2_confidence,
+    fatmax_hr,
+    fatmax_power,
+    fatmax_pace,
+    fatmax_vo2,
+    fatmax_confidence,
+    vam_kmh,
+    pam_watts,
+    hr_drift_percent,
+    hrmax,
+    hrmax_confidence,
+    training_zones,
+    zones_data,
+    data_quality: quality_text,
+    data_quality_score: quality_score,
+    metabolic_profile,
+    stage_analysis,
+    has_power,
+    has_lactate,
+    has_vo2,
+    has_rer,
+    has_pace
+  };
+}
+
+function calculateLeanBodyMass(athlete: Athlete): number | null {
+  if (!athlete.weight_kg || !athlete.body_fat_percent) return null;
+  return athlete.weight_kg * (1 - athlete.body_fat_percent / 100);
+}
+
+function determineHRMax(
+  athlete: Athlete,
+  points: TestDataPoint[]
+): { hrmax: number; hrmax_confidence: ConfidenceLevel } {
+  const observedMaxHR = Math.max(...points.map(p => p.heart_rate));
+
+  if (observedMaxHR >= 180) {
+    return { hrmax: observedMaxHR, hrmax_confidence: 'measured' };
+  }
+
+  const age = athlete.date_of_birth
+    ? new Date().getFullYear() - new Date(athlete.date_of_birth).getFullYear()
+    : 30;
+
+  const formulaMaxHR = Math.round(208 - 0.7 * age);
+
+  if (observedMaxHR >= formulaMaxHR * 0.95) {
+    return { hrmax: observedMaxHR, hrmax_confidence: 'measured' };
+  }
+
+  return { hrmax: formulaMaxHR, hrmax_confidence: 'estimated' };
+}
+
+function calculateVO2max(
+  athlete: Athlete,
+  points: TestDataPoint[],
+  hasVO2: boolean,
+  hasPower: boolean,
+  leanBodyMassKg: number | null
+): {
+  vo2max: number | null;
+  vo2max_ml_kg_min: number | null;
+  vo2max_ml_kg_lbm_min: number | null;
+  vo2max_ml_kg_ffm_min: number | null;
+  vo2max_ml_kg_muscle_min: number | null;
+  vo2max_ml_min: number | null;
+  vo2max_confidence: ConfidenceLevel;
+} {
+  if (hasVO2 && athlete.weight_kg) {
+    const vo2Values = points.filter(p => p.vo2_ml_kg_min).map(p => p.vo2_ml_kg_min!);
+    const vo2max_ml_kg_min = Math.max(...vo2Values);
+
+    const vo2max_ml_min = vo2max_ml_kg_min * athlete.weight_kg;
+    const vo2max_ml_kg_lbm_min = leanBodyMassKg ? vo2max_ml_min / leanBodyMassKg : null;
+
+    return {
+      vo2max: vo2max_ml_kg_min,
+      vo2max_ml_kg_min,
+      vo2max_ml_kg_lbm_min,
+      vo2max_ml_kg_ffm_min: null,
+      vo2max_ml_kg_muscle_min: null,
+      vo2max_ml_min,
+      vo2max_confidence: 'measured'
+    };
+  }
+
+  if (hasPower && athlete.weight_kg) {
+    const maxPower = Math.max(...points.map(p => p.power_watts || 0));
+    const vo2_estimated = estimateVO2FromPower(maxPower, athlete.weight_kg);
+    const vo2_ml_min = vo2_estimated * athlete.weight_kg;
+    const vo2max_ml_kg_lbm_min = leanBodyMassKg ? vo2_ml_min / leanBodyMassKg : null;
+
+    return {
+      vo2max: vo2_estimated,
+      vo2max_ml_kg_min: vo2_estimated,
+      vo2max_ml_kg_lbm_min,
+      vo2max_ml_kg_ffm_min: null,
+      vo2max_ml_kg_muscle_min: null,
+      vo2max_ml_min: vo2_ml_min,
+      vo2max_confidence: 'estimated'
+    };
+  }
+
+  if (!athlete.weight_kg || !athlete.sex) {
+    return {
+      vo2max: null,
+      vo2max_ml_kg_min: null,
+      vo2max_ml_kg_lbm_min: null,
+      vo2max_ml_kg_ffm_min: null,
+      vo2max_ml_kg_muscle_min: null,
+      vo2max_ml_min: null,
+      vo2max_confidence: 'inferred'
+    };
+  }
+
+  const isMale = athlete.sex === 'male';
+  const baseVO2max = isMale ? 45 : 38;
+  const vo2_ml_min = baseVO2max * athlete.weight_kg;
+  const vo2max_ml_kg_lbm_min = leanBodyMassKg ? vo2_ml_min / leanBodyMassKg : null;
+
+  return {
+    vo2max: baseVO2max,
+    vo2max_ml_kg_min: baseVO2max,
+    vo2max_ml_kg_lbm_min,
+    vo2max_ml_kg_ffm_min: null,
+    vo2max_ml_kg_muscle_min: null,
+    vo2max_ml_min: vo2_ml_min,
+    vo2max_confidence: 'inferred'
+  };
+}
+
+function estimateVO2FromPower(powerWatts: number, weightKg: number): number {
+  // Hawley & Noakes (1992): VO2max (ml/kg/min) = 10.8 * W/kg + 7
+  return (10.8 * powerWatts) / weightKg + 7;
+}
+
+function calculateLT1(
+  points: TestDataPoint[],
+  hasLactate: boolean,
+  vo2max: number | null,
+  hrmax: number,
+  weightKg: number | null
+): {
+  lt1_hr: number | null;
+  lt1_power: number | null;
+  lt1_pace: string | null;
+  lt1_vo2: number | null;
+  lt1_percent_vo2max: number | null;
+  lt1_percent_hrmax: number | null;
+  lt1_confidence: ConfidenceLevel;
+} {
+  let lt1Point: TestDataPoint | null = null;
+  let confidence: ConfidenceLevel = 'estimated';
+
+  if (hasLactate) {
+    const lactatePoints = points.filter(p => p.lactate !== null && p.lactate !== undefined);
+
+    if (lactatePoints.length >= 3) {
+      // Modified Beaver et al. method: LT1 = first point where lactate rises >= 0.5 mmol/L above baseline
+      // Baseline is the minimum lactate value in the test (resting or first stage value)
+      const baseline = Math.min(...lactatePoints.map(p => p.lactate!));
+      const lt1Threshold = baseline + 0.5;
+
+      // Find the FIRST point that crosses the threshold (not just any point)
+      const crossingPoint = lactatePoints.find(p => p.lactate! >= lt1Threshold) || null;
+
+      if (crossingPoint) {
+        // If there's a point just before the crossing, use linear interpolation to refine
+        const crossingIndex = lactatePoints.indexOf(crossingPoint);
+        if (crossingIndex > 0) {
+          lt1Point = lactatePoints[crossingIndex - 1];
+        } else {
+          lt1Point = crossingPoint;
+        }
+        confidence = 'measured';
+      }
+    }
+
+    // Fallback: use the point closest to 2.0 mmol/L (individual aerobic threshold, IAT)
+    // Only if no crossing found
+    if (!lt1Point && lactatePoints.length >= 2) {
+      const targetLactate = 2.0;
+      lt1Point = lactatePoints.reduce((prev, curr) =>
+        Math.abs(curr.lactate! - targetLactate) < Math.abs(prev.lactate! - targetLactate) ? curr : prev
+      );
+      if (lt1Point) confidence = 'measured';
+    }
+  }
+
+  if (!lt1Point) {
+    const vt1Point = points.find(p => p.vt1_marker);
+    if (vt1Point) {
+      lt1Point = vt1Point;
+      confidence = 'measured';
+    }
+  }
+
+  if (!lt1Point && vo2max) {
+    const targetVO2 = vo2max * 0.65;
+    lt1Point = findClosestPointByVO2(points, targetVO2);
+    if (lt1Point) {
+      confidence = 'estimated';
+    }
+  }
+
+  if (!lt1Point) {
+    const estimatedLT1_HR = Math.round(hrmax * 0.70);
+    lt1Point = points.reduce((prev, curr) =>
+      Math.abs(curr.heart_rate - estimatedLT1_HR) < Math.abs(prev.heart_rate - estimatedLT1_HR)
+        ? curr
+        : prev
+    );
+    confidence = 'estimated';
+  }
+
+  const lt1_vo2_ml_kg_min = lt1Point.vo2_ml_kg_min || null;
+  const lt1_vo2 = lt1_vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(lt1_vo2_ml_kg_min, weightKg) : null;
+  let lt1_percent_vo2max: number | null = null;
+  if (vo2max && lt1_vo2_ml_kg_min) {
+    lt1_percent_vo2max = Math.round((lt1_vo2_ml_kg_min / vo2max) * 100 * 10) / 10;
+  }
+  const lt1_percent_hrmax = Math.round((lt1Point.heart_rate / hrmax) * 100 * 10) / 10;
+
+  return {
+    lt1_hr: lt1Point.heart_rate,
+    lt1_power: lt1Point.power_watts || null,
+    lt1_pace: lt1Point.speed_pace || null,
+    lt1_vo2,
+    lt1_percent_vo2max,
+    lt1_percent_hrmax,
+    lt1_confidence: confidence
+  };
+}
+
+function calculateLT2(
+  points: TestDataPoint[],
+  hasLactate: boolean,
+  vo2max: number | null,
+  hrmax: number,
+  weightKg: number | null
+): {
+  lt2_hr: number | null;
+  lt2_power: number | null;
+  lt2_pace: string | null;
+  lt2_vo2: number | null;
+  lt2_percent_vo2max: number | null;
+  lt2_percent_hrmax: number | null;
+  lt2_confidence: ConfidenceLevel;
+} {
+  let lt2Point: TestDataPoint | null = null;
+  let confidence: ConfidenceLevel = 'estimated';
+
+  if (hasLactate) {
+    const lactatePoints = points.filter(p => p.lactate !== null && p.lactate !== undefined);
+
+    // Primary method: Dmax (when sufficient points exist) — Cheng et al. 1992
+    // Dmax uses HR or power as X-axis for physiological relevance
+    if (lactatePoints.length >= 4) {
+      const dmaxPoint = calculateDmax(lactatePoints);
+      if (dmaxPoint) {
+        lt2Point = dmaxPoint;
+        confidence = 'measured';
+      }
+    }
+
+    // If Dmax fails or lactate reaches 4.0 mmol/L (OBLA, Sjödin & Jacobs 1981),
+    // prefer the 4.0 mmol/L point as it represents the onset of blood lactate accumulation
+    const oblaPoint = lactatePoints.find(p => p.lactate! >= 4.0) || null;
+    if (oblaPoint) {
+      // Use the stage just before 4.0 mmol/L if available (as LT2 is the threshold, not above it)
+      const oblaIndex = lactatePoints.indexOf(oblaPoint);
+      if (oblaIndex > 0 && lactatePoints[oblaIndex - 1].lactate! < 4.0) {
+        lt2Point = lactatePoints[oblaIndex - 1];
+      } else {
+        lt2Point = oblaPoint;
+      }
+      confidence = 'measured';
+    }
+  }
+
+  if (!lt2Point) {
+    const vt2Point = points.find(p => p.vt2_marker);
+    if (vt2Point) {
+      lt2Point = vt2Point;
+      confidence = 'measured';
+    }
+  }
+
+  if (!lt2Point && vo2max) {
+    const targetVO2 = vo2max * 0.88;
+    lt2Point = findClosestPointByVO2(points, targetVO2);
+    if (lt2Point) {
+      confidence = 'estimated';
+    }
+  }
+
+  if (!lt2Point) {
+    const estimatedLT2_HR = Math.round(hrmax * 0.90);
+    lt2Point = points.reduce((prev, curr) =>
+      Math.abs(curr.heart_rate - estimatedLT2_HR) < Math.abs(prev.heart_rate - estimatedLT2_HR)
+        ? curr
+        : prev
+    );
+    confidence = 'estimated';
+  }
+
+  const lt2_vo2_ml_kg_min = lt2Point.vo2_ml_kg_min || null;
+  const lt2_vo2 = lt2_vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(lt2_vo2_ml_kg_min, weightKg) : null;
+  let lt2_percent_vo2max: number | null = null;
+  if (vo2max && lt2_vo2_ml_kg_min) {
+    lt2_percent_vo2max = Math.round((lt2_vo2_ml_kg_min / vo2max) * 100 * 10) / 10;
+  }
+  const lt2_percent_hrmax = Math.round((lt2Point.heart_rate / hrmax) * 100 * 10) / 10;
+
+  return {
+    lt2_hr: lt2Point.heart_rate,
+    lt2_power: lt2Point.power_watts || null,
+    lt2_pace: lt2Point.speed_pace || null,
+    lt2_vo2,
+    lt2_percent_vo2max,
+    lt2_percent_hrmax,
+    lt2_confidence: confidence
+  };
+}
+
+function calculateDmax(lactatePoints: TestDataPoint[]): TestDataPoint | null {
+  if (lactatePoints.length < 4) return null;
+
+  const sorted = [...lactatePoints].sort((a, b) => a.stage_number - b.stage_number);
+
+  // Use HR as X-axis if available (physiologically meaningful), otherwise power, otherwise stage number
+  // Cheng et al. 1992: perpendicular distance from the line connecting first and last point of the lactate curve
+  const getX = (p: TestDataPoint): number => {
+    if (p.heart_rate > 0) return p.heart_rate;
+    if (p.power_watts && p.power_watts > 0) return p.power_watts;
+    return p.stage_number;
+  };
+
+  let maxDistance = 0;
+  let dmaxPoint: TestDataPoint | null = null;
+
+  const firstPoint = sorted[0];
+  const lastPoint = sorted[sorted.length - 1];
+  const x1 = getX(firstPoint);
+  const y1 = firstPoint.lactate || 0;
+  const x2 = getX(lastPoint);
+  const y2 = lastPoint.lactate || 0;
+
+  for (let i = 1; i < sorted.length - 1; i++) {
+    const point = sorted[i];
+    const x0 = getX(point);
+    const y0 = point.lactate || 0;
+
+    const numerator = Math.abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1);
+    const denominator = Math.sqrt(Math.pow(y2 - y1, 2) + Math.pow(x2 - x1, 2));
+
+    if (denominator === 0) continue;
+    const distance = numerator / denominator;
+
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      dmaxPoint = point;
+    }
+  }
+
+  return dmaxPoint;
+}
+
+function findClosestPointByVO2(points: TestDataPoint[], targetVO2_ml_kg_min: number): TestDataPoint | null {
+  const vo2Points = points.filter(p => p.vo2_ml_kg_min !== null && p.vo2_ml_kg_min !== undefined);
+
+  if (vo2Points.length === 0) return null;
+
+  return vo2Points.reduce((prev, curr) =>
+    Math.abs(curr.vo2_ml_kg_min! - targetVO2_ml_kg_min) < Math.abs(prev.vo2_ml_kg_min! - targetVO2_ml_kg_min) ? curr : prev
+  );
+}
+
+function calculateFatMax(
+  points: TestDataPoint[],
+  vo2max: number | null,
+  hrmax: number
+): {
+  fatmax_hr: number | null;
+  fatmax_power: number | null;
+  fatmax_pace: string | null;
+  fatmax_vo2: number | null;
+  fatmax_confidence: ConfidenceLevel;
+} {
+  let fatMaxPoint: TestDataPoint | null = null;
+  let confidence: ConfidenceLevel = 'inferred';
+
+  if (vo2max && points.length > 0) {
+    const vo2maxPoint = points.reduce((prev, curr) => {
+      if (!prev.vo2_ml_kg_min) return curr;
+      if (!curr.vo2_ml_kg_min) return prev;
+      return curr.vo2_ml_kg_min > prev.vo2_ml_kg_min ? curr : prev;
+    });
+
+    const validPoints = points.filter(p => {
+      if (!p.vo2_ml_kg_min) return false;
+      const percentVO2max = (p.vo2_ml_kg_min / vo2max) * 100;
+      return percentVO2max <= 65 && p.id !== vo2maxPoint.id;
+    });
+
+    if (validPoints.length > 0) {
+      let maxFatOxidation = 0;
+
+      for (const point of validPoints) {
+        if (!point.vo2_ml_kg_min) continue;
+
+        const percentVO2max = (point.vo2_ml_kg_min / vo2max) * 100;
+        const estimatedRER = estimateRERFromVO2Percent(percentVO2max);
+        const fatOxidation = calculateFatOxidationRate(estimatedRER, point.vo2_ml_kg_min, vo2max);
+
+        if (fatOxidation > maxFatOxidation) {
+          maxFatOxidation = fatOxidation;
+          fatMaxPoint = point;
+        }
+      }
+
+      if (fatMaxPoint) {
+        confidence = 'estimated';
+      }
+    }
+  }
+
+  if (!fatMaxPoint) {
+    const estimatedFatMaxHR = Math.round(hrmax * 0.60);
+    fatMaxPoint = points.reduce((prev, curr) =>
+      Math.abs(curr.heart_rate - estimatedFatMaxHR) < Math.abs(prev.heart_rate - estimatedFatMaxHR)
+        ? curr
+        : prev
+    );
+    confidence = 'inferred';
+  }
+
+  return {
+    fatmax_hr: fatMaxPoint.heart_rate,
+    fatmax_power: fatMaxPoint.power_watts || null,
+    fatmax_pace: fatMaxPoint.speed_pace || null,
+    fatmax_vo2: fatMaxPoint.vo2_ml_kg_min || null,
+    fatmax_confidence: confidence
+  };
+}
+
+function calculateVAMandPAM(
+  points: TestDataPoint[],
+  hasPower: boolean,
+  sport: Sport
+): { vam_kmh: number | null; pam_watts: number | null } {
+  const pacePoints = points.filter(p => p.speed_pace && p.speed_pace.trim() !== '');
+  const powerPoints = points.filter(p => p.power_watts && p.power_watts > 0);
+
+  let vam_kmh: number | null = null;
+  let pam_watts: number | null = null;
+
+  if (sport === 'cycling' && pacePoints.length > 0) {
+    let maxSpeed = 0;
+    for (const p of pacePoints) {
+      const speed = parseSpeedToKmh(p.speed_pace!, sport);
+      if (speed !== null && speed > maxSpeed) {
+        maxSpeed = speed;
+      }
+    }
+    if (maxSpeed > 0) vam_kmh = Math.round(maxSpeed * 10) / 10;
+  }
+
+  if (sport === 'running' && pacePoints.length > 0) {
+    let maxSpeed = 0;
+    for (const p of pacePoints) {
+      const speed = parseSpeedToKmh(p.speed_pace!, sport);
+      if (speed !== null && speed > maxSpeed) {
+        maxSpeed = speed;
+      }
+    }
+    if (maxSpeed > 0) vam_kmh = Math.round(maxSpeed * 10) / 10;
+  }
+
+  if (sport === 'swimming' && pacePoints.length > 0) {
+    let maxSpeed = 0;
+    for (const p of pacePoints) {
+      const speed = parseSpeedToKmh(p.speed_pace!, sport);
+      if (speed !== null && speed > maxSpeed) {
+        maxSpeed = speed;
+      }
+    }
+    if (maxSpeed > 0) vam_kmh = Math.round(maxSpeed * 10) / 10;
+  }
+
+  if (hasPower && powerPoints.length > 0) {
+    pam_watts = Math.max(...powerPoints.map(p => p.power_watts!));
+  }
+
+  return { vam_kmh, pam_watts };
+}
+
+export function parseSpeedToKmh(speedPace: string, sport: Sport): number | null {
+  if (!speedPace || speedPace.trim() === '') return null;
+  const trimmed = speedPace.trim();
+
+  if (sport === 'cycling') {
+    const num = parseFloat(trimmed.replace(',', '.'));
+    if (!isNaN(num) && num > 0) return num;
+    return null;
+  }
+
+  if (sport === 'running') {
+    if (trimmed.includes(':')) {
+      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
+      if (parts.length >= 2) {
+        const mins = parseInt(parts[0]);
+        const secs = parseInt(parts[1]);
+        if (!isNaN(mins) && !isNaN(secs) && (mins + secs / 60) > 0) {
+          return 60 / (mins + secs / 60);
+        }
+      }
+    }
+    const num = parseFloat(trimmed.replace(',', '.'));
+    if (!isNaN(num) && num > 0) return num;
+    return null;
+  }
+
+  if (sport === 'swimming') {
+    if (trimmed.includes(':')) {
+      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
+      if (parts.length >= 2) {
+        const mins = parseInt(parts[0]);
+        const secs = parseInt(parts[1]);
+        const totalMins = mins + secs / 60;
+        if (!isNaN(totalMins) && totalMins > 0) {
+          return (0.1 / totalMins) * 60;
+        }
+      }
+    }
+    return null;
+  }
+
+  if (sport === 'triathlon') {
+    const num = parseFloat(trimmed.replace(',', '.'));
+    if (!isNaN(num) && num > 0) return num;
+    return null;
+  }
+
+  return null;
+}
+
+function calculateFatOxidationRate(rer: number, vo2_ml_kg_min: number, _vo2max: number): number {
+  // Jeukendrup & Wallis (2005): fat oxidation (g/min) = 1.695 * VO2 - 1.701 * VCO2
+  // where VCO2 = RER * VO2
+  // Normalized to relative VO2 for comparison across stages
+  const clampedRER = Math.max(0.70, Math.min(1.05, rer));
+  const vo2_L_min = vo2_ml_kg_min / 1000; // approximate per kg, used for relative comparison
+
+  const fatOxidation_g_min = 1.695 * vo2_L_min - 1.701 * (clampedRER * vo2_L_min);
+  return Math.max(0, fatOxidation_g_min);
+}
+
+function calculateHRDrift(points: TestDataPoint[]): number | null {
+  const totalDuration = points.reduce((sum, p) => sum + p.duration_seconds, 0);
+
+  if (totalDuration < 1200) return null;
+
+  if (points.length < 4) return null;
+
+  const midPoint = Math.floor(points.length / 2);
+  const first10min = points.slice(0, Math.max(2, midPoint));
+  const last10min = points.slice(-Math.max(2, points.length - midPoint));
+
+  const avgFirst = first10min.reduce((sum, p) => sum + p.heart_rate, 0) / first10min.length;
+  const avgLast = last10min.reduce((sum, p) => sum + p.heart_rate, 0) / last10min.length;
+
+  const drift = ((avgLast - avgFirst) / avgFirst) * 100;
+
+  return Math.abs(drift) > 0.5 ? Math.round(drift * 10) / 10 : null;
+}
+
+function calculateTrainingZones(
+  points: TestDataPoint[],
+  lt1_hr: number | null,
+  lt2_hr: number | null,
+  hasPower: boolean,
+  hasPace: boolean,
+  sport: Sport,
+  hrmax: number
+): TrainingZone[] {
+  const lt1 = lt1_hr || Math.round(hrmax * 0.70);
+  const lt2 = lt2_hr || Math.round(hrmax * 0.90);
+
+  const zones: TrainingZone[] = [
+    {
+      zone: 1,
+      name: getZoneName(1, sport),
+      hr_min: Math.round(hrmax * 0.50),
+      hr_max: lt1,
+      description: 'Recovery and base aerobic development'
+    },
+    {
+      zone: 2,
+      name: getZoneName(2, sport),
+      hr_min: lt1 + 1,
+      hr_max: Math.round(lt1 * 1.05),
+      description: 'Aerobic endurance'
+    },
+    {
+      zone: 3,
+      name: getZoneName(3, sport),
+      hr_min: Math.round(lt1 * 1.05) + 1,
+      hr_max: lt2,
+      description: 'Tempo and sustainable pace'
+    },
+    {
+      zone: 4,
+      name: getZoneName(4, sport),
+      hr_min: lt2 + 1,
+      hr_max: Math.round(lt2 * 1.05),
+      description: 'Lactate threshold training'
+    },
+    {
+      zone: 5,
+      name: getZoneName(5, sport),
+      hr_min: Math.round(lt2 * 1.05) + 1,
+      hr_max: hrmax,
+      description: 'VO2max and anaerobic capacity'
+    }
+  ];
+
+  if (hasPower) {
+    const maxPower = Math.max(...points.map(p => p.power_watts || 0));
+    const lt1Power = points.find(p => p.heart_rate >= lt1)?.power_watts || maxPower * 0.55;
+    const lt2Power = points.find(p => p.heart_rate >= lt2)?.power_watts || maxPower * 0.75;
+
+    zones[0].power_min = Math.round(maxPower * 0.40);
+    zones[0].power_max = Math.round(lt1Power * 0.90);
+    zones[1].power_min = Math.round(lt1Power * 0.90) + 1;
+    zones[1].power_max = Math.round(lt1Power * 1.05);
+    zones[2].power_min = Math.round(lt1Power * 1.05) + 1;
+    zones[2].power_max = Math.round(lt2Power * 0.95);
+    zones[3].power_min = Math.round(lt2Power * 0.95) + 1;
+    zones[3].power_max = Math.round(lt2Power * 1.05);
+    zones[4].power_min = Math.round(lt2Power * 1.05) + 1;
+    zones[4].power_max = Math.round(maxPower * 1.20);
+  }
+
+  if (hasPace) {
+    const lt1PacePoint = points.reduce((prev, curr) =>
+      Math.abs(curr.heart_rate - lt1) < Math.abs(prev.heart_rate - lt1) ? curr : prev
+    );
+    const lt2PacePoint = points.reduce((prev, curr) =>
+      Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev
+    );
+
+    const pacePoints = points.filter(p => p.speed_pace && p.speed_pace.trim() !== '');
+    if (pacePoints.length >= 2) {
+      const lt1Pace = lt1PacePoint.speed_pace || null;
+      const lt2Pace = lt2PacePoint.speed_pace || null;
+
+      zones[0].pace_max = lt1Pace;
+      zones[1].pace_min = lt1Pace;
+      zones[1].pace_max = lt1Pace;
+      zones[2].pace_min = lt1Pace;
+      zones[2].pace_max = lt2Pace;
+      zones[3].pace_min = lt2Pace;
+      zones[3].pace_max = lt2Pace;
+      zones[4].pace_min = lt2Pace;
+    }
+  }
+
+  return zones;
+}
+
+function getZoneName(zone: number, sport: Sport): string {
+  const names: Record<number, Record<Sport, string>> = {
+    1: { cycling: 'Active Recovery', running: 'Easy', triathlon: 'Recovery', swimming: 'Easy', other: 'Recovery' },
+    2: { cycling: 'Endurance', running: 'Aerobic', triathlon: 'Endurance', swimming: 'Aerobic', other: 'Endurance' },
+    3: { cycling: 'Tempo', running: 'Tempo', triathlon: 'Tempo', swimming: 'Threshold', other: 'Tempo' },
+    4: { cycling: 'Threshold', running: 'Threshold', triathlon: 'Threshold', swimming: 'VO2max', other: 'Threshold' },
+    5: { cycling: 'VO2max', running: 'VO2max', triathlon: 'VO2max', swimming: 'Sprint', other: 'VO2max' }
+  };
+
+  return names[zone][sport];
+}
+
+function assessDataQuality(
+  points: TestDataPoint[],
+  hasPower: boolean,
+  hasLactate: boolean,
+  hasVO2: boolean,
+  hasRER: boolean
+): { quality_text: string; quality_score: number } {
+  let score = 0;
+
+  if (points.length >= 6) score += 3;
+  else if (points.length >= 4) score += 2;
+  else if (points.length >= 2) score += 1;
+
+  if (hasVO2) score += 4;
+  if (hasLactate) score += 3;
+  if (hasRER) score += 2;
+  if (hasPower) score += 2;
+
+  let quality_text = '';
+
+  if (score >= 10) {
+    quality_text = 'Excellent - Direct metabolic measurements with lactate';
+  } else if (score >= 7) {
+    quality_text = 'Good - Multiple direct measurements available';
+  } else if (score >= 4) {
+    quality_text = 'Fair - Key metrics present, some estimation required';
+  } else {
+    quality_text = 'Basic - Primarily HR-based estimates';
+  }
+
+  return { quality_text, quality_score: score };
+}
+
+function generateMetabolicProfile(
+  vo2max: number | null,
+  lt2_hr: number | null,
+  fatmax_hr: number | null,
+  hr_drift: number | null,
+  hrmax: number,
+  hasVO2: boolean
+): {
+  aerobic_capacity: string;
+  fat_utilization: string;
+  anaerobic_contribution: string;
+  durability: string;
+} {
+  let aerobic_capacity = 'Moderate';
+  if (vo2max && hasVO2) {
+    if (vo2max >= 55) aerobic_capacity = 'High';
+    else if (vo2max >= 45) aerobic_capacity = 'Moderate';
+    else aerobic_capacity = 'Low';
+  }
+
+  let fat_utilization = 'Moderate';
+  if (fatmax_hr) {
+    const fatmax_percent = (fatmax_hr / hrmax) * 100;
+    if (fatmax_percent >= 65) fat_utilization = 'High';
+    else if (fatmax_percent >= 55) fat_utilization = 'Moderate';
+    else fat_utilization = 'Low';
+  }
+
+  let anaerobic_contribution = 'Moderate';
+  if (lt2_hr) {
+    const lt2_percent = (lt2_hr / hrmax) * 100;
+    if (lt2_percent >= 92) anaerobic_contribution = 'High';
+    else if (lt2_percent >= 88) anaerobic_contribution = 'Moderate';
+    else anaerobic_contribution = 'Low';
+  }
+
+  let durability = 'Moderate';
+  if (hr_drift !== null) {
+    if (Math.abs(hr_drift) < 5) durability = 'High';
+    else if (Math.abs(hr_drift) < 8) durability = 'Moderate';
+    else durability = 'Low';
+  }
+
+  return {
+    aerobic_capacity,
+    fat_utilization,
+    anaerobic_contribution,
+    durability
+  };
+}
+
+function generateStageAnalysis(
+  points: TestDataPoint[],
+  vo2max: number | null,
+  hrmax: number,
+  hasVO2: boolean,
+  weightKg: number | null
+): StageAnalysis[] {
+  return points.map(point => {
+    const hr_percent_max = Math.round((point.heart_rate / hrmax) * 100 * 10) / 10;
+
+    let vo2_percent_max: number | null = null;
+    if (vo2max && point.vo2_ml_kg_min) {
+      vo2_percent_max = Math.round((point.vo2_ml_kg_min / vo2max) * 100 * 10) / 10;
+    }
+
+    let energy_mix: EnergyMix | null = null;
+    if (hasVO2 && point.vo2_ml_kg_min && weightKg) {
+      const vo2_l_min = convertVO2ToAbsolute(point.vo2_ml_kg_min, weightKg);
+      const estimatedRER = estimateRERFromVO2Percent(vo2_percent_max || 0);
+      energy_mix = calculateEnergyMix(estimatedRER, vo2_l_min);
+    }
+
+    return {
+      ...point,
+      vo2_percent_max,
+      hr_percent_max,
+      energy_mix
+    };
+  });
+}
+
+function calculateEnergyMix(rer: number, vo2_L_min: number): EnergyMix {
+  const clampedRER = Math.max(0.70, Math.min(1.0, rer));
+
+  const fat_percent = Math.max(0, Math.min(100, ((1.0 - clampedRER) / (1.0 - 0.70)) * 100));
+  const carb_percent = 100 - fat_percent;
+
+  const fat_grams_per_min = (1.695 * vo2_L_min) - (1.701 * vo2_L_min * clampedRER);
+  const carb_grams_per_min = (4.585 * vo2_L_min * clampedRER) - (3.226 * vo2_L_min);
+
+  return {
+    fat_percent: Math.round(fat_percent * 10) / 10,
+    carb_percent: Math.round(carb_percent * 10) / 10,
+    fat_grams_per_min: Math.max(0, Math.round(fat_grams_per_min * 100) / 100),
+    carb_grams_per_min: Math.max(0, Math.round(carb_grams_per_min * 100) / 100)
+  };
+}
+
+function estimateRERFromVO2Percent(vo2Percent: number): number {
+  if (vo2Percent < 50) return 0.75;
+  if (vo2Percent < 70) return 0.80 + (vo2Percent - 50) * 0.003;
+  if (vo2Percent < 85) return 0.85 + (vo2Percent - 70) * 0.004;
+  return 0.95 + (vo2Percent - 85) * 0.003;
+}
+
+export function calculateAdvancedMetrics(
+  athlete: Athlete,
+  dataPoints: TestDataPoint[],
+  results: PhysiologyResults,
+  manualOverrides?: Partial<AdvancedMetrics>
+): AdvancedMetrics {
+  const normalizedAthlete = normalizeAthlete(athlete);
+  const sorted = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
+  const lbm = normalizedAthlete.lean_body_mass_kg || null;
+  const weight = normalizedAthlete.weight_kg || null;
+  const vo2max = results.vo2max;
+
+  const rer_vs_stage = sorted.map(p => {
+    if (!p.vo2_ml_kg_min || !vo2max) return null;
+    const pct = (p.vo2_ml_kg_min / vo2max) * 100;
+    return Math.round(estimateRERFromVO2Percent(pct) * 1000) / 1000;
+  });
+
+  const energy_mixes = sorted.map((p, i) => {
+    const rer = rer_vs_stage[i];
+    if (!rer || !p.vo2_ml_kg_min || !weight) return null;
+    const vo2_l = convertVO2ToAbsolute(p.vo2_ml_kg_min, weight);
+    return calculateEnergyMix(rer, vo2_l);
+  });
+
+  const percent_fat_vs_stage = energy_mixes.map(m => m ? Math.round(m.fat_percent) : null);
+  const percent_carb_vs_stage = energy_mixes.map(m => m ? Math.round(m.carb_percent) : null);
+
+  let watts_per_kg_lbm: number | null = null;
+  let efficiency_percent: number | null = null;
+  if (athlete.sport === 'cycling' && lbm && sorted.length > 0) {
+    const maxPowerPoint = sorted.reduce((best, p) =>
+      (p.power_watts || 0) > (best.power_watts || 0) ? p : best, sorted[0]);
+    if (maxPowerPoint?.power_watts) {
+      watts_per_kg_lbm = Math.round((maxPowerPoint.power_watts / lbm) * 100) / 100;
+      if (maxPowerPoint.vo2_ml_kg_min && weight) {
+        const vo2_l_min = convertVO2ToAbsolute(maxPowerPoint.vo2_ml_kg_min, weight);
+        const energy_rate_watts = vo2_l_min * 20.9 * 1000 / 60;
+        efficiency_percent = Math.round((maxPowerPoint.power_watts / energy_rate_watts) * 100 * 10) / 10;
+      }
+    }
+  }
+
+  let cost_per_km_ml_o2_kg: number | null = null;
+  if (athlete.sport === 'running') {
+    const subMaxPoints = sorted.filter(p => {
+      if (!p.vo2_ml_kg_min || !vo2max) return false;
+      return (p.vo2_ml_kg_min / vo2max) * 100 < 85 && p.speed_pace;
+    });
+    if (subMaxPoints.length > 0) {
+      const costs = subMaxPoints
+        .map(p => {
+          if (!p.speed_pace || !p.vo2_ml_kg_min) return null;
+          const speed = parseSpeedToKmh(p.speed_pace, 'running');
+          if (!speed || speed <= 0) return null;
+          return (p.vo2_ml_kg_min / speed) * 1000;
+        })
+        .filter((c): c is number => c !== null);
+      if (costs.length > 0) {
+        cost_per_km_ml_o2_kg = Math.round(costs.reduce((a, b) => a + b, 0) / costs.length);
+      }
+    }
+  }
+
+  const recovery = manualOverrides?.recovery ?? {
+    hrv_post_exercise_ms: null,
+    time_to_hr_baseline_min: null,
+    lactate_clearance: { min5: null, min10: null, min20: null },
+    hr_drift_percent: results.hr_drift_percent
+  };
+
+  const anaerobicTest = manualOverrides?.anaerobicTest ?? {
+    peak_power_watts: null,
+    mean_power_watts: null,
+    fatigue_index_percent: null,
+    test_duration_seconds: null
+  };
+
+  return {
+    recovery,
+    movementEconomy: {
+      cycling: { watts_per_kg_lbm, efficiency_percent },
+      running: { cost_per_km_ml_o2_kg }
+    },
+    energyProfile: {
+      rer_vs_stage,
+      percent_fat_vs_stage,
+      percent_carb_vs_stage
+    },
+    anaerobicTest
+  };
+}
