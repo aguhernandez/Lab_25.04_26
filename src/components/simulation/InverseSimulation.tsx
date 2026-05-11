@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import type { Athlete } from '../../types';
 import { loadSimulationProfile } from '../../lib/simulationProfile';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   simulateInverse,
   formatTime,
@@ -15,6 +16,7 @@ import {
 
 export default function InverseSimulation() {
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
 
   const DISTANCES = [
     { label: '5K', km: 5 },
@@ -42,10 +44,15 @@ export default function InverseSimulation() {
   const [result, setResult] = useState<ReturnType<typeof simulateInverse> | null>(null);
 
   useEffect(() => {
-    supabase.from('athletes').select('*').order('name').then(({ data }) => {
-      if (data) setAthletes(data);
-    });
-  }, []);
+    const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
+    let query = supabase.from('athletes').select('*').order('name');
+    if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+      query = query.eq('hub_user_id', profile.hub_user_id);
+    } else if (effectiveRole === 'coach' && profile?.id) {
+      query = query.eq('coach_id', profile.id);
+    }
+    query.then(({ data }) => { if (data) setAthletes(data); });
+  }, [profile]);
 
   useEffect(() => {
     if (!selectedAthleteId) return;

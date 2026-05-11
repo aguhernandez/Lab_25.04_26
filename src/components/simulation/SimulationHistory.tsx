@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { formatTime } from '../../lib/simulationEngine';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface SimRecord {
   id: string;
@@ -21,6 +22,7 @@ const FEASIBILITY_COLORS: Record<string, string> = {
 };
 
 export default function SimulationHistory() {
+  const { profile } = useAuth();
   const [records, setRecords] = useState<SimRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'race' | 'altitude'>('all');
@@ -28,16 +30,51 @@ export default function SimulationHistory() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [profile]);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
-      .from('simulation_history')
-      .select('*, athletes(name)')
-      .order('created_at', { ascending: false })
-      .limit(50);
-    setRecords((data as SimRecord[]) ?? []);
+    const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
+
+    if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+      // Athlete: first find their own athlete row, then filter history by that athlete_id
+      const { data: athleteRow } = await supabase
+        .from('athletes')
+        .select('id')
+        .eq('hub_user_id', profile.hub_user_id)
+        .maybeSingle();
+      if (!athleteRow) { setRecords([]); setLoading(false); return; }
+      const { data } = await supabase
+        .from('simulation_history')
+        .select('*, athletes(name)')
+        .eq('athlete_id', athleteRow.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setRecords((data as SimRecord[]) ?? []);
+    } else if (effectiveRole === 'coach' && profile?.id) {
+      // Coach: join through athletes to only get their athletes' simulations
+      const { data: athleteRows } = await supabase
+        .from('athletes')
+        .select('id')
+        .eq('coach_id', profile.id);
+      const ids = (athleteRows ?? []).map(a => a.id);
+      if (ids.length === 0) { setRecords([]); setLoading(false); return; }
+      const { data } = await supabase
+        .from('simulation_history')
+        .select('*, athletes(name)')
+        .in('athlete_id', ids)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setRecords((data as SimRecord[]) ?? []);
+    } else {
+      // Admin: see all
+      const { data } = await supabase
+        .from('simulation_history')
+        .select('*, athletes(name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setRecords((data as SimRecord[]) ?? []);
+    }
     setLoading(false);
   }
 

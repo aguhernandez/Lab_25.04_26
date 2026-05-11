@@ -32,9 +32,11 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
 
   const loadAthletes = async () => {
     try {
-      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      if (effectiveRole === 'coach' && profile?.id) {
+      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
+      if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+        query = query.eq('hub_user_id', profile.hub_user_id);
+      } else if (effectiveRole === 'coach' && profile?.id) {
         query = query.eq('coach_id', profile.id);
       }
       const { data } = await query;

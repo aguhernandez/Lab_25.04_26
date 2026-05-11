@@ -14,6 +14,7 @@ import {
 } from '../../lib/simulationEngine';
 import { loadSimulationProfile, buildProfileSummary } from '../../lib/simulationProfile';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const DISTANCES = [
   { labelKey: 'sim.dist.track1k', km: 1 },
@@ -47,6 +48,7 @@ const FEASIBILITY_STYLE = {
 
 export default function RaceSimulation() {
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
   const [physioProfile, setPhysioProfile] = useState<AthletePhysioProfile | null>(null);
@@ -71,10 +73,15 @@ export default function RaceSimulation() {
   const animRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    supabase.from('athletes').select('*').order('name').then(({ data }) => {
-      if (data) setAthletes(data);
-    });
-  }, []);
+    const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
+    let query = supabase.from('athletes').select('*').order('name');
+    if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+      query = query.eq('hub_user_id', profile.hub_user_id);
+    } else if (effectiveRole === 'coach' && profile?.id) {
+      query = query.eq('coach_id', profile.id);
+    }
+    query.then(({ data }) => { if (data) setAthletes(data); });
+  }, [profile]);
 
   useEffect(() => {
     if (!selectedAthleteId) return;

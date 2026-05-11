@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import type { Athlete } from '../../types';
 import { loadSimulationProfile } from '../../lib/simulationProfile';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   simulateAltitude,
   type AthletePhysioProfile,
@@ -34,6 +35,7 @@ const ALTITUDE_PRESETS = [
 
 export default function AltitudeSimulation() {
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
   const [physioProfile, setPhysioProfile] = useState<AthletePhysioProfile | null>(null);
@@ -47,10 +49,15 @@ export default function AltitudeSimulation() {
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'zones' | 'recs'>('overview');
 
   useEffect(() => {
-    supabase.from('athletes').select('*').order('name').then(({ data }) => {
-      if (data) setAthletes(data);
-    });
-  }, []);
+    const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
+    let query = supabase.from('athletes').select('*').order('name');
+    if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+      query = query.eq('hub_user_id', profile.hub_user_id);
+    } else if (effectiveRole === 'coach' && profile?.id) {
+      query = query.eq('coach_id', profile.id);
+    }
+    query.then(({ data }) => { if (data) setAthletes(data); });
+  }, [profile]);
 
   useEffect(() => {
     if (!selectedAthleteId) return;
