@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { useLanguage } from './contexts/LanguageContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -26,6 +26,7 @@ import ReferencePopulationsAdmin from './components/ReferencePopulationsAdmin';
 import ReportsPage from './pages/ReportsPage';
 import SimulationPage from './pages/SimulationPage';
 import { Athlete } from './types';
+import PublicLanding from './components/PublicLanding';
 
 type View = 'dashboard' | 'athlete-selector' | 'create-athlete' | 'edit-athlete' | 'athletes' | 'athlete-detail' | 'test' | 'results' | 'admin' | 'users' | 'settings' | 'profile' | 'my-evaluations' | 'evaluations' | 'anthropometry' | 'anthropometry-dashboard' | 'environmental-physiology' | 'lab' | 'force-velocity' | 'reference-populations' | 'reports' | 'simulation';
 
@@ -37,64 +38,35 @@ function AppContent() {
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
   const [athleteForReports, setAthleteForReports] = useState<Athlete | null>(null);
 
-  useEffect(() => {
-    if (!loading && !user && !hasToken && !isDevMode) {
-      console.log('🔄 No user, no token, redirecting to HUB...');
-      const timer = setTimeout(() => {
-        login();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [user, loading, hasToken, isDevMode, login]);
-
-  if (loading) {
+  if (loading || (hasToken && !user && !isDevMode)) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center">
-        <div className="text-white text-2xl font-semibold">{t('app.loading')}</div>
-      </div>
-    );
-  }
-
-  if (!user && !isDevMode) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md mx-4">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-blue-600 text-3xl">🔐</span>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Authentication Required</h2>
-            <p className="text-gray-600 mb-4">
-              Redirecting to HUB for authentication...
-            </p>
-            <p className="text-sm text-gray-500">
-              If you're not redirected automatically, click the button below.
-            </p>
-            <button
-              onClick={login}
-              className="mt-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition font-medium"
-            >
-              Go to HUB Login
-            </button>
-          </div>
+      <div className="min-h-screen bg-[#080c10] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <img src="/favicon.svg" alt="Asciende" className="w-10 h-10 opacity-60 animate-pulse" />
+          <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
         </div>
       </div>
     );
   }
 
+  if (!user && !isDevMode) {
+    return <PublicLanding onLogin={login} />;
+  }
+
   if (user && !profile) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center">
-        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md mx-4">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-yellow-600 text-3xl">⚠</span>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Profile Syncing</h2>
-            <p className="text-gray-600 mb-4">
-              Creating your profile in LAB satellite...
-            </p>
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+      <div className="min-h-screen bg-[#080c10] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-5">
+          <img src="/favicon.svg" alt="Asciende" className="w-10 h-10 opacity-60" />
+          <div className="text-sm text-white/40 tracking-widest uppercase">Syncing profile</div>
+          <div className="flex gap-1.5">
+            {[0, 1, 2].map(i => (
+              <div
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-white/25 animate-pulse"
+                style={{ animationDelay: `${i * 200}ms` }}
+              />
+            ))}
           </div>
         </div>
       </div>
