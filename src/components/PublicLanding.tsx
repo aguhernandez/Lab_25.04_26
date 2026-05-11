@@ -852,6 +852,3 @@ export default function PublicLanding({ onLogin }: Props) {
     </div>
   );
 }
-
-
-export default PublicLanding

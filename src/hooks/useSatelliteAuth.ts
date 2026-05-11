@@ -144,11 +144,38 @@ export function useSatelliteAuth() {
     }
   };
 
+  const loginWithCredentials = async (email: string, password: string): Promise<void> => {
+    setAuthError(null);
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hub-auth`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error ?? 'Invalid credentials');
+    }
+
+    localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+    setUser({
+      id: data.user.id,
+      email: data.user.email,
+      name: data.user.name,
+      role: data.user.role,
+      membership_slug: data.user.membership_slug,
+      membership_name: data.user.membership_name,
+    });
+  };
+
   const login = () => {
     const currentUrl = window.location.href.split('?')[0];
-    const hubAuthUrl = `${HUB_URL}?redirect=${encodeURIComponent(currentUrl)}`;
-    console.log('[Auth] Redirecting to HUB auth:', hubAuthUrl);
-    window.location.href = hubAuthUrl;
+    window.location.href = `${HUB_URL}?redirect=${encodeURIComponent(currentUrl)}`;
   };
 
   const logout = async () => {
@@ -160,5 +187,5 @@ export function useSatelliteAuth() {
 
   const hasToken = user !== null;
 
-  return { user, loading, hasToken, authError, login, logout };
+  return { user, loading, hasToken, authError, login, logout, loginWithCredentials };
 }

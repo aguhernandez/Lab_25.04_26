@@ -27,16 +27,18 @@ import ReportsPage from './pages/ReportsPage';
 import SimulationPage from './pages/SimulationPage';
 import { Athlete } from './types';
 import PublicLanding from './components/PublicLanding';
+import LoginModal from './components/auth/LoginModal';
 
 type View = 'dashboard' | 'athlete-selector' | 'create-athlete' | 'edit-athlete' | 'athletes' | 'athlete-detail' | 'test' | 'results' | 'admin' | 'users' | 'settings' | 'profile' | 'my-evaluations' | 'evaluations' | 'anthropometry' | 'anthropometry-dashboard' | 'environmental-physiology' | 'lab' | 'force-velocity' | 'reference-populations' | 'reports' | 'simulation';
 
 function AppContent() {
-  const { user, profile, loading, hasToken, isDevMode, login } = useAuth();
+  const { user, profile, loading, hasToken, isDevMode } = useAuth();
   const { t } = useLanguage();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
   const [athleteForReports, setAthleteForReports] = useState<Athlete | null>(null);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   if (loading || (hasToken && !user && !isDevMode)) {
     return (
@@ -50,7 +52,12 @@ function AppContent() {
   }
 
   if (!user && !isDevMode) {
-    return <PublicLanding onLogin={login} />;
+    return (
+      <>
+        <PublicLanding onLogin={() => setLoginModalOpen(true)} />
+        <LoginModal isOpen={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+      </>
+    );
   }
 
   if (user && !profile) {
