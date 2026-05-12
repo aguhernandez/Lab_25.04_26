@@ -7,6 +7,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+function normalizeRole(role: string | undefined | null): string {
+  if (!role) return "athlete";
+  if (role === "trainer") return "coach";
+  return role;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -53,72 +59,78 @@ Deno.serve(async (req: Request) => {
     const hubUser = hubAuth.user;
     const hubToken = hubAuth.session.access_token;
 
-    // Fetch the Hub profile to get role and membership info
-    const { data: hubProfile } = await hubClient
+    // Role resolution: Hub profiles table → user_metadata → app_metadata → default
+    // Try multiple possible role column names and locations
+    const { data: hubProfile, error: profileError } = await hubClient
       .from("profiles")
       .select("role, full_name, membership_slug, membership_name")
       .eq("id", hubUser.id)
       .maybeSingle();
 
-    const role = hubProfile?.role ?? hubUser.user_metadata?.role ?? "athlete";
-    const fullName = hubProfile?.full_name ?? hubUser.user_metadata?.full_name ?? hubUser.email;
+    if (profileError) {
+      console.error("Hub profile query error:", profileError);
+    }
+
+    // Build role from most reliable source first
+    const rawRole =
+      hubProfile?.role ||                           // Hub profiles table
+      hubUser.user_metadata?.role ||                // user_metadata in JWT
+      hubUser.app_metadata?.role ||                 // app_metadata in JWT
+      null;
+
+    const role = normalizeRole(rawRole);
+
+    const fullName =
+      hubProfile?.full_name ||
+      hubUser.user_metadata?.full_name ||
+      hubUser.user_metadata?.name ||
+      hubUser.email;
+
+    const membershipSlug =
+      hubProfile?.membership_slug ||
+      hubUser.user_metadata?.membership_slug ||
+      "inicia";
+
+    const membershipName =
+      hubProfile?.membership_name ||
+      hubUser.user_metadata?.membership_name ||
+      "Asciende Inicia";
+
+    console.log(`[hub-auth] User ${email}: raw_role="${rawRole}" → normalized="${role}"`);
 
     // Look up or create local profile by hub_user_id
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
-      .select("id, user_id, hub_user_id, role, full_name, email")
+      .select("id, hub_user_id, role, full_name, email")
       .eq("hub_user_id", hubUser.id)
       .maybeSingle();
 
     if (!existingProfile) {
-      // Also try by email in case profile exists unlinked
+      // Try to find by email (unlinked profile)
       const { data: profileByEmail } = await supabaseAdmin
         .from("profiles")
-        .select("id, user_id, hub_user_id, role, full_name, email")
+        .select("id, hub_user_id")
         .eq("email", email)
         .is("hub_user_id", null)
         .maybeSingle();
 
       if (profileByEmail) {
-        // Link the existing profile
         await supabaseAdmin
           .from("profiles")
-          .update({
-            hub_user_id: hubUser.id,
-            role: role === "trainer" ? "coach" : role,
-            full_name: fullName,
-            membership_slug: hubProfile?.membership_slug ?? "inicia",
-            membership_name: hubProfile?.membership_name ?? "Asciende Inicia",
-          })
+          .update({ hub_user_id: hubUser.id, role, full_name: fullName, membership_slug: membershipSlug, membership_name: membershipName })
           .eq("id", profileByEmail.id);
       } else {
-        // Create new profile
         await supabaseAdmin
           .from("profiles")
-          .insert({
-            hub_user_id: hubUser.id,
-            email: hubUser.email,
-            role: role === "trainer" ? "coach" : role,
-            full_name: fullName,
-            membership_slug: hubProfile?.membership_slug ?? "inicia",
-            membership_name: hubProfile?.membership_name ?? "Asciende Inicia",
-          });
+          .insert({ hub_user_id: hubUser.id, email: hubUser.email, role, full_name: fullName, membership_slug: membershipSlug, membership_name: membershipName });
       }
     } else {
-      // Update existing profile with latest Hub data
       await supabaseAdmin
         .from("profiles")
-        .update({
-          email: hubUser.email,
-          role: role === "trainer" ? "coach" : role,
-          full_name: fullName,
-          membership_slug: hubProfile?.membership_slug ?? existingProfile.role,
-          membership_name: hubProfile?.membership_name ?? "Asciende",
-        })
+        .update({ email: hubUser.email, role, full_name: fullName, membership_slug: membershipSlug, membership_name: membershipName })
         .eq("id", existingProfile.id);
     }
 
-    // Return the Hub JWT so the client can store it directly
     return new Response(
       JSON.stringify({
         success: true,
@@ -127,9 +139,9 @@ Deno.serve(async (req: Request) => {
           id: hubUser.id,
           email: hubUser.email,
           name: fullName,
-          role: role === "trainer" ? "coach" : role,
-          membership_slug: hubProfile?.membership_slug ?? "inicia",
-          membership_name: hubProfile?.membership_name ?? "Asciende Inicia",
+          role,
+          membership_slug: membershipSlug,
+          membership_name: membershipName,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -14,6 +14,7 @@ export interface HubUser {
 
 const HUB_URL = 'https://hub.asciende.pro';
 const SESSION_TOKEN_KEY = 'hub_session_token';
+const SESSION_USER_KEY = 'hub_session_user';
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
@@ -37,14 +38,27 @@ function extractUserFromPayload(payload: Record<string, unknown>): HubUser | nul
   const sub = payload.sub ?? payload.user_id ?? payload.id;
   const email = payload.email;
   if (!sub || !email) return null;
+
+  // Supabase JWTs nest custom claims inside app_metadata or user_metadata
+  const appMeta = (payload.app_metadata ?? {}) as Record<string, unknown>;
+  const userMeta = (payload.user_metadata ?? {}) as Record<string, unknown>;
+
+  // Role: top-level claim (Hub OAuth tokens), then app_metadata, then user_metadata
+  const rawRole = payload.role ?? appMeta.role ?? userMeta.role;
+  const role = (rawRole as HubUser['role']) ?? 'athlete';
+
+  const membershipSlug = (payload.membership_slug ?? appMeta.membership_slug ?? userMeta.membership_slug) as MembershipSlug | undefined;
+  const membershipName = (payload.membership_name ?? appMeta.membership_name ?? userMeta.membership_name) as string | undefined;
+  const name = (payload.name ?? appMeta.full_name ?? userMeta.full_name ?? appMeta.name ?? userMeta.name) as string | undefined;
+
   return {
     id: String(sub),
     email: String(email),
-    name: payload.name ? String(payload.name) : undefined,
-    role: (payload.role as HubUser['role']) ?? 'athlete',
+    name: name || undefined,
+    role,
     active_plan: Array.isArray(payload.active_plan) ? payload.active_plan : undefined,
-    membership_slug: (payload.membership_slug as MembershipSlug) ?? 'inicia',
-    membership_name: payload.membership_name ? String(payload.membership_name) : 'Asciende Inicia',
+    membership_slug: membershipSlug ?? 'inicia',
+    membership_name: membershipName ?? 'Asciende Inicia',
   };
 }
 
@@ -69,36 +83,45 @@ export function useSatelliteAuth() {
     try {
       const token = localStorage.getItem(SESSION_TOKEN_KEY);
       if (!token) {
-        console.log('[Auth] No session token found');
         setUser(null);
         return;
       }
 
-      console.log('[Auth] Decoding session token...');
       const payload = decodeJwtPayload(token);
 
       if (!payload) {
-        console.log('[Auth] Invalid JWT format');
         localStorage.removeItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem(SESSION_USER_KEY);
         setUser(null);
         return;
       }
 
       if (isTokenExpired(payload)) {
-        console.log('[Auth] Token expired');
         localStorage.removeItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem(SESSION_USER_KEY);
         setUser(null);
         return;
       }
 
-      console.log('[Auth] JWT payload:', payload);
-      const hubUser = extractUserFromPayload(payload);
+      // Prefer stored user data (set during loginWithCredentials) — it carries the
+      // correct role from the Hub profiles table, which the JWT payload does NOT include.
+      const storedUserRaw = localStorage.getItem(SESSION_USER_KEY);
+      if (storedUserRaw) {
+        try {
+          const storedUser = JSON.parse(storedUserRaw) as HubUser;
+          setUser(storedUser);
+          return;
+        } catch {
+          localStorage.removeItem(SESSION_USER_KEY);
+        }
+      }
 
+      // Fallback: try to extract from JWT payload (works for Hub OAuth tokens that
+      // embed custom claims; Supabase JWTs only carry them in app_metadata)
+      const hubUser = extractUserFromPayload(payload);
       if (hubUser) {
-        console.log('[Auth] User authenticated from token:', hubUser.email);
         setUser(hubUser);
       } else {
-        console.log('[Auth] Could not extract user from token payload, trying proxy...');
         await checkAuthViaProxy(token);
       }
     } catch (error) {
@@ -162,15 +185,17 @@ export function useSatelliteAuth() {
       throw new Error(data.error ?? 'Invalid credentials');
     }
 
-    localStorage.setItem(SESSION_TOKEN_KEY, data.token);
-    setUser({
+    const hubUser: HubUser = {
       id: data.user.id,
       email: data.user.email,
       name: data.user.name,
       role: data.user.role,
       membership_slug: data.user.membership_slug,
       membership_name: data.user.membership_name,
-    });
+    };
+    localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+    localStorage.setItem(SESSION_USER_KEY, JSON.stringify(hubUser));
+    setUser(hubUser);
   };
 
   const login = () => {
@@ -180,6 +205,7 @@ export function useSatelliteAuth() {
 
   const logout = async () => {
     localStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(SESSION_USER_KEY);
     setUser(null);
     const currentUrl = window.location.href.split('?')[0];
     window.location.href = `${HUB_URL}/logout?redirect=${encodeURIComponent(currentUrl)}`;
