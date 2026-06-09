@@ -97,7 +97,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       setDataPoints(dataPointsData || []);
 
-      const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || []);
+      const thresholdOverrides = testData.anthropometry_snapshot?.threshold_overrides;
+      const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides);
       setResults(calculated);
 
       const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated);
@@ -575,7 +576,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       </div>
 
       <div className={showAdvanced ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-6'}>
-        <MetabolicProfile results={results} />
+        <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
         {!showAdvanced && (
           <TrainingZonesTable
             zonesData={results.zones_data}

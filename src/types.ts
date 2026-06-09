@@ -31,6 +31,12 @@ export interface Athlete {
   updated_at: string;
 }
 
+export interface ThresholdOverrides {
+  lt1_hr?: number | null;
+  lt2_hr?: number | null;
+  fatmax_hr?: number | null;
+}
+
 export interface AnthropometryData {
   weight_kg: number;
   height_cm: number;
@@ -39,6 +45,7 @@ export interface AnthropometryData {
   bodyFatPercent?: number;
   leanBodyMassKg?: number;
   source: AnthropometrySource;
+  threshold_overrides?: ThresholdOverrides;
 }
 
 export interface Test {

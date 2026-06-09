@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { TestDataPoint, Athlete, Test, AnthropometryData } from '../types';
+import { TestDataPoint, Athlete, Test, AnthropometryData, ThresholdOverrides } from '../types';
 
 interface EditRow {
   id: string;
@@ -69,6 +69,18 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
   const [error, setError] = useState<string | null>(null);
   const [showAnthro, setShowAnthro] = useState(!existingSnapshot || !existingSnapshot.weight_kg);
 
+  const existingOverrides = existingSnapshot?.threshold_overrides;
+  const [thresholds, setThresholds] = useState({
+    lt1_hr: existingOverrides?.lt1_hr != null ? String(existingOverrides.lt1_hr) : '',
+    lt2_hr: existingOverrides?.lt2_hr != null ? String(existingOverrides.lt2_hr) : '',
+    fatmax_hr: existingOverrides?.fatmax_hr != null ? String(existingOverrides.fatmax_hr) : '',
+  });
+
+  const updateThreshold = (field: string, value: string) => {
+    setThresholds(prev => ({ ...prev, [field]: value }));
+    setError(null);
+  };
+
   const updateRow = (id: string, field: keyof EditRow, value: string | boolean) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
     setError(null);
@@ -117,6 +129,15 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
       const bodyFatPercent = anthro.bodyFatPercent.trim() ? parseFloat(anthro.bodyFatPercent) : null;
       const leanBodyMassKg = bodyFatPercent ? weight * (1 - bodyFatPercent / 100) : null;
 
+      // Build threshold overrides (only include non-empty values)
+      const threshold_overrides: ThresholdOverrides = {};
+      const lt1Val = thresholds.lt1_hr.trim() ? parseInt(thresholds.lt1_hr) : null;
+      const lt2Val = thresholds.lt2_hr.trim() ? parseInt(thresholds.lt2_hr) : null;
+      const fatmaxVal = thresholds.fatmax_hr.trim() ? parseInt(thresholds.fatmax_hr) : null;
+      if (lt1Val && !isNaN(lt1Val)) threshold_overrides.lt1_hr = lt1Val;
+      if (lt2Val && !isNaN(lt2Val)) threshold_overrides.lt2_hr = lt2Val;
+      if (fatmaxVal && !isNaN(fatmaxVal)) threshold_overrides.fatmax_hr = fatmaxVal;
+
       const snapshot: AnthropometryData = {
         weight_kg: weight,
         height_cm: height,
@@ -125,6 +146,7 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
         bodyFatPercent: bodyFatPercent ?? undefined,
         leanBodyMassKg: leanBodyMassKg ?? undefined,
         source: existingSnapshot?.source ?? 'manual',
+        threshold_overrides: Object.keys(threshold_overrides).length > 0 ? threshold_overrides : undefined,
       };
 
       await supabase
@@ -416,6 +438,76 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
 
           <div className="text-xs text-gray-500 dark:text-gray-400">
             * Required fields. Optional fields left blank will be stored as empty.
+          </div>
+
+          {/* Threshold Overrides */}
+          <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-[#5A4E6B] dark:text-[#fdda36]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Threshold Overrides</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500 font-normal ml-2">
+                  Set HR values directly from gas analyzer — will override computed thresholds
+                </span>
+              </div>
+            </div>
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">LT1 (Aerobic) HR</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="60"
+                    max="220"
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                    value={thresholds.lt1_hr}
+                    onChange={e => updateThreshold('lt1_hr', e.target.value)}
+                    disabled={saving}
+                    placeholder="e.g. 140"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">bpm</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">LT2 (Lactate) HR</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="60"
+                    max="220"
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                    value={thresholds.lt2_hr}
+                    onChange={e => updateThreshold('lt2_hr', e.target.value)}
+                    disabled={saving}
+                    placeholder="e.g. 170"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">bpm</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">FatMax HR</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="60"
+                    max="220"
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                    value={thresholds.fatmax_hr}
+                    onChange={e => updateThreshold('fatmax_hr', e.target.value)}
+                    disabled={saving}
+                    placeholder="e.g. 120"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">bpm</span>
+                </div>
+              </div>
+            </div>
+            <div className="px-4 pb-3">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Leave blank to use automatic detection from lactate/VO2 data. Fill in values to override with gas-measured thresholds.
+              </p>
+            </div>
           </div>
         </div>
 

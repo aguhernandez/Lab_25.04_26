@@ -1,4 +1,4 @@
-import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics } from '../types';
+import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides } from '../types';
 import { buildTrainingZonesData, TrainingZonesData } from './trainingZones';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
@@ -101,7 +101,8 @@ function normalizeAthlete(athlete: Athlete): Athlete {
 
 export function calculatePhysiology(
   athlete: Athlete,
-  dataPoints: TestDataPoint[]
+  dataPoints: TestDataPoint[],
+  overrides?: ThresholdOverrides
 ): PhysiologyResults {
   const athlete_ = normalizeAthlete(athlete);
   const sortedPoints = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
@@ -127,7 +128,7 @@ export function calculatePhysiology(
     leanBodyMassKg
   );
 
-  const { lt1_hr, lt1_power, lt1_pace, lt1_vo2, lt1_percent_vo2max, lt1_percent_hrmax, lt1_confidence } = calculateLT1(
+  let { lt1_hr, lt1_power, lt1_pace, lt1_vo2, lt1_percent_vo2max, lt1_percent_hrmax, lt1_confidence } = calculateLT1(
     sortedPoints,
     has_lactate,
     vo2max,
@@ -135,7 +136,7 @@ export function calculatePhysiology(
     athlete.weight_kg || null
   );
 
-  const { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence } = calculateLT2(
+  let { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence } = calculateLT2(
     sortedPoints,
     has_lactate,
     vo2max,
@@ -143,11 +144,50 @@ export function calculatePhysiology(
     athlete.weight_kg || null
   );
 
-  const { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence } = calculateFatMax(
+  let { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence } = calculateFatMax(
     sortedPoints,
     vo2max,
     hrmax
   );
+
+  // Apply manual threshold overrides if provided
+  if (overrides) {
+    const weightKg = athlete.weight_kg || null;
+    if (overrides.lt1_hr) {
+      const closest = sortedPoints.reduce((prev, curr) =>
+        Math.abs(curr.heart_rate - overrides.lt1_hr!) < Math.abs(prev.heart_rate - overrides.lt1_hr!) ? curr : prev
+      );
+      lt1_hr = closest.heart_rate;
+      lt1_power = closest.power_watts || null;
+      lt1_pace = closest.speed_pace || null;
+      lt1_vo2 = closest.vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(closest.vo2_ml_kg_min, weightKg) : null;
+      lt1_percent_vo2max = vo2max && closest.vo2_ml_kg_min ? Math.round((closest.vo2_ml_kg_min / vo2max) * 1000) / 10 : null;
+      lt1_percent_hrmax = Math.round((closest.heart_rate / hrmax) * 1000) / 10;
+      lt1_confidence = 'measured';
+    }
+    if (overrides.lt2_hr) {
+      const closest = sortedPoints.reduce((prev, curr) =>
+        Math.abs(curr.heart_rate - overrides.lt2_hr!) < Math.abs(prev.heart_rate - overrides.lt2_hr!) ? curr : prev
+      );
+      lt2_hr = closest.heart_rate;
+      lt2_power = closest.power_watts || null;
+      lt2_pace = closest.speed_pace || null;
+      lt2_vo2 = closest.vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(closest.vo2_ml_kg_min, weightKg) : null;
+      lt2_percent_vo2max = vo2max && closest.vo2_ml_kg_min ? Math.round((closest.vo2_ml_kg_min / vo2max) * 1000) / 10 : null;
+      lt2_percent_hrmax = Math.round((closest.heart_rate / hrmax) * 1000) / 10;
+      lt2_confidence = 'measured';
+    }
+    if (overrides.fatmax_hr) {
+      const closest = sortedPoints.reduce((prev, curr) =>
+        Math.abs(curr.heart_rate - overrides.fatmax_hr!) < Math.abs(prev.heart_rate - overrides.fatmax_hr!) ? curr : prev
+      );
+      fatmax_hr = closest.heart_rate;
+      fatmax_power = closest.power_watts || null;
+      fatmax_pace = closest.speed_pace || null;
+      fatmax_vo2 = closest.vo2_ml_kg_min || null;
+      fatmax_confidence = 'measured';
+    }
+  }
 
   const { vam_kmh, pam_watts } = calculateVAMandPAM(sortedPoints, has_power, athlete.sport);
 
