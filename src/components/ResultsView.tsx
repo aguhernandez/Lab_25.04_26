@@ -143,7 +143,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           hr_drift_percent: calculated.hr_drift_percent,
           training_zones: calculated.training_zones,
           data_quality: calculated.data_quality,
-          advanced_metrics: advanced ?? null
+          advanced_metrics: advanced ?? null,
+          thresholds: calculated.thresholds ?? null
         });
 
       if (error) throw error;

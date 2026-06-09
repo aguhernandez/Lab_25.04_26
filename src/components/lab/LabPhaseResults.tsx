@@ -112,6 +112,15 @@ function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSes
     has_vo2: true,
     has_rer: false,
     has_pace: false,
+    thresholds: {
+      LT1: { hr: m.lt1_hr ?? null, vo2: m.lt1_vo2 ?? null, power: m.lt1_power ?? null, pace: null, percent_vo2max: m.vo2max && m.lt1_vo2 ? Math.round((m.lt1_vo2 / m.vo2max) * 100) : null, percent_hrmax: m.lt1_hr ? Math.round((m.lt1_hr / hrmax) * 100) : null, confidence: 'measured' },
+      LT2: { hr: m.lt2_hr ?? null, vo2: m.lt2_vo2 ?? null, power: m.lt2_power ?? null, pace: null, percent_vo2max: m.vo2max && m.lt2_vo2 ? Math.round((m.lt2_vo2 / m.vo2max) * 100) : null, percent_hrmax: m.lt2_hr ? Math.round((m.lt2_hr / hrmax) * 100) : null, confidence: 'measured' },
+      VT1: { hr: m.lt1_hr ?? null, vo2: m.lt1_vo2 ?? null, power: m.lt1_power ?? null, pace: null, percent_vo2max: m.vo2max && m.lt1_vo2 ? Math.round((m.lt1_vo2 / m.vo2max) * 100) : null, percent_hrmax: m.lt1_hr ? Math.round((m.lt1_hr / hrmax) * 100) : null, confidence: 'estimated' },
+      VT2: { hr: m.lt2_hr ?? null, vo2: m.lt2_vo2 ?? null, power: m.lt2_power ?? null, pace: null, percent_vo2max: m.vo2max && m.lt2_vo2 ? Math.round((m.lt2_vo2 / m.vo2max) * 100) : null, percent_hrmax: m.lt2_hr ? Math.round((m.lt2_hr / hrmax) * 100) : null, confidence: 'estimated' },
+      vt_source: 'estimated_from_lt',
+      delta_lt1_vt1_hr: null,
+      delta_lt2_vt2_hr: null,
+    },
   } as PhysiologyResults;
 }
 

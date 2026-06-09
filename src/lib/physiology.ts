@@ -1,4 +1,4 @@
-import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides } from '../types';
+import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
 import { buildTrainingZonesData, TrainingZonesData } from './trainingZones';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
@@ -74,6 +74,8 @@ export interface PhysiologyResults {
   has_vo2: boolean;
   has_rer: boolean;
   has_pace: boolean;
+  // Unified thresholds (LT + VT)
+  thresholds: UnifiedThresholds;
 }
 
 function normalizeDataPoints(dataPoints: TestDataPoint[]): TestDataPoint[] {
@@ -237,6 +239,15 @@ export function calculatePhysiology(
     athlete.weight_kg || null
   );
 
+  // Build unified thresholds (LT + VT)
+  const thresholds = buildUnifiedThresholds(
+    { lt1_hr, lt1_power, lt1_pace, lt1_vo2, lt1_percent_vo2max, lt1_percent_hrmax, lt1_confidence },
+    { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence },
+    overrides,
+    hrmax,
+    vo2max
+  );
+
   return {
     vo2max,
     vo2max_confidence,
@@ -279,13 +290,79 @@ export function calculatePhysiology(
     has_lactate,
     has_vo2,
     has_rer,
-    has_pace
+    has_pace,
+    thresholds
   };
 }
 
 function calculateLeanBodyMass(athlete: Athlete): number | null {
   if (!athlete.weight_kg || !athlete.body_fat_percent) return null;
   return athlete.weight_kg * (1 - athlete.body_fat_percent / 100);
+}
+
+function buildUnifiedThresholds(
+  lt1: { lt1_hr: number | null; lt1_power: number | null; lt1_pace: string | null; lt1_vo2: number | null; lt1_percent_vo2max: number | null; lt1_percent_hrmax: number | null; lt1_confidence: ConfidenceLevel },
+  lt2: { lt2_hr: number | null; lt2_power: number | null; lt2_pace: string | null; lt2_vo2: number | null; lt2_percent_vo2max: number | null; lt2_percent_hrmax: number | null; lt2_confidence: ConfidenceLevel },
+  overrides: ThresholdOverrides | undefined,
+  hrmax: number,
+  vo2max: number | null
+): UnifiedThresholds {
+  const vt_source: VTSource = overrides?.vt_source ?? 'estimated_from_lt';
+
+  const LT1: ThresholdData = {
+    hr: lt1.lt1_hr,
+    vo2: lt1.lt1_vo2,
+    power: lt1.lt1_power,
+    pace: lt1.lt1_pace,
+    percent_vo2max: lt1.lt1_percent_vo2max,
+    percent_hrmax: lt1.lt1_percent_hrmax,
+    confidence: lt1.lt1_confidence,
+  };
+
+  const LT2: ThresholdData = {
+    hr: lt2.lt2_hr,
+    vo2: lt2.lt2_vo2,
+    power: lt2.lt2_power,
+    pace: lt2.lt2_pace,
+    percent_vo2max: lt2.lt2_percent_vo2max,
+    percent_hrmax: lt2.lt2_percent_hrmax,
+    confidence: lt2.lt2_confidence,
+  };
+
+  let VT1: ThresholdData;
+  let VT2: ThresholdData;
+
+  if (vt_source === 'manual' && overrides) {
+    const vt1_hr = overrides.vt1_hr ?? null;
+    const vt2_hr = overrides.vt2_hr ?? null;
+    VT1 = {
+      hr: vt1_hr,
+      vo2: overrides.vt1_vo2 ?? null,
+      power: overrides.vt1_power ?? null,
+      pace: overrides.vt1_pace ?? null,
+      percent_vo2max: vo2max && overrides.vt1_vo2 ? Math.round((overrides.vt1_vo2 / vo2max) * 1000) / 10 : null,
+      percent_hrmax: vt1_hr ? Math.round((vt1_hr / hrmax) * 1000) / 10 : null,
+      confidence: 'manual',
+    };
+    VT2 = {
+      hr: vt2_hr,
+      vo2: overrides.vt2_vo2 ?? null,
+      power: overrides.vt2_power ?? null,
+      pace: overrides.vt2_pace ?? null,
+      percent_vo2max: vo2max && overrides.vt2_vo2 ? Math.round((overrides.vt2_vo2 / vo2max) * 1000) / 10 : null,
+      percent_hrmax: vt2_hr ? Math.round((vt2_hr / hrmax) * 1000) / 10 : null,
+      confidence: 'manual',
+    };
+  } else {
+    // Estimated from LT: VT1 = LT1, VT2 = LT2
+    VT1 = { ...LT1, confidence: 'estimated' };
+    VT2 = { ...LT2, confidence: 'estimated' };
+  }
+
+  const delta_lt1_vt1_hr = (LT1.hr != null && VT1.hr != null) ? VT1.hr - LT1.hr : null;
+  const delta_lt2_vt2_hr = (LT2.hr != null && VT2.hr != null) ? VT2.hr - LT2.hr : null;
+
+  return { LT1, LT2, VT1, VT2, vt_source, delta_lt1_vt1_hr, delta_lt2_vt2_hr };
 }
 
 function determineHRMax(

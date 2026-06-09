@@ -874,6 +874,45 @@ function renderThresholds(b: PDFBuilder, data: ReportData) {
     ], true);
   }
 
+  // Ventilatory Thresholds
+  if (r.thresholds) {
+    b.spacer(6);
+    b.paragraph('Ventilatory Thresholds (VT1 / VT2)');
+    b.spacer(2);
+    const vt = r.thresholds;
+    if (vt.VT1.hr) {
+      b.tableRow([
+        { value: 'VT1 (First Ventilatory)', width: 38 },
+        { value: val(vt.VT1.hr), width: 28 },
+        { value: val(vt.VT1.power), width: 28 },
+        { value: val(vt.VT1.vo2, 1), width: 38 },
+        { value: vt.VT1.percent_vo2max ? `${vt.VT1.percent_vo2max}%` : '—', width: 28 },
+        { value: vt.VT1.percent_hrmax ? `${vt.VT1.percent_hrmax}%` : '—', width: 22 },
+      ], true);
+    }
+    if (vt.VT2.hr) {
+      b.tableRow([
+        { value: 'VT2 (Second Ventilatory)', width: 38 },
+        { value: val(vt.VT2.hr), width: 28 },
+        { value: val(vt.VT2.power), width: 28 },
+        { value: val(vt.VT2.vo2, 1), width: 38 },
+        { value: vt.VT2.percent_vo2max ? `${vt.VT2.percent_vo2max}%` : '—', width: 28 },
+        { value: vt.VT2.percent_hrmax ? `${vt.VT2.percent_hrmax}%` : '—', width: 22 },
+      ], false);
+    }
+    b.spacer(3);
+    if (vt.delta_lt1_vt1_hr !== null || vt.delta_lt2_vt2_hr !== null) {
+      const d1 = vt.delta_lt1_vt1_hr !== null ? `${vt.delta_lt1_vt1_hr > 0 ? '+' : ''}${vt.delta_lt1_vt1_hr} bpm` : '—';
+      const d2 = vt.delta_lt2_vt2_hr !== null ? `${vt.delta_lt2_vt2_hr > 0 ? '+' : ''}${vt.delta_lt2_vt2_hr} bpm` : '—';
+      b.paragraph(`Delta LT1-VT1: ${d1} | Delta LT2-VT2: ${d2}`);
+    }
+    b.spacer(2);
+    b.paragraph('Lactate thresholds represent metabolic changes. Ventilatory thresholds represent respiratory changes. They are related but not necessarily identical.');
+    if (vt.vt_source === 'estimated_from_lt') {
+      b.paragraph('Note: VT values estimated from lactate thresholds. Not directly measured.');
+    }
+  }
+
   b.spacer(4);
 }
 

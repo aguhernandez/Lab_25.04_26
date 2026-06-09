@@ -35,6 +35,39 @@ export interface ThresholdOverrides {
   lt1_hr?: number | null;
   lt2_hr?: number | null;
   fatmax_hr?: number | null;
+  vt_source?: VTSource;
+  vt1_hr?: number | null;
+  vt1_vo2?: number | null;
+  vt1_power?: number | null;
+  vt1_pace?: string | null;
+  vt2_hr?: number | null;
+  vt2_vo2?: number | null;
+  vt2_power?: number | null;
+  vt2_pace?: string | null;
+}
+
+export type VTSource = 'estimated_from_lt' | 'manual' | 'direct_measurement';
+
+export type ThresholdConfidence = 'measured' | 'estimated' | 'inferred' | 'manual';
+
+export interface ThresholdData {
+  hr: number | null;
+  vo2: number | null;
+  power: number | null;
+  pace: string | null;
+  percent_vo2max: number | null;
+  percent_hrmax: number | null;
+  confidence: ThresholdConfidence;
+}
+
+export interface UnifiedThresholds {
+  LT1: ThresholdData;
+  LT2: ThresholdData;
+  VT1: ThresholdData;
+  VT2: ThresholdData;
+  vt_source: VTSource;
+  delta_lt1_vt1_hr: number | null;
+  delta_lt2_vt2_hr: number | null;
 }
 
 export interface AnthropometryData {

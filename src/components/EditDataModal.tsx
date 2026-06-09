@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { TestDataPoint, Athlete, Test, AnthropometryData, ThresholdOverrides } from '../types';
+import { TestDataPoint, Athlete, Test, AnthropometryData, ThresholdOverrides, VTSource } from '../types';
 
 interface EditRow {
   id: string;
@@ -76,8 +76,25 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
     fatmax_hr: existingOverrides?.fatmax_hr != null ? String(existingOverrides.fatmax_hr) : '',
   });
 
+  const [vtSource, setVtSource] = useState<VTSource>(existingOverrides?.vt_source ?? 'estimated_from_lt');
+  const [vtFields, setVtFields] = useState({
+    vt1_hr: existingOverrides?.vt1_hr != null ? String(existingOverrides.vt1_hr) : '',
+    vt1_vo2: existingOverrides?.vt1_vo2 != null ? String(existingOverrides.vt1_vo2) : '',
+    vt1_power: existingOverrides?.vt1_power != null ? String(existingOverrides.vt1_power) : '',
+    vt1_pace: existingOverrides?.vt1_pace ?? '',
+    vt2_hr: existingOverrides?.vt2_hr != null ? String(existingOverrides.vt2_hr) : '',
+    vt2_vo2: existingOverrides?.vt2_vo2 != null ? String(existingOverrides.vt2_vo2) : '',
+    vt2_power: existingOverrides?.vt2_power != null ? String(existingOverrides.vt2_power) : '',
+    vt2_pace: existingOverrides?.vt2_pace ?? '',
+  });
+
   const updateThreshold = (field: string, value: string) => {
     setThresholds(prev => ({ ...prev, [field]: value }));
+    setError(null);
+  };
+
+  const updateVtField = (field: string, value: string) => {
+    setVtFields(prev => ({ ...prev, [field]: value }));
     setError(null);
   };
 
@@ -137,6 +154,25 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
       if (lt1Val && !isNaN(lt1Val)) threshold_overrides.lt1_hr = lt1Val;
       if (lt2Val && !isNaN(lt2Val)) threshold_overrides.lt2_hr = lt2Val;
       if (fatmaxVal && !isNaN(fatmaxVal)) threshold_overrides.fatmax_hr = fatmaxVal;
+
+      // VT source and manual VT fields
+      threshold_overrides.vt_source = vtSource;
+      if (vtSource === 'manual') {
+        const v1hr = vtFields.vt1_hr.trim() ? parseInt(vtFields.vt1_hr) : null;
+        const v1vo2 = vtFields.vt1_vo2.trim() ? parseFloat(vtFields.vt1_vo2) : null;
+        const v1power = vtFields.vt1_power.trim() ? parseInt(vtFields.vt1_power) : null;
+        const v2hr = vtFields.vt2_hr.trim() ? parseInt(vtFields.vt2_hr) : null;
+        const v2vo2 = vtFields.vt2_vo2.trim() ? parseFloat(vtFields.vt2_vo2) : null;
+        const v2power = vtFields.vt2_power.trim() ? parseInt(vtFields.vt2_power) : null;
+        if (v1hr && !isNaN(v1hr)) threshold_overrides.vt1_hr = v1hr;
+        if (v1vo2 && !isNaN(v1vo2)) threshold_overrides.vt1_vo2 = v1vo2;
+        if (v1power && !isNaN(v1power)) threshold_overrides.vt1_power = v1power;
+        if (vtFields.vt1_pace.trim()) threshold_overrides.vt1_pace = vtFields.vt1_pace.trim();
+        if (v2hr && !isNaN(v2hr)) threshold_overrides.vt2_hr = v2hr;
+        if (v2vo2 && !isNaN(v2vo2)) threshold_overrides.vt2_vo2 = v2vo2;
+        if (v2power && !isNaN(v2power)) threshold_overrides.vt2_power = v2power;
+        if (vtFields.vt2_pace.trim()) threshold_overrides.vt2_pace = vtFields.vt2_pace.trim();
+      }
 
       const snapshot: AnthropometryData = {
         weight_kg: weight,
@@ -507,6 +543,123 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
               <p className="text-xs text-gray-400 dark:text-gray-500">
                 Leave blank to use automatic detection from lactate/VO2 data. Fill in values to override with gas-measured thresholds.
               </p>
+            </div>
+          </div>
+
+          {/* Ventilatory Thresholds */}
+          <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                </svg>
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Ventilatory Thresholds (VT1 / VT2)</span>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">VT Source</label>
+                <div className="flex flex-wrap gap-3">
+                  {([
+                    { value: 'estimated_from_lt' as VTSource, label: 'Estimated from LT' },
+                    { value: 'manual' as VTSource, label: 'Manual Entry' },
+                    { value: 'direct_measurement' as VTSource, label: 'Direct Measurement (future)' },
+                  ]).map(opt => (
+                    <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="vt_source"
+                        value={opt.value}
+                        checked={vtSource === opt.value}
+                        onChange={() => setVtSource(opt.value)}
+                        disabled={saving || opt.value === 'direct_measurement'}
+                        className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className={`text-sm ${opt.value === 'direct_measurement' ? 'text-gray-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                        {opt.label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {vtSource === 'estimated_from_lt' && (
+                <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+                  VT values estimated from lactate thresholds. Not directly measured. VT1 = LT1, VT2 = LT2.
+                </div>
+              )}
+
+              {vtSource === 'manual' && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">VT1 (First Ventilatory Threshold)</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">HR</label>
+                        <div className="relative">
+                          <input type="number" min="60" max="220" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10" value={vtFields.vt1_hr} onChange={e => updateVtField('vt1_hr', e.target.value)} disabled={saving} placeholder="140" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">bpm</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">VO2</label>
+                        <div className="relative">
+                          <input type="number" step="0.1" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-16" value={vtFields.vt1_vo2} onChange={e => updateVtField('vt1_vo2', e.target.value)} disabled={saving} placeholder="30" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">ml/kg</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Power</label>
+                        <div className="relative">
+                          <input type="number" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-6" value={vtFields.vt1_power} onChange={e => updateVtField('vt1_power', e.target.value)} disabled={saving} placeholder="180" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">W</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Pace</label>
+                        <input type="text" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent" value={vtFields.vt1_pace} onChange={e => updateVtField('vt1_pace', e.target.value)} disabled={saving} placeholder="5:30/km" />
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">VT2 (Second Ventilatory Threshold)</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">HR</label>
+                        <div className="relative">
+                          <input type="number" min="60" max="220" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10" value={vtFields.vt2_hr} onChange={e => updateVtField('vt2_hr', e.target.value)} disabled={saving} placeholder="170" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">bpm</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">VO2</label>
+                        <div className="relative">
+                          <input type="number" step="0.1" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-16" value={vtFields.vt2_vo2} onChange={e => updateVtField('vt2_vo2', e.target.value)} disabled={saving} placeholder="50" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">ml/kg</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Power</label>
+                        <div className="relative">
+                          <input type="number" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-6" value={vtFields.vt2_power} onChange={e => updateVtField('vt2_power', e.target.value)} disabled={saving} placeholder="250" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">W</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Pace</label>
+                        <input type="text" className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent" value={vtFields.vt2_pace} onChange={e => updateVtField('vt2_pace', e.target.value)} disabled={saving} placeholder="4:30/km" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {vtSource === 'direct_measurement' && (
+                <div className="px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400">
+                  Direct measurement from gas exchange data (VE, VCO2, VE/VO2, VE/VCO2, RER) will be supported in a future update. Architecture is prepared.
+                </div>
+              )}
             </div>
           </div>
         </div>

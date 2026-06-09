@@ -1,26 +1,29 @@
 import { PhysiologyResults, ConfidenceLevel } from '../lib/physiology';
+import { ThresholdConfidence } from '../types';
 
 interface MetabolicProfileProps {
   results: PhysiologyResults;
   onEdit?: () => void;
 }
 
-function getConfidenceBadge(confidence: ConfidenceLevel) {
-  const colors = {
+function getConfidenceBadge(confidence: ConfidenceLevel | ThresholdConfidence) {
+  const colors: Record<string, string> = {
     measured: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
     estimated: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
-    inferred: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+    inferred: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+    manual: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400',
   };
 
-  const labels = {
+  const labels: Record<string, string> = {
     measured: 'MEASURED',
     estimated: 'ESTIMATED',
-    inferred: 'INFERRED'
+    inferred: 'INFERRED',
+    manual: 'MANUAL',
   };
 
   return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[confidence]}`}>
-      {labels[confidence]}
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[confidence] || colors.inferred}`}>
+      {labels[confidence] || confidence.toUpperCase()}
     </span>
   );
 }
@@ -197,6 +200,42 @@ export default function MetabolicProfile({ results, onEdit }: MetabolicProfilePr
           </div>
         )}
 
+        {/* Threshold Comparison: LT vs VT */}
+        {results.thresholds && (
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+            <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
+              Threshold Comparison (LT vs VT)
+            </h4>
+            <div className="space-y-3">
+              <ThresholdRow
+                ltLabel="LT1"
+                vtLabel="VT1"
+                ltHr={results.thresholds.LT1.hr}
+                vtHr={results.thresholds.VT1.hr}
+                ltConfidence={results.thresholds.LT1.confidence}
+                vtConfidence={results.thresholds.VT1.confidence}
+                delta={results.thresholds.delta_lt1_vt1_hr}
+              />
+              <ThresholdRow
+                ltLabel="LT2"
+                vtLabel="VT2"
+                ltHr={results.thresholds.LT2.hr}
+                vtHr={results.thresholds.VT2.hr}
+                ltConfidence={results.thresholds.LT2.confidence}
+                vtConfidence={results.thresholds.VT2.confidence}
+                delta={results.thresholds.delta_lt2_vt2_hr}
+              />
+            </div>
+            <div className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+              {results.thresholds.vt_source === 'estimated_from_lt'
+                ? 'VT values estimated from lactate thresholds (VT = LT).'
+                : results.thresholds.vt_source === 'manual'
+                ? 'VT values manually entered from gas exchange analysis.'
+                : 'VT values from direct measurement.'}
+            </div>
+          </div>
+        )}
+
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
           <div className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
             Qualitative Assessment
@@ -238,6 +277,50 @@ export default function MetabolicProfile({ results, onEdit }: MetabolicProfilePr
               ? 'Thresholds estimated from VO₂ and HR data.'
               : 'Thresholds estimated from heart rate progression and physiological models.'}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThresholdRow({ ltLabel, vtLabel, ltHr, vtHr, ltConfidence, vtConfidence, delta }: {
+  ltLabel: string;
+  vtLabel: string;
+  ltHr: number | null;
+  vtHr: number | null;
+  ltConfidence: ThresholdConfidence;
+  vtConfidence: ThresholdConfidence;
+  delta: number | null;
+}) {
+  const getDeltaStatus = (d: number | null) => {
+    if (d === null || d === 0) return { label: 'Matching', color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' };
+    if (Math.abs(d) <= 5) return { label: 'Slight Difference', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' };
+    return { label: 'Large Difference', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' };
+  };
+
+  const status = getDeltaStatus(delta);
+
+  return (
+    <div className={`rounded-lg px-4 py-3 ${status.bg} border border-gray-100 dark:border-gray-700`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="text-sm">
+            <span className="font-semibold text-gray-700 dark:text-gray-300">{ltLabel}</span>
+            <span className="text-gray-900 dark:text-white font-bold ml-2">{ltHr ?? '—'} bpm</span>
+            <span className="ml-1">{getConfidenceBadge(ltConfidence)}</span>
+          </div>
+          <span className="text-gray-300 dark:text-gray-600">|</span>
+          <div className="text-sm">
+            <span className="font-semibold text-gray-700 dark:text-gray-300">{vtLabel}</span>
+            <span className="text-gray-900 dark:text-white font-bold ml-2">{vtHr ?? '—'} bpm</span>
+            <span className="ml-1">{getConfidenceBadge(vtConfidence)}</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className={`text-sm font-semibold ${status.color}`}>
+            {delta !== null && delta !== 0 ? `${delta > 0 ? '+' : ''}${delta} bpm` : '0 bpm'}
+          </div>
+          <div className={`text-xs ${status.color}`}>{status.label}</div>
         </div>
       </div>
     </div>

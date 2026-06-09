@@ -51,6 +51,27 @@ export interface MetabolicLabJSON {
       percent_HRmax: number | null;
       confidence: string;
     };
+    VT1: {
+      HR_bpm: number | null;
+      VO2_ml_kg_min: number | null;
+      Power_W: number | null;
+      Pace: string | null;
+      percent_VO2max: number | null;
+      percent_HRmax: number | null;
+      confidence: string;
+    };
+    VT2: {
+      HR_bpm: number | null;
+      VO2_ml_kg_min: number | null;
+      Power_W: number | null;
+      Pace: string | null;
+      percent_VO2max: number | null;
+      percent_HRmax: number | null;
+      confidence: string;
+    };
+    vt_source: string;
+    delta_LT1_VT1_bpm: number | null;
+    delta_LT2_VT2_bpm: number | null;
   };
   FatMax: {
     HR_bpm: number | null;
@@ -220,6 +241,7 @@ function generateVO2maxData(results: PhysiologyResults) {
 }
 
 function generateThresholds(results: PhysiologyResults) {
+  const t = results.thresholds;
   return {
     LT1: {
       VO2_L_min: results.lt1_vo2,
@@ -236,7 +258,28 @@ function generateThresholds(results: PhysiologyResults) {
       percent_VO2max: results.lt2_percent_vo2max,
       percent_HRmax: results.lt2_percent_hrmax,
       confidence: results.lt2_confidence
-    }
+    },
+    VT1: {
+      HR_bpm: t.VT1.hr,
+      VO2_ml_kg_min: t.VT1.vo2,
+      Power_W: t.VT1.power,
+      Pace: t.VT1.pace,
+      percent_VO2max: t.VT1.percent_vo2max,
+      percent_HRmax: t.VT1.percent_hrmax,
+      confidence: t.VT1.confidence
+    },
+    VT2: {
+      HR_bpm: t.VT2.hr,
+      VO2_ml_kg_min: t.VT2.vo2,
+      Power_W: t.VT2.power,
+      Pace: t.VT2.pace,
+      percent_VO2max: t.VT2.percent_vo2max,
+      percent_HRmax: t.VT2.percent_hrmax,
+      confidence: t.VT2.confidence
+    },
+    vt_source: t.vt_source,
+    delta_LT1_VT1_bpm: t.delta_lt1_vt1_hr,
+    delta_LT2_VT2_bpm: t.delta_lt2_vt2_hr
   };
 }
 

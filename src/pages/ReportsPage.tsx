@@ -166,6 +166,15 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
       has_vo2: !!(p.vo2max_relative_ml_kg_min),
       has_rer: false,
       has_pace: !!(p.lt1_pace || p.lt2_pace),
+      thresholds: {
+        LT1: { hr: p.lt1_hr, vo2: null, power: p.lt1_power, pace: p.lt1_pace, percent_vo2max: p.lt1_percent_vo2max, percent_hrmax: p.lt1_percent_hrmax, confidence: (p.lt1_confidence as 'measured' | 'estimated') || 'estimated' },
+        LT2: { hr: p.lt2_hr, vo2: null, power: p.lt2_power, pace: p.lt2_pace, percent_vo2max: p.lt2_percent_vo2max, percent_hrmax: p.lt2_percent_hrmax, confidence: (p.lt2_confidence as 'measured' | 'estimated') || 'estimated' },
+        VT1: { hr: p.lt1_hr, vo2: null, power: p.lt1_power, pace: p.lt1_pace, percent_vo2max: p.lt1_percent_vo2max, percent_hrmax: p.lt1_percent_hrmax, confidence: 'estimated' },
+        VT2: { hr: p.lt2_hr, vo2: null, power: p.lt2_power, pace: p.lt2_pace, percent_vo2max: p.lt2_percent_vo2max, percent_hrmax: p.lt2_percent_hrmax, confidence: 'estimated' },
+        vt_source: 'estimated_from_lt',
+        delta_lt1_vt1_hr: null,
+        delta_lt2_vt2_hr: null,
+      },
     } as PhysiologyResults;
   };
 
@@ -241,6 +250,15 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
           has_vo2: !!(r.vo2max),
           has_rer: false,
           has_pace: false,
+          thresholds: (r.thresholds as PhysiologyResults['thresholds']) ?? {
+            LT1: { hr: r.lt1_hr as number ?? null, vo2: null, power: r.lt1_power as number ?? null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'estimated' },
+            LT2: { hr: r.lt2_hr as number ?? null, vo2: null, power: r.lt2_power as number ?? null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'estimated' },
+            VT1: { hr: r.lt1_hr as number ?? null, vo2: null, power: r.lt1_power as number ?? null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'estimated' },
+            VT2: { hr: r.lt2_hr as number ?? null, vo2: null, power: r.lt2_power as number ?? null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'estimated' },
+            vt_source: 'estimated_from_lt',
+            delta_lt1_vt1_hr: null,
+            delta_lt2_vt2_hr: null,
+          },
         } as PhysiologyResults;
         advancedMetrics = (r.advanced_metrics as AdvancedMetrics) ?? null;
       }
