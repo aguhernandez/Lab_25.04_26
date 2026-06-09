@@ -18,6 +18,7 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
   const [searchingHub, setSearchingHub] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [athletesWithMeasurements, setAthletesWithMeasurements] = useState<Set<string>>(new Set());
   const hubEnabled = isHubLinkingEnabled();
 
   useEffect(() => {
@@ -59,7 +60,19 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
       }
       const { data, error } = await query;
       if (error) throw error;
-      setAthletes(data || []);
+      const athleteList = data || [];
+      setAthletes(athleteList);
+
+      // Check which athletes have actual anthropometry measurements
+      if (athleteList.length > 0) {
+        const ids = athleteList.map(a => a.id);
+        const { data: measurements } = await supabase
+          .from('anthropometry_measurements')
+          .select('athlete_id')
+          .in('athlete_id', ids);
+        const withData = new Set((measurements || []).map(m => m.athlete_id));
+        setAthletesWithMeasurements(withData);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load athletes');
     } finally {
@@ -211,7 +224,7 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredAthletes.map(athlete => {
               const age = calculateAge(athlete.date_of_birth);
-              const hasData = !!(athlete.weight_kg && athlete.height_cm);
+              const hasData = athletesWithMeasurements.has(athlete.id) || !!(athlete.weight_kg && athlete.height_cm);
               return (
                 <div
                   key={athlete.id}
