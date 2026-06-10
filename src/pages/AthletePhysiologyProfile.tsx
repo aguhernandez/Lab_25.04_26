@@ -13,6 +13,7 @@ interface ProfileData {
   aerobic: { vo2max?: number | null; lt1_hr?: number | null; lt2_hr?: number | null; hrmax?: number | null } | null;
   neuromuscular: { hasData: boolean } | null;
   hydration: { sweatRate?: number | null; lastSession?: string | null } | null;
+  biochemical: { globalScore?: number | null; testDate?: string | null; flagCount?: number } | null;
 }
 
 function ProfileCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
@@ -33,7 +34,7 @@ export default function AthletePhysiologyProfile({ preselectedAthlete }: Physiol
   const { profile } = useAuth();
   const isAthlete = profile?.role === 'athlete';
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(preselectedAthlete ?? null);
-  const [data, setData] = useState<ProfileData>({ bodyComposition: null, aerobic: null, neuromuscular: null, hydration: null });
+  const [data, setData] = useState<ProfileData>({ bodyComposition: null, aerobic: null, neuromuscular: null, hydration: null, biochemical: null });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -54,11 +55,12 @@ export default function AthletePhysiologyProfile({ preselectedAthlete }: Physiol
   const loadData = async (athleteId: string) => {
     setLoading(true);
     try {
-      const [anthroRes, physioRes, fvRes, hydRes] = await Promise.all([
+      const [anthroRes, physioRes, fvRes, hydRes, bioRes] = await Promise.all([
         supabase.from('athlete_anthropometry_profiles').select('body_fat_percent, muscle_mass_kg, weight_kg').eq('athlete_id', athleteId).maybeSingle(),
         supabase.from('athlete_physiology_profiles').select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, hrmax').eq('athlete_id', athleteId).maybeSingle(),
         supabase.from('force_velocity_sessions').select('id').eq('athlete_id', athleteId).limit(1),
         supabase.from('hydration_sessions').select('sweat_rate_l_h, session_date').eq('athlete_id', athleteId).order('session_date', { ascending: false }).limit(1),
+        supabase.from('biochemical_tests').select('global_score, test_date, health_flags').eq('athlete_id', athleteId).order('test_date', { ascending: false }).limit(1),
       ]);
 
       setData({
@@ -66,6 +68,7 @@ export default function AthletePhysiologyProfile({ preselectedAthlete }: Physiol
         aerobic: physioRes.data ? { vo2max: physioRes.data.vo2max_relative_ml_kg_min, lt1_hr: physioRes.data.lt1_hr, lt2_hr: physioRes.data.lt2_hr, hrmax: physioRes.data.hrmax } : null,
         neuromuscular: { hasData: !!(fvRes.data && fvRes.data.length > 0) },
         hydration: hydRes.data && hydRes.data.length > 0 ? { sweatRate: hydRes.data[0].sweat_rate_l_h, lastSession: hydRes.data[0].session_date } : null,
+        biochemical: bioRes.data && bioRes.data.length > 0 ? { globalScore: bioRes.data[0].global_score, testDate: bioRes.data[0].test_date, flagCount: Array.isArray(bioRes.data[0].health_flags) ? bioRes.data[0].health_flags.length : 0 } : null,
       });
     } catch (err) {
       console.error('Error loading profile data:', err);
@@ -159,9 +162,17 @@ export default function AthletePhysiologyProfile({ preselectedAthlete }: Physiol
           </ProfileCard>
 
           <ProfileCard title="Biochemical Status" icon={<svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>}>
-            <div className="text-sm text-gray-400 dark:text-gray-500">
-              <p>No data yet</p>
-            </div>
+            {data.biochemical ? (
+              <div className="grid grid-cols-2 gap-4">
+                <MetricValue label="Global Score" value={data.biochemical.globalScore?.toFixed(0)} unit="/100" />
+                <MetricValue label="Flags" value={data.biochemical.flagCount} unit="" />
+                <MetricValue label="Last Test" value={data.biochemical.testDate ? new Date(data.biochemical.testDate).toLocaleDateString() : null} />
+              </div>
+            ) : (
+              <div className="text-sm text-gray-400 dark:text-gray-500">
+                <p>No data yet</p>
+              </div>
+            )}
           </ProfileCard>
         </div>
       )}

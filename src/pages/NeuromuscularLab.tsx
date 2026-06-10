@@ -1,25 +1,27 @@
 import { useState } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 import ForceVelocityLab from './ForceVelocityLab';
 
 type NeuromuscularTab = 'force-velocity' | 'jump-testing' | 'sprint-testing' | 'strength-testing' | 'vbt' | 'fatigue-monitoring';
 
-const TABS: { id: NeuromuscularTab; label: string }[] = [
-  { id: 'force-velocity', label: 'Force Velocity Profile' },
-  { id: 'jump-testing', label: 'Jump Testing' },
-  { id: 'sprint-testing', label: 'Sprint Testing' },
-  { id: 'strength-testing', label: 'Strength Testing' },
-  { id: 'vbt', label: 'Velocity Based Training' },
-  { id: 'fatigue-monitoring', label: 'Fatigue Monitoring' },
+const TABS: { id: NeuromuscularTab; labelKey: string }[] = [
+  { id: 'force-velocity', labelKey: 'neuro.tab.forceVelocity' },
+  { id: 'jump-testing', labelKey: 'neuro.tab.jumpTesting' },
+  { id: 'sprint-testing', labelKey: 'neuro.tab.sprintTesting' },
+  { id: 'strength-testing', labelKey: 'neuro.tab.strengthTesting' },
+  { id: 'vbt', labelKey: 'neuro.tab.vbt' },
+  { id: 'fatigue-monitoring', labelKey: 'neuro.tab.fatigueMonitoring' },
 ];
 
 export default function NeuromuscularLab() {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<NeuromuscularTab>('force-velocity');
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-heading font-bold text-gray-900 dark:text-white">Neuromuscular Lab</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Neuromuscular assessment and performance profiling</p>
+        <h1 className="text-2xl font-heading font-bold text-gray-900 dark:text-white">{t('neuro.title')}</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('neuro.subtitle')}</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-2">
@@ -33,7 +35,7 @@ export default function NeuromuscularLab() {
                 : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
             }`}
           >
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>
@@ -47,7 +49,7 @@ export default function NeuromuscularLab() {
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-            {TABS.find(t => t.id === activeTab)?.label}
+            {t(TABS.find(tb => tb.id === activeTab)?.labelKey || '')}
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400"></p>
         </div>
