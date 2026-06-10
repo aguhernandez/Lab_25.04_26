@@ -50,6 +50,7 @@ export default function AdminDashboard() {
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [sportDist, setSportDist] = useState<SportDist[]>([]);
   const [recentTests, setRecentTests] = useState<RecentTest[]>([]);
+  const [readinessDist, setReadinessDist] = useState<{ green: number; yellow: number; red: number }>({ green: 0, yellow: 0, red: 0 });
   const [loading, setLoading] = useState(true);
 
   const tr: Record<string, Record<string, string>> = {
@@ -144,6 +145,24 @@ export default function AdminDashboard() {
 
       const athleteMap = Object.fromEntries((athleteNamesRes.data || []).map(a => [a.id, a.name]));
       setRecentTests((recentRes.data || []).map(test => ({ ...test, athleteName: athleteMap[test.athlete_id] })));
+
+      // Load readiness distribution
+      const { data: readinessData } = await supabase
+        .from('athlete_readiness_snapshots')
+        .select('athlete_id, global_readiness')
+        .order('computed_at', { ascending: false });
+      if (readinessData) {
+        const seen = new Set<string>();
+        let green = 0, yellow = 0, red = 0;
+        for (const r of readinessData) {
+          if (seen.has(r.athlete_id)) continue;
+          seen.add(r.athlete_id);
+          if (r.global_readiness >= 75) green++;
+          else if (r.global_readiness >= 50) yellow++;
+          else red++;
+        }
+        setReadinessDist({ green, yellow, red });
+      }
     } catch {
     } finally {
       setLoading(false);
@@ -209,6 +228,29 @@ export default function AdminDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Population Readiness Distribution */}
+      {(readinessDist.green + readinessDist.yellow + readinessDist.red) > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
+            {language === 'es' ? 'Distribución de Disposición' : 'Readiness Distribution'}
+          </h2>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center border border-green-200 dark:border-green-800">
+              <p className="text-2xl font-bold text-green-700 dark:text-green-400">{readinessDist.green}</p>
+              <p className="text-xs text-green-600 dark:text-green-500 mt-1">{language === 'es' ? 'Óptimo (75+)' : 'Optimal (75+)'}</p>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center border border-amber-200 dark:border-amber-800">
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{readinessDist.yellow}</p>
+              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">{language === 'es' ? 'Monitorear (50-74)' : 'Monitor (50-74)'}</p>
+            </div>
+            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center border border-red-200 dark:border-red-800">
+              <p className="text-2xl font-bold text-red-700 dark:text-red-400">{readinessDist.red}</p>
+              <p className="text-xs text-red-600 dark:text-red-500 mt-1">{language === 'es' ? 'Atención (<50)' : 'Attention (<50)'}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">

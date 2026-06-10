@@ -16,6 +16,8 @@ interface AthleteSummary {
   muscleMass?: number | null;
   bmi?: number | null;
   hasAnthro: boolean;
+  readiness?: number | null;
+  limitingFactor?: string | null;
 }
 
 interface MonthlyActivity {
@@ -88,7 +90,7 @@ export default function CoachDashboard() {
 
       const athleteIds = athleteList.map(a => a.id);
 
-      const [testsRes, resultsRes, anthroRes, hydrationCountRes, fvCountRes] = await Promise.all([
+      const [testsRes, resultsRes, anthroRes, hydrationCountRes, fvCountRes, readinessRes] = await Promise.all([
         supabase
           .from('tests')
           .select('id, athlete_id, test_date, status')
@@ -110,11 +112,17 @@ export default function CoachDashboard() {
           .from('force_velocity_sessions')
           .select('id', { count: 'exact', head: true })
           .in('athlete_id', athleteIds),
+        supabase
+          .from('athlete_readiness_snapshots')
+          .select('athlete_id, global_readiness, limiting_factor')
+          .in('athlete_id', athleteIds)
+          .order('computed_at', { ascending: false }),
       ]);
 
       const allTests = testsRes.data || [];
       const allResults = resultsRes.data || [];
       const allAnthro = anthroRes.data || [];
+      const allReadiness = readinessRes.data || [];
       setTotalTests(allTests.length);
       setLabCounts({
         anthropometry: allAnthro.length,
@@ -131,6 +139,7 @@ export default function CoachDashboard() {
           ? Math.floor((now - new Date(lastTest.test_date).getTime()) / 86400000)
           : undefined;
         const anthro = allAnthro.find(a => a.athlete_id === athlete.id);
+        const latestReadiness = allReadiness.find(r => r.athlete_id === athlete.id);
 
         return {
           id: athlete.id,
@@ -144,6 +153,8 @@ export default function CoachDashboard() {
           muscleMass: anthro?.muscle_mass_kg ?? null,
           bmi: anthro?.bmi ?? null,
           hasAnthro: !!anthro,
+          readiness: latestReadiness?.global_readiness ?? null,
+          limitingFactor: latestReadiness?.limiting_factor ?? null,
         };
       });
 
@@ -232,6 +243,34 @@ export default function CoachDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Athlete Readiness Comparison */}
+      {athletes.some(a => a.readiness != null) && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
+            {language === 'es' ? 'Disposición del Plantel' : 'Team Readiness'}
+          </h2>
+          <div className="space-y-2">
+            {athletes
+              .filter(a => a.readiness != null)
+              .sort((a, b) => (b.readiness ?? 0) - (a.readiness ?? 0))
+              .map(a => (
+                <div key={a.id} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-600 dark:text-gray-400 w-28 truncate">{a.name}</span>
+                  <div className="flex-1 h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        (a.readiness ?? 0) >= 75 ? 'bg-green-500' : (a.readiness ?? 0) >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${a.readiness ?? 0}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-bold text-gray-900 dark:text-white w-8 text-right">{a.readiness}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">

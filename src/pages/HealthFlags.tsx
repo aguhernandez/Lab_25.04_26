@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Athlete } from '../types';
 import { HealthFlag, FlagStatus } from '../lib/biochemistry';
+import { EngineHealthFlag, DomainStatus } from '../lib/physiologyEngine';
 import AthleteSelector from '../components/AthleteSelector';
 
 export default function HealthFlags() {
@@ -12,6 +13,7 @@ export default function HealthFlags() {
   const isAthlete = profile?.role === 'athlete';
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
   const [flags, setFlags] = useState<HealthFlag[]>([]);
+  const [engineFlags, setEngineFlags] = useState<EngineHealthFlag[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -31,18 +33,33 @@ export default function HealthFlags() {
 
   const loadFlags = async (athleteId: string) => {
     setLoading(true);
-    const { data } = await supabase
-      .from('biochemical_tests')
-      .select('health_flags, test_date')
-      .eq('athlete_id', athleteId)
-      .order('test_date', { ascending: false })
-      .limit(1);
+    const [bioRes, engineRes] = await Promise.all([
+      supabase
+        .from('biochemical_tests')
+        .select('health_flags, test_date')
+        .eq('athlete_id', athleteId)
+        .order('test_date', { ascending: false })
+        .limit(1),
+      supabase
+        .from('athlete_readiness_snapshots')
+        .select('health_flags')
+        .eq('athlete_id', athleteId)
+        .order('computed_at', { ascending: false })
+        .limit(1),
+    ]);
 
-    if (data && data.length > 0 && Array.isArray(data[0].health_flags)) {
-      setFlags(data[0].health_flags as HealthFlag[]);
+    if (bioRes.data && bioRes.data.length > 0 && Array.isArray(bioRes.data[0].health_flags)) {
+      setFlags(bioRes.data[0].health_flags as HealthFlag[]);
     } else {
       setFlags([]);
     }
+
+    if (engineRes.data && engineRes.data.length > 0 && Array.isArray(engineRes.data[0].health_flags)) {
+      setEngineFlags(engineRes.data[0].health_flags as EngineHealthFlag[]);
+    } else {
+      setEngineFlags([]);
+    }
+
     setLoading(false);
   };
 
@@ -89,7 +106,9 @@ export default function HealthFlags() {
         <>
           <div className="grid grid-cols-3 gap-4">
             {(['green', 'yellow', 'red'] as FlagStatus[]).map(status => {
-              const count = flags.filter(f => f.status === status).length;
+              const bioCount = flags.filter(f => f.status === status).length;
+              const engCount = engineFlags.filter(f => f.status === (status as DomainStatus)).length;
+              const count = bioCount + engCount;
               const cfg = statusConfig[status];
               return (
                 <div key={status} className={`rounded-xl border p-4 ${cfg.bg}`}>
@@ -101,6 +120,34 @@ export default function HealthFlags() {
               );
             })}
           </div>
+
+          {/* Engine-level physiological flags */}
+          {engineFlags.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">{t('healthFlags.fromEngine')}</h3>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{selectedAthlete?.name}</p>
+              <div className="space-y-2">
+                {engineFlags.map(flag => (
+                  <div
+                    key={flag.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg border ${
+                      flag.status === 'red'
+                        ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
+                        : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800'
+                    }`}
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                      flag.status === 'red' ? 'bg-red-500' : 'bg-amber-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{t(flag.labelKey)}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{flag.domain}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {flags.length > 0 ? (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
@@ -138,7 +185,7 @@ export default function HealthFlags() {
                 ))}
               </div>
             </div>
-          ) : (
+          ) : engineFlags.length === 0 ? (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 text-center">
               <div className="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -148,7 +195,7 @@ export default function HealthFlags() {
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{t('healthFlags.noFlags')}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">{t('healthFlags.noFlagsDesc')}</p>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>

@@ -50,6 +50,15 @@ interface HydrationSummary {
   sweat_rate_l_h?: number | null;
 }
 
+interface ReadinessSnapshot {
+  global_readiness: number | null;
+  limiting_factor: string | null;
+  aerobic_score: number | null;
+  neuromuscular_score: number | null;
+  biological_health_score: number | null;
+  hydration_stress_score: number | null;
+}
+
 export default function AthleteDashboard() {
   const { profile } = useAuth();
   const { language } = useLanguage();
@@ -57,6 +66,7 @@ export default function AthleteDashboard() {
   const [physiology, setPhysiology] = useState<PhysiologyProfile | null>(null);
   const [anthro, setAnthro] = useState<AnthroProfile | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary[]>([]);
+  const [readiness, setReadiness] = useState<ReadinessSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
   const tr: Record<string, Record<string, string>> = {
@@ -85,6 +95,17 @@ export default function AthleteDashboard() {
     noAnthro: { en: 'No body composition data. Ask your coach to apply an anthropometry.', es: 'Sin datos de composición corporal. Pedile a tu entrenador que aplique una antropometría.' },
     lastUpdate: { en: 'Last update', es: 'Última actualización' },
     noProfile: { en: 'No physiological profile yet. Complete a lab session to see your data here.', es: 'Sin perfil fisiológico aún. Completá una sesión de laboratorio para ver tus datos aquí.' },
+    readiness: { en: 'Athlete Readiness', es: 'Disposición del Atleta' },
+    aerobic: { en: 'Aerobic', es: 'Aeróbico' },
+    neuromuscular: { en: 'Neuromuscular', es: 'Neuromuscular' },
+    biological: { en: 'Biological', es: 'Biológico' },
+    hydrationDomain: { en: 'Hydration', es: 'Hidratación' },
+    limitingFactor: { en: 'Limiting factor', es: 'Factor limitante' },
+    limit_aerobic_limitation: { en: 'Aerobic capacity decline', es: 'Descenso de capacidad aeróbica' },
+    limit_neuromuscular_fatigue: { en: 'Neuromuscular fatigue', es: 'Fatiga neuromuscular' },
+    limit_iron_transport: { en: 'Iron/oxygen transport limitation', es: 'Limitación de transporte de hierro/oxígeno' },
+    limit_hormonal_stress: { en: 'Hormonal stress response', es: 'Respuesta de estrés hormonal' },
+    limit_hydration_heat: { en: 'Hydration/heat stress', es: 'Estrés hídrico/calórico' },
   };
 
   const t = (key: string) => tr[key]?.[language] ?? tr[key]?.en ?? key;
@@ -106,7 +127,7 @@ export default function AthleteDashboard() {
       if (!athleteData) { setLoading(false); return; }
       setAthlete(athleteData);
 
-      const [physRes, anthroRes, hydrationRes] = await Promise.all([
+      const [physRes, anthroRes, hydrationRes, readinessRes] = await Promise.all([
         supabase
           .from('athlete_physiology_profiles')
           .select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, pam_watts, vam_kmh, hrmax, physiology_zones, last_test_date, history')
@@ -123,11 +144,18 @@ export default function AthleteDashboard() {
           .eq('athlete_id', athleteData.id)
           .order('session_date', { ascending: false })
           .limit(6),
+        supabase
+          .from('athlete_readiness_snapshots')
+          .select('global_readiness, limiting_factor, aerobic_score, neuromuscular_score, biological_health_score, hydration_stress_score')
+          .eq('athlete_id', athleteData.id)
+          .order('computed_at', { ascending: false })
+          .limit(1),
       ]);
 
       setPhysiology(physRes.data || null);
       setAnthro(anthroRes.data || null);
       setHydration(hydrationRes.data || []);
+      setReadiness(readinessRes.data?.[0] || null);
     } catch { }
     finally { setLoading(false); }
   }
@@ -216,6 +244,48 @@ export default function AthleteDashboard() {
               </div>
             ))}
           </div>
+
+          {readiness && readiness.global_readiness != null && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
+                {t('readiness')}
+              </h2>
+              <div className="flex items-center gap-6">
+                <div className="relative w-20 h-20">
+                  <svg className="transform -rotate-90" width={80} height={80}>
+                    <circle cx={40} cy={40} r={35} fill="none" stroke="currentColor" strokeWidth={5} className="text-gray-200 dark:text-gray-700" />
+                    <circle cx={40} cy={40} r={35} fill="none"
+                      stroke={readiness.global_readiness >= 75 ? '#22c55e' : readiness.global_readiness >= 50 ? '#f59e0b' : '#ef4444'}
+                      strokeWidth={5} strokeDasharray={220} strokeDashoffset={220 - (readiness.global_readiness / 100) * 220} strokeLinecap="round" />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-xl font-bold text-gray-900 dark:text-white">
+                    {readiness.global_readiness}
+                  </span>
+                </div>
+                <div className="flex-1 grid grid-cols-2 gap-2">
+                  {[
+                    { label: t('aerobic'), score: readiness.aerobic_score },
+                    { label: t('neuromuscular'), score: readiness.neuromuscular_score },
+                    { label: t('biological'), score: readiness.biological_health_score },
+                    { label: t('hydrationDomain'), score: readiness.hydration_stress_score },
+                  ].map(d => (
+                    <div key={d.label} className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        (d.score ?? 0) >= 75 ? 'bg-green-500' : (d.score ?? 0) >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                      }`} />
+                      <span className="text-xs text-gray-600 dark:text-gray-400">{d.label}</span>
+                      <span className="text-xs font-bold text-gray-900 dark:text-white ml-auto">{d.score ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {readiness.limiting_factor && readiness.limiting_factor !== 'none' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-3 font-medium">
+                  {t('limitingFactor')}: {t(`limit_${readiness.limiting_factor}`)}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">

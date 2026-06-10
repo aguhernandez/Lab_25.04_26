@@ -840,6 +840,45 @@ const translations: Translations = {
   'healthFlags.noFlagsDesc': { en: 'Health flags will appear here when generated from laboratory assessments.', es: 'Las alertas de salud aparecerán aquí cuando se generen a partir de evaluaciones de laboratorio.' },
   'healthFlags.fromBiochemical': { en: 'From biochemical analysis', es: 'Del análisis bioquímico' },
   'healthFlags.selectAthlete': { en: 'Select an athlete to view their health flags', es: 'Seleccioná un atleta para ver sus alertas de salud' },
+  'healthFlags.fromEngine': { en: 'Physiological integration flags', es: 'Alertas de integración fisiológica' },
+
+  // Physiology Engine
+  'engine.readinessScore': { en: 'Athlete Readiness', es: 'Disposición del Atleta' },
+  'engine.limitingFactor': { en: 'Limiting Factor', es: 'Factor Limitante' },
+  'engine.noData': { en: 'No data available', es: 'Sin datos disponibles' },
+  'engine.noDataAvailable': { en: 'Insufficient data to compute readiness. Complete lab assessments to generate your physiological profile.', es: 'Datos insuficientes para calcular la disposición. Completá evaluaciones de laboratorio para generar tu perfil fisiológico.' },
+  'engine.flags': { en: 'Physiological Flags', es: 'Alertas Fisiológicas' },
+
+  'engine.domain.aerobic': { en: 'Aerobic System', es: 'Sistema Aeróbico' },
+  'engine.domain.neuromuscular': { en: 'Neuromuscular System', es: 'Sistema Neuromuscular' },
+  'engine.domain.biological': { en: 'Biological Health', es: 'Salud Biológica' },
+  'engine.domain.hydration': { en: 'Hydration & Env. Stress', es: 'Hidratación y Estrés Ambiental' },
+
+  'engine.interp.aerobic.good': { en: 'Strong aerobic capacity with efficient lactate clearance.', es: 'Capacidad aeróbica sólida con eficiente aclaramiento de lactato.' },
+  'engine.interp.aerobic.moderate': { en: 'Moderate aerobic development. LT stability could improve.', es: 'Desarrollo aeróbico moderado. La estabilidad del umbral puede mejorar.' },
+  'engine.interp.aerobic.low': { en: 'Reduced aerobic efficiency. Priority development area.', es: 'Eficiencia aeróbica reducida. Área de desarrollo prioritaria.' },
+  'engine.interp.neuro.good': { en: 'Excellent neuromuscular function and power output.', es: 'Excelente función neuromuscular y producción de potencia.' },
+  'engine.interp.neuro.moderate': { en: 'Adequate neuromuscular capacity with room for improvement.', es: 'Capacidad neuromuscular adecuada con margen de mejora.' },
+  'engine.interp.neuro.low': { en: 'Neuromuscular fatigue or detraining detected.', es: 'Fatiga neuromuscular o desentrenamiento detectado.' },
+  'engine.interp.bio.good': { en: 'Healthy biological markers supporting performance.', es: 'Marcadores biológicos saludables que apoyan el rendimiento.' },
+  'engine.interp.bio.moderate': { en: 'Some markers require monitoring. No critical issues.', es: 'Algunos marcadores requieren monitoreo. Sin problemas críticos.' },
+  'engine.interp.bio.low': { en: 'Significant biological stress detected. Review markers.', es: 'Estrés biológico significativo detectado. Revisar marcadores.' },
+  'engine.interp.hydration.good': { en: 'Well hydrated with appropriate thermoregulatory response.', es: 'Bien hidratado con respuesta termorreguladora apropiada.' },
+  'engine.interp.hydration.moderate': { en: 'Mild hydration or heat stress indicators present.', es: 'Indicadores leves de estrés hídrico o calórico presentes.' },
+  'engine.interp.hydration.low': { en: 'Significant hydration deficit or heat stress detected.', es: 'Déficit hídrico significativo o estrés por calor detectado.' },
+
+  'engine.limit.none': { en: 'No limiting factors identified', es: 'Sin factores limitantes identificados' },
+  'engine.limit.aerobicLimitation': { en: 'Aerobic capacity decline', es: 'Descenso de capacidad aeróbica' },
+  'engine.limit.neuromuscularFatigue': { en: 'Neuromuscular fatigue accumulation', es: 'Acumulación de fatiga neuromuscular' },
+  'engine.limit.ironTransport': { en: 'Iron/oxygen transport limitation', es: 'Limitación de transporte de hierro/oxígeno' },
+  'engine.limit.hormonalStress': { en: 'Hormonal stress response', es: 'Respuesta de estrés hormonal' },
+  'engine.limit.hydrationHeat': { en: 'Hydration/heat stress', es: 'Estrés hídrico/calórico' },
+
+  'engine.flag.aerobicDecline': { en: 'Aerobic capacity decline detected', es: 'Descenso de capacidad aeróbica detectado' },
+  'engine.flag.neuromuscularFatigue': { en: 'Neuromuscular fatigue accumulation', es: 'Acumulación de fatiga neuromuscular' },
+  'engine.flag.biologicalStress': { en: 'Biological stress markers elevated', es: 'Marcadores de estrés biológico elevados' },
+  'engine.flag.hydrationImbalance': { en: 'Hydration imbalance under stress', es: 'Desequilibrio hídrico bajo estrés' },
+  'engine.flag.systemicFatigue': { en: 'General systemic fatigue state', es: 'Estado de fatiga sistémica general' },
 };
 
 let _currentLanguage: Language = 'en';
