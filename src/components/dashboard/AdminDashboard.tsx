@@ -12,6 +12,10 @@ interface AdminStats {
   totalTests: number;
   testsThisMonth: number;
   testsLastMonth: number;
+  anthropometryCount: number;
+  hydrationCount: number;
+  fvCount: number;
+  coachCount: number;
 }
 
 interface MonthlyData {
@@ -42,7 +46,7 @@ const SPORT_COLORS: Record<string, string> = {
 export default function AdminDashboard() {
   const { profile } = useAuth();
   const { language } = useLanguage();
-  const [stats, setStats] = useState<AdminStats>({ totalAthletes: 0, totalTests: 0, testsThisMonth: 0, testsLastMonth: 0 });
+  const [stats, setStats] = useState<AdminStats>({ totalAthletes: 0, totalTests: 0, testsThisMonth: 0, testsLastMonth: 0, anthropometryCount: 0, hydrationCount: 0, fvCount: 0, coachCount: 0 });
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [sportDist, setSportDist] = useState<SportDist[]>([]);
   const [recentTests, setRecentTests] = useState<RecentTest[]>([]);
@@ -83,13 +87,17 @@ export default function AdminDashboard() {
       const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
       const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0).toISOString();
 
-      const [athletesRes, testsCountRes, thisMonthRes, lastMonthRes, recentRes, athleteNamesRes] = await Promise.all([
+      const [athletesRes, testsCountRes, thisMonthRes, lastMonthRes, recentRes, athleteNamesRes, anthroCountRes, hydrationCountRes, fvCountRes, coachCountRes] = await Promise.all([
         supabase.from('athletes').select('id, sport'),
         supabase.from('tests').select('id', { count: 'exact', head: true }),
         supabase.from('tests').select('id', { count: 'exact', head: true }).gte('created_at', startOfMonth),
         supabase.from('tests').select('id', { count: 'exact', head: true }).gte('created_at', startOfLastMonth).lte('created_at', endOfLastMonth),
         supabase.from('tests').select('id, test_date, sport, athlete_id').eq('status', 'completed').order('test_date', { ascending: false }).limit(8),
         supabase.from('athletes').select('id, name'),
+        supabase.from('anthropometry_measurements').select('id', { count: 'exact', head: true }),
+        supabase.from('hydration_sessions').select('id', { count: 'exact', head: true }),
+        supabase.from('force_velocity_sessions').select('id', { count: 'exact', head: true }),
+        supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'coach'),
       ]);
 
       setStats({
@@ -97,6 +105,10 @@ export default function AdminDashboard() {
         totalTests: testsCountRes.count || 0,
         testsThisMonth: thisMonthRes.count || 0,
         testsLastMonth: lastMonthRes.count || 0,
+        anthropometryCount: anthroCountRes.count || 0,
+        hydrationCount: hydrationCountRes.count || 0,
+        fvCount: fvCountRes.count || 0,
+        coachCount: coachCountRes.count || 0,
       });
 
       const sportCounts: Record<string, number> = { cycling: 0, running: 0, triathlon: 0, swimming: 0 };
@@ -178,6 +190,22 @@ export default function AdminDashboard() {
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">{card.label}</p>
             <p className="text-3xl font-bold text-gray-900 dark:text-white">{card.value}</p>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Lab Section Breakdown */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {[
+          { label: 'Anthropometry', value: stats.anthropometryCount, icon: '📏' },
+          { label: 'Metabolic', value: stats.totalTests, icon: '🧪' },
+          { label: 'Hydration & Heat', value: stats.hydrationCount, icon: '💧' },
+          { label: 'Neuromuscular', value: stats.fvCount, icon: '⚡' },
+          { label: language === 'es' ? 'Entrenadores' : 'Coaches', value: stats.coachCount, icon: '👤' },
+        ].map((card, i) => (
+          <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{card.label}</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{card.value}</p>
           </div>
         ))}
       </div>

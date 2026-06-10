@@ -29,6 +29,7 @@ export default function CoachDashboard() {
   const [athletes, setAthletes] = useState<AthleteSummary[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyActivity[]>([]);
   const [totalTests, setTotalTests] = useState(0);
+  const [labCounts, setLabCounts] = useState({ anthropometry: 0, hydration: 0, neuromuscular: 0 });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'physiology' | 'anthropometry'>('physiology');
 
@@ -87,7 +88,7 @@ export default function CoachDashboard() {
 
       const athleteIds = athleteList.map(a => a.id);
 
-      const [testsRes, resultsRes, anthroRes] = await Promise.all([
+      const [testsRes, resultsRes, anthroRes, hydrationCountRes, fvCountRes] = await Promise.all([
         supabase
           .from('tests')
           .select('id, athlete_id, test_date, status')
@@ -101,12 +102,25 @@ export default function CoachDashboard() {
           .from('athlete_anthropometry_profiles')
           .select('athlete_id, body_fat_percent, muscle_mass_kg, bmi')
           .in('athlete_id', athleteIds),
+        supabase
+          .from('hydration_sessions')
+          .select('id', { count: 'exact', head: true })
+          .in('athlete_id', athleteIds),
+        supabase
+          .from('force_velocity_sessions')
+          .select('id', { count: 'exact', head: true })
+          .in('athlete_id', athleteIds),
       ]);
 
       const allTests = testsRes.data || [];
       const allResults = resultsRes.data || [];
       const allAnthro = anthroRes.data || [];
       setTotalTests(allTests.length);
+      setLabCounts({
+        anthropometry: allAnthro.length,
+        hydration: hydrationCountRes.count || 0,
+        neuromuscular: fvCountRes.count || 0,
+      });
 
       const now = Date.now();
       const summaries: AthleteSummary[] = athleteList.map(athlete => {
@@ -200,6 +214,21 @@ export default function CoachDashboard() {
               {card.value}
             </p>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Lab Evaluations Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: language === 'es' ? 'Lab Metabólico' : 'Metabolic Lab', value: totalTests },
+          { label: language === 'es' ? 'Antropometría' : 'Anthropometry', value: labCounts.anthropometry },
+          { label: language === 'es' ? 'Hidratación' : 'Hydration & Heat', value: labCounts.hydration },
+          { label: language === 'es' ? 'Neuromuscular' : 'Neuromuscular', value: labCounts.neuromuscular },
+        ].map((card, i) => (
+          <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{card.label}</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{card.value}</p>
           </div>
         ))}
       </div>

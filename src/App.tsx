@@ -21,7 +21,10 @@ import AnthropometryPage from './pages/AnthropometryPage';
 import AnthropometryDashboard from './pages/AnthropometryDashboard';
 import EnvironmentalPhysiology from './pages/EnvironmentalPhysiology';
 import LabWorkflow from './components/lab/LabWorkflow';
-import ForceVelocityLab from './pages/ForceVelocityLab';
+import NeuromuscularLab from './pages/NeuromuscularLab';
+import BiochemicalLab from './pages/BiochemicalLab';
+import AthletePhysiologyProfile from './pages/AthletePhysiologyProfile';
+import HealthFlags from './pages/HealthFlags';
 import ReferencePopulationsAdmin from './components/ReferencePopulationsAdmin';
 import ReportsPage from './pages/ReportsPage';
 import SimulationPage from './pages/SimulationPage';
@@ -29,7 +32,7 @@ import { Athlete } from './types';
 import PublicLanding from './components/PublicLanding';
 import LoginModal from './components/auth/LoginModal';
 
-type View = 'dashboard' | 'athlete-selector' | 'create-athlete' | 'edit-athlete' | 'athletes' | 'athlete-detail' | 'test' | 'results' | 'admin' | 'users' | 'settings' | 'profile' | 'my-evaluations' | 'evaluations' | 'anthropometry' | 'anthropometry-dashboard' | 'environmental-physiology' | 'lab' | 'force-velocity' | 'reference-populations' | 'reports' | 'simulation';
+type View = 'dashboard' | 'athlete-selector' | 'create-athlete' | 'edit-athlete' | 'athletes' | 'athlete-detail' | 'test' | 'results' | 'admin' | 'users' | 'settings' | 'profile' | 'my-evaluations' | 'evaluations' | 'anthropometry' | 'anthropometry-dashboard' | 'environmental-physiology' | 'lab' | 'neuromuscular' | 'biochemical' | 'physiology-profile' | 'health-flags' | 'reference-populations' | 'reports' | 'simulation';
 
 function AppContent() {
   const { user, profile, loading, hasToken, isDevMode } = useAuth();
@@ -154,7 +157,10 @@ function AppContent() {
       '/anthropometry-dashboard': 'anthropometry-dashboard',
       '/environmental-physiology': 'environmental-physiology',
       '/lab': 'lab',
-      '/force-velocity': 'force-velocity',
+      '/neuromuscular': 'neuromuscular',
+      '/biochemical': 'biochemical',
+      '/physiology-profile': 'physiology-profile',
+      '/health-flags': 'health-flags',
       '/reference-populations': 'reference-populations',
       '/reports': 'reports',
       '/simulation': 'simulation',
@@ -286,7 +292,13 @@ function AppContent() {
 
           {currentView === 'environmental-physiology' && <EnvironmentalPhysiology />}
 
-          {currentView === 'force-velocity' && <ForceVelocityLab />}
+          {currentView === 'neuromuscular' && <NeuromuscularLab />}
+
+          {currentView === 'biochemical' && <BiochemicalLab />}
+
+          {currentView === 'physiology-profile' && <AthletePhysiologyProfile />}
+
+          {currentView === 'health-flags' && <HealthFlags />}
 
           {currentView === 'reference-populations' && <ReferencePopulationsAdmin />}
 
