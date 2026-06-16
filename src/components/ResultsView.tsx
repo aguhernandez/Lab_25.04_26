@@ -7,6 +7,7 @@ import type { ReportData } from '../lib/reportGenerator';
 import { generateCompleteJSON, exportJSONToFile, getJSONSummary, MetabolicLabJSON } from '../lib/jsonGenerator';
 import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones, lockZonesToLab, AthleteTrainingZones } from '../lib/physiologyProfile';
 import type { ZoneDefinition } from '../lib/trainingZones';
+import type { PreTestData } from '../lib/labSession';
 import MetabolicProfile from './MetabolicProfile';
 import TrainingZonesTable from './TrainingZonesTable';
 import AdvancedData from './AdvancedData';
@@ -44,6 +45,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [lockingZones, setLockingZones] = useState(false);
   const [showReportBuilder, setShowReportBuilder] = useState(false);
   const [showEditData, setShowEditData] = useState(false);
+  const [preTestData, setPreTestData] = useState<PreTestData | null>(null);
 
   useEffect(() => {
     loadTestData();
@@ -63,6 +65,24 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       if (!testData) throw new Error('Test not found');
 
       setTest(testData);
+
+      // Extract pre-test environmental data from the tests row
+      const td = testData as Record<string, unknown>;
+      setPreTestData({
+        anthropometry: {} as any,
+        test_time: (td.test_time as string) ?? null,
+        city: (td.city as string) ?? null,
+        elevation_m: (td.elevation_m as number) ?? null,
+        outdoor_weather: (td.outdoor_weather as any) ?? null,
+        indoor_temp_c: (td.indoor_temp_c as number) ?? null,
+        indoor_humidity_percent: (td.indoor_humidity_percent as number) ?? null,
+        indoor_conditions_notes: (td.indoor_conditions_notes as string) ?? null,
+        usg: null,
+        hr_rest: null,
+        hrv_ms: null,
+        basal_lactate: null,
+        rmr_kcal: null,
+      });
 
       const { data: athleteData, error: athleteError } = await supabase
         .from('athletes')
@@ -270,6 +290,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       anthropometryMeasurement: null,
       kerrResults: null,
       hydrationSessions: [],
+      preTestData,
     };
     return (
       <div className="space-y-8">

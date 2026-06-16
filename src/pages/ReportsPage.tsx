@@ -11,6 +11,7 @@ import type { AnthropometryMeasurement, KerrResults } from '../types/anthropomet
 import type { ReportData, ReportSection, ReportType } from '../lib/reportGenerator';
 import { buildTrainingZonesData } from '../lib/trainingZones';
 import type { AthletePhysiologyProfile } from '../lib/physiologyProfile';
+import type { PreTestData } from '../lib/labSession';
 
 interface TestRecord {
   id: string;
@@ -297,6 +298,26 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
     const anthropometryMeasurement = (anthroRows?.[0] as AnthropometryMeasurement) ?? null;
     const kerrResults = (kerrRow?.[0] as KerrResults) ?? null;
 
+    let preTestData: PreTestData | null = null;
+    if (test) {
+      const td = test as unknown as Record<string, unknown>;
+      preTestData = {
+        anthropometry: {} as any,
+        test_time: (td.test_time as string) ?? null,
+        city: (td.city as string) ?? null,
+        elevation_m: (td.elevation_m as number) ?? null,
+        outdoor_weather: (td.outdoor_weather as any) ?? null,
+        indoor_temp_c: (td.indoor_temp_c as number) ?? null,
+        indoor_humidity_percent: (td.indoor_humidity_percent as number) ?? null,
+        indoor_conditions_notes: (td.indoor_conditions_notes as string) ?? null,
+        usg: null,
+        hr_rest: null,
+        hrv_ms: null,
+        basal_lactate: null,
+        rmr_kcal: null,
+      };
+    }
+
     setReportData({
       athlete,
       test,
@@ -306,6 +327,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
       anthropometryMeasurement,
       kerrResults,
       hydrationSessions: hydrationRows ?? [],
+      preTestData,
     });
   };
 

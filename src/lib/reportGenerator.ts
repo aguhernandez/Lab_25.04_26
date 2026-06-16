@@ -1976,71 +1976,158 @@ function renderTestContext(b: PDFBuilder, data: ReportData) {
   const p = data.preTestData;
   const test = data.test;
 
-  const hasContext = p?.test_time || p?.city || p?.elevation_m != null ||
-    p?.outdoor_weather || p?.indoor_temp_c != null || p?.indoor_humidity_percent != null || p?.indoor_conditions_notes;
+  b.sectionHeader('TEST CONDITIONS / CONDICIONES DEL TEST');
 
-  if (!hasContext && !test?.test_date) return;
+  const na = 'N/A';
+  const fmt = (v: number | null | undefined, decimals = 1) =>
+    v != null ? v.toFixed(decimals) : na;
 
-  b.sectionHeader('CONDICIONES DEL TEST');
+  const rows: Array<{ label: string; value: string }> = [];
 
-  const contextItems: Array<{ label: string; value: string; unit?: string }> = [];
-
+  // Date & time
   if (test?.test_date) {
     const dateStr = new Date(test.test_date).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
-    contextItems.push({ label: 'Fecha', value: dateStr });
-  }
-  if (p?.test_time) {
-    contextItems.push({ label: 'Hora del test', value: p.test_time });
-  }
-  if (p?.city) {
-    contextItems.push({ label: 'Ubicación', value: p.city });
-  }
-  if (p?.elevation_m != null) {
-    contextItems.push({ label: 'Altitud', value: String(p.elevation_m), unit: 'm.s.n.m.' });
+    rows.push({ label: 'Test Date / Fecha del Test', value: dateStr });
+  } else {
+    rows.push({ label: 'Test Date / Fecha del Test', value: na });
   }
 
-  if (contextItems.length > 0) {
-    b.metricGrid(contextItems, Math.min(3, contextItems.length));
+  rows.push({
+    label: 'Test Time / Hora del Test',
+    value: p?.test_time ?? na,
+  });
+
+  rows.push({
+    label: 'Location / Ubicación',
+    value: p?.city ?? na,
+  });
+
+  rows.push({
+    label: 'Altitude / Altitud',
+    value: p?.elevation_m != null ? `${p.elevation_m} m.s.l. / m.s.n.m.` : na,
+  });
+
+  // Outdoor conditions
+  rows.push({
+    label: 'Outdoor Temperature / Temperatura Exterior',
+    value: p?.outdoor_weather?.temperature_c != null
+      ? `${fmt(p.outdoor_weather.temperature_c)} °C`
+      : na,
+  });
+
+  rows.push({
+    label: 'Outdoor Humidity / Humedad Exterior',
+    value: p?.outdoor_weather?.humidity_percent != null
+      ? `${p.outdoor_weather.humidity_percent} %`
+      : na,
+  });
+
+  rows.push({
+    label: 'Atmospheric Pressure / Presión Atmosférica',
+    value: p?.outdoor_weather?.pressure_hpa != null
+      ? `${fmt(p.outdoor_weather.pressure_hpa, 0)} hPa`
+      : na,
+  });
+
+  rows.push({
+    label: 'Wind Speed / Velocidad del Viento',
+    value: p?.outdoor_weather?.wind_speed_kmh != null
+      ? `${fmt(p.outdoor_weather.wind_speed_kmh)} km/h`
+      : na,
+  });
+
+  rows.push({
+    label: 'Weather Conditions / Condiciones Climáticas',
+    value: p?.outdoor_weather?.description ?? na,
+  });
+
+  // Indoor conditions
+  rows.push({
+    label: 'Indoor Temperature / Temperatura Interior',
+    value: p?.indoor_temp_c != null ? `${fmt(p.indoor_temp_c)} °C` : na,
+  });
+
+  rows.push({
+    label: 'Indoor Humidity / Humedad Interior',
+    value: p?.indoor_humidity_percent != null ? `${p.indoor_humidity_percent} %` : na,
+  });
+
+  if (p?.indoor_conditions_notes) {
+    rows.push({
+      label: 'Lab Notes / Notas del Laboratorio',
+      value: p.indoor_conditions_notes,
+    });
   }
 
-  if (p?.outdoor_weather) {
-    const ow = p.outdoor_weather;
-    b.spacer(2);
-    b.label('Condiciones meteorológicas exteriores');
+  // Pre-test athlete state
+  rows.push({
+    label: 'Resting HR / FC en Reposo',
+    value: p?.hr_rest != null ? `${p.hr_rest} bpm` : na,
+  });
 
-    const owItems: Array<{ label: string; value: string; unit?: string }> = [];
-    if (ow.temperature_c != null) owItems.push({ label: 'Temperatura exterior', value: ow.temperature_c.toFixed(1), unit: '°C' });
-    if (ow.humidity_percent != null) owItems.push({ label: 'Humedad exterior', value: String(ow.humidity_percent), unit: '%' });
-    if (ow.wind_speed_kmh != null) owItems.push({ label: 'Viento', value: ow.wind_speed_kmh.toFixed(1), unit: 'km/h' });
-    if (ow.pressure_hpa != null) owItems.push({ label: 'Presión', value: ow.pressure_hpa.toFixed(0), unit: 'hPa' });
+  rows.push({
+    label: 'HRV',
+    value: p?.hrv_ms != null ? `${p.hrv_ms} ms` : na,
+  });
 
-    if (owItems.length > 0) {
-      b.metricGrid(owItems, Math.min(4, owItems.length));
+  rows.push({
+    label: 'Basal Lactate / Lactato Basal',
+    value: p?.basal_lactate != null ? `${fmt(p.basal_lactate)} mmol/L` : na,
+  });
+
+  rows.push({
+    label: 'Urine Specific Gravity / Gravedad Urinaria',
+    value: p?.usg != null ? fmt(p.usg, 3) : na,
+  });
+
+  // Render as two-column table
+  const colLabel = b.cw * 0.52;
+
+  // Table header row
+  b.checkPage(10 + rows.length * 7);
+  const [hr, hg, hb] = hexToRgb(C.dark);
+  b.doc.setFillColor(hr, hg, hb);
+  b.doc.rect(b.ml, b.y, b.cw, 7, 'F');
+  b.doc.setFontSize(7);
+  b.doc.setFont('helvetica', 'bold');
+  b.doc.setTextColor(255, 255, 255);
+  b.doc.text('PARAMETER / PARÁMETRO', b.ml + 3, b.y + 4.8);
+  b.doc.text('VALUE / VALOR', b.ml + colLabel + 3, b.y + 4.8);
+  b.y += 7;
+
+  rows.forEach((row, i) => {
+    const rowH = 7;
+    b.checkPage(rowH + 4);
+    if (i % 2 === 0) {
+      const [br2, bg2, bb2] = hexToRgb(C.gray100);
+      b.doc.setFillColor(br2, bg2, bb2);
+    } else {
+      b.doc.setFillColor(255, 255, 255);
     }
-    if (ow.description) {
-      b.paragraph(`Condición: ${ow.description}`);
-    }
-  }
+    b.doc.rect(b.ml, b.y, b.cw, rowH, 'F');
 
-  const hasIndoor = p?.indoor_temp_c != null || p?.indoor_humidity_percent != null || p?.indoor_conditions_notes;
-  if (hasIndoor) {
-    b.spacer(2);
-    b.label('Condiciones internas del laboratorio');
+    // Divider line
+    b.doc.setDrawColor(220, 220, 220);
+    b.doc.setLineWidth(0.2);
+    b.doc.line(b.ml, b.y + rowH, b.ml + b.cw, b.y + rowH);
+    b.doc.line(b.ml + colLabel, b.y, b.ml + colLabel, b.y + rowH);
 
-    const indoorItems: Array<{ label: string; value: string; unit?: string }> = [];
-    if (p?.indoor_temp_c != null) indoorItems.push({ label: 'Temperatura Lab', value: p.indoor_temp_c.toFixed(1), unit: '°C' });
-    if (p?.indoor_humidity_percent != null) indoorItems.push({ label: 'Humedad Lab', value: String(p.indoor_humidity_percent), unit: '%' });
+    b.doc.setFontSize(7.5);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.dark);
+    b.doc.text(row.label, b.ml + 3, b.y + 4.8);
 
-    if (indoorItems.length > 0) {
-      b.metricGrid(indoorItems, Math.min(3, indoorItems.length));
-    }
-    if (p?.indoor_conditions_notes) {
-      b.paragraph(p.indoor_conditions_notes);
-    }
-  }
+    b.doc.setFont('helvetica', 'normal');
+    const isNA = row.value === na;
+    b.textColor(isNA ? C.gray500 : C.dark);
+    b.doc.text(row.value, b.ml + colLabel + 3, b.y + 4.8);
+
+    b.y += rowH;
+  });
 
   b.spacer(4);
 }
+
 
 function renderEnergySubstrate(b: PDFBuilder, data: ReportData) {
   b.sectionHeader('% ENERGY BY SUBSTRATE');
