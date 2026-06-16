@@ -170,11 +170,28 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   }
 
   if (showManualForm) {
+    const prePopulated = profile ? {
+      vo2max_relative_ml_kg_min: profile.vo2max_relative_ml_kg_min,
+      vo2max_absolute_l_min: profile.vo2max_absolute_l_min,
+      hrmax: profile.hrmax,
+      lt1_hr: profile.lt1_hr,
+      lt1_power: profile.lt1_power,
+      lt1_pace: profile.lt1_pace,
+      lt2_hr: profile.lt2_hr,
+      lt2_power: profile.lt2_power,
+      lt2_pace: profile.lt2_pace,
+      fatmax_hr: profile.fatmax_hr,
+      fatmax_power: profile.fatmax_power,
+      fatmax_pace: profile.fatmax_pace,
+      vam_kmh: profile.vam_kmh,
+      pam_watts: profile.pam_watts,
+    } : undefined;
+
     return (
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="bg-gradient-to-r from-slate-700 to-slate-800 px-6 py-4">
           <h2 className="text-lg font-semibold text-white">Manual Physiology Entry</h2>
-          <p className="text-xs text-white/70 mt-0.5">Enter values from external tools — zones will be calculated automatically</p>
+          <p className="text-xs text-white/70 mt-0.5">Edit values — zones will be recalculated automatically</p>
         </div>
         <div className="p-6">
           <ManualPhysiologyForm
@@ -183,6 +200,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
             onSaved={handleManualSaved}
             onCancel={() => setShowManualForm(false)}
             onToast={onToast}
+            initialValues={prePopulated}
           />
         </div>
       </div>

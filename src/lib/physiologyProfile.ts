@@ -315,6 +315,7 @@ export interface ManualPhysiologyInput {
   lt2_pace: string | null;
   fatmax_hr: number | null;
   fatmax_power: number | null;
+  fatmax_pace: string | null;
   vam_kmh: number | null;
   pam_watts: number | null;
   zone_mode?: '5' | '7';
@@ -427,7 +428,7 @@ export async function saveManualPhysiologyProfile(
     lt2_confidence: 'measured',
     fatmax_hr: input.fatmax_hr,
     fatmax_power: input.fatmax_power,
-    fatmax_pace: null,
+    fatmax_pace: input.fatmax_pace,
     fatmax_confidence: 'measured',
     vam_kmh: input.vam_kmh,
     pam_watts: input.pam_watts,

@@ -8,6 +8,7 @@ interface ManualPhysiologyFormProps {
   onSaved: () => void;
   onCancel: () => void;
   onToast?: (message: string, type: 'success' | 'error') => void;
+  initialValues?: Partial<Record<string, string | number | null>>;
 }
 
 type FieldKey = keyof ManualPhysiologyInput;
@@ -35,9 +36,10 @@ const FIELDS: FieldDef[] = [
   { key: 'vam_kmh', label: 'VAM / Peak Speed', unit: 'km/h', placeholder: 'e.g. 22.5', section: 'speed' },
 ];
 
-const PACE_FIELDS: { key: 'lt1_pace' | 'lt2_pace'; label: string; section: 'lt1' | 'lt2' }[] = [
+const PACE_FIELDS: { key: 'lt1_pace' | 'lt2_pace' | 'fatmax_pace'; label: string; section: 'lt1' | 'lt2' | 'fatmax' }[] = [
   { key: 'lt1_pace', label: 'LT1 Pace', section: 'lt1' },
   { key: 'lt2_pace', label: 'LT2 Pace', section: 'lt2' },
+  { key: 'fatmax_pace', label: 'FatMax Pace', section: 'fatmax' },
 ];
 
 const SECTIONS: { key: string; title: string; color: string }[] = [
@@ -65,8 +67,15 @@ const PACE_PLACEHOLDER: Record<Sport, string> = {
   other: 'e.g. value',
 };
 
-export default function ManualPhysiologyForm({ athleteId, sport, onSaved, onCancel, onToast }: ManualPhysiologyFormProps) {
-  const [values, setValues] = useState<Record<string, string>>({});
+export default function ManualPhysiologyForm({ athleteId, sport, onSaved, onCancel, onToast, initialValues }: ManualPhysiologyFormProps) {
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    if (!initialValues) return {};
+    const init: Record<string, string> = {};
+    for (const [k, v] of Object.entries(initialValues)) {
+      if (v != null) init[k] = String(v);
+    }
+    return init;
+  });
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [zoneMode, setZoneMode] = useState<'5' | '7'>('5');
@@ -107,6 +116,7 @@ export default function ManualPhysiologyForm({ athleteId, sport, onSaved, onCanc
         lt2_pace: values.lt2_pace?.trim() || null,
         fatmax_hr: parseNum(values.fatmax_hr),
         fatmax_power: parseNum(values.fatmax_power),
+        fatmax_pace: values.fatmax_pace?.trim() || null,
         vam_kmh: parseNum(values.vam_kmh),
         pam_watts: parseNum(values.pam_watts),
         zone_mode: zoneMode,
