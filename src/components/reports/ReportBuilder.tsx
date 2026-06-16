@@ -57,7 +57,9 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   const [anthropometryNotes, setAnthropometryNotes] = useState('');
   const [includePhysiologyNotes, setIncludePhysiologyNotes] = useState(true);
   const [includeAnthropometryNotes, setIncludeAnthropometryNotes] = useState(true);
-  const [useManualZones, setUseManualZones] = useState(false);
+  const [useManualZones, setUseManualZones] = useState(
+    !!(manualTrainingZones && manualTrainingZones.length > 0)
+  );
   const [chartSelections, setChartSelections] = useState<ChartSelection[]>(
     CHART_DEFINITIONS.map(def => ({
       type: def.type,

@@ -6,6 +6,7 @@ import ReportBuilder from './reports/ReportBuilder';
 import type { ReportData } from '../lib/reportGenerator';
 import { generateCompleteJSON, exportJSONToFile, getJSONSummary, MetabolicLabJSON } from '../lib/jsonGenerator';
 import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones, lockZonesToLab, AthleteTrainingZones } from '../lib/physiologyProfile';
+import type { ZoneDefinition } from '../lib/trainingZones';
 import MetabolicProfile from './MetabolicProfile';
 import TrainingZonesTable from './TrainingZonesTable';
 import AdvancedData from './AdvancedData';
@@ -198,6 +199,18 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       }
     } finally {
       setLockingZones(false);
+    }
+  };
+
+  const handleZonesSaved = (updatedZones: ZoneDefinition[]) => {
+    if (trainingZones) {
+      setTrainingZones({
+        ...trainingZones,
+        heart_rate_zones: updatedZones as any,
+        mode: 'manual_override',
+        last_modified_by: 'coach',
+        last_modified_at: new Date().toISOString(),
+      });
     }
   };
 
@@ -588,6 +601,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             lt1_hr={results.lt1_hr}
             lt2_hr={results.lt2_hr}
             hrmax={results.hrmax}
+            athleteId={athlete?.id}
+            onSaved={handleZonesSaved}
           />
         )}
       </div>
@@ -602,6 +617,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             lt1_hr={results.lt1_hr}
             lt2_hr={results.lt2_hr}
             hrmax={results.hrmax}
+            athleteId={athlete?.id}
+            onSaved={handleZonesSaved}
           />
           <AdvancedData dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} />
         </>
