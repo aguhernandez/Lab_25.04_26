@@ -47,8 +47,10 @@ export default function TrainingZonesTable({
   const [editRows, setEditRows] = useState<Record<number, EditRow>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [localZones, setLocalZones] = useState<ZoneDefinition[] | null>(null);
 
   const resolveZones = (): ZoneDefinition[] => {
+    if (localZones) return localZones;
     if (zonesData) {
       return mode === '7' ? zonesData.zones7 : zonesData.zones5;
     }
@@ -132,6 +134,7 @@ export default function TrainingZonesTable({
       }
     }
 
+    setLocalZones(updatedZones);
     onSaved?.(updatedZones);
     setEditing(false);
     setEditRows({});
@@ -184,7 +187,7 @@ export default function TrainingZonesTable({
 
             <div className="flex items-center bg-white/10 rounded-xl p-1 gap-1">
               <button
-                onClick={() => { setMode('5'); setEditing(false); }}
+                onClick={() => { setMode('5'); setEditing(false); setLocalZones(null); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
                   mode === '5'
                     ? 'bg-white text-gray-800 shadow'
@@ -194,7 +197,7 @@ export default function TrainingZonesTable({
                 5 zones
               </button>
               <button
-                onClick={() => { setMode('7'); setEditing(false); }}
+                onClick={() => { setMode('7'); setEditing(false); setLocalZones(null); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
                   mode === '7'
                     ? 'bg-white text-gray-800 shadow'
