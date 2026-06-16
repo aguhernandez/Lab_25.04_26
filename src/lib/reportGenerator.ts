@@ -156,8 +156,10 @@ export type ReportSection =
   | 'vo2max'
   | 'thresholds'
   | 'fat_oxidation'
+  | 'energy_substrate'
   | 'training_zones'
   | 'economy_metrics'
+  | 'vo2_comparison'
   | 'hydration'
   | 'heat_adaptation'
   | 'raw_data'
@@ -173,6 +175,31 @@ export interface ReportBranding {
   contactInfo: string;
 }
 
+export type ChartType =
+  | 'hr_power'
+  | 'lactate_curve'
+  | 'vo2_power'
+  | 'rpe_stage'
+  | 'substrate_oxidation'
+  | 'rer_stage';
+
+export interface ChartSeriesConfig {
+  hr?: boolean;
+  power?: boolean;
+  lactate?: boolean;
+  vo2?: boolean;
+  rpe?: boolean;
+  fat_pct?: boolean;
+  carb_pct?: boolean;
+  rer?: boolean;
+}
+
+export interface ChartSelection {
+  type: ChartType;
+  enabled: boolean;
+  series: ChartSeriesConfig;
+}
+
 export interface ReportOptions {
   sections: ReportSection[];
   style: ReportStyle;
@@ -180,6 +207,9 @@ export interface ReportOptions {
   reportNotes?: string;
   physiologyNotes?: string;
   anthropometryNotes?: string;
+  useManualZones?: boolean;
+  manualTrainingZones?: TrainingZone[];
+  charts?: ChartSelection[];
 }
 
 export interface ReportData {
@@ -228,8 +258,10 @@ export const SECTION_DEFINITIONS: SectionDefinition[] = [
   { key: 'vo2max', label: 'VO\u2082max', group: 'Physiology', requiresData: ['physiology'] },
   { key: 'thresholds', label: 'Lactate Thresholds (LT1 / LT2)', group: 'Physiology', requiresData: ['physiology'] },
   { key: 'fat_oxidation', label: 'Fat Oxidation & FatMax', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'energy_substrate', label: '% Energy by Substrate', group: 'Physiology', requiresData: ['physiology'] },
   { key: 'training_zones', label: 'Training Zones', group: 'Physiology', requiresData: ['physiology'] },
   { key: 'economy_metrics', label: 'Economy & Power Metrics', group: 'Physiology', requiresData: ['physiology'] },
+  { key: 'vo2_comparison', label: 'VO2max & Lactate Comparison', group: 'Physiology', requiresData: ['physiology'] },
   { key: 'hydration', label: 'Hydration Analysis', group: 'Environmental', requiresData: ['hydration'] },
   { key: 'heat_adaptation', label: 'Heat Adaptation Notes', group: 'Environmental', requiresData: [] },
   { key: 'raw_data', label: 'Appendix: Raw Stage Data', group: 'Data', requiresData: ['dataPoints'] },
@@ -237,13 +269,75 @@ export const SECTION_DEFINITIONS: SectionDefinition[] = [
 ];
 
 export const REPORT_TYPE_PRESETS: Record<ReportType, ReportSection[]> = {
-  full: ['cover', 'executive_summary', 'test_context', 'anthropometry', 'isak_details', 'vo2max', 'thresholds', 'fat_oxidation', 'training_zones', 'economy_metrics', 'hydration', 'recommendations'],
-  lab: ['cover', 'executive_summary', 'test_context', 'vo2max', 'thresholds', 'fat_oxidation', 'training_zones', 'economy_metrics', 'raw_data'],
+  full: ['cover', 'executive_summary', 'test_context', 'anthropometry', 'isak_details', 'vo2max', 'thresholds', 'fat_oxidation', 'energy_substrate', 'training_zones', 'economy_metrics', 'vo2_comparison', 'hydration', 'recommendations'],
+  lab: ['cover', 'executive_summary', 'test_context', 'vo2max', 'thresholds', 'fat_oxidation', 'energy_substrate', 'training_zones', 'economy_metrics', 'vo2_comparison', 'raw_data'],
   anthropometry: ['cover', 'executive_summary', 'anthropometry', 'anthropometry_results', 'anthropometry_targets', 'isak_details', 'anthropometry_comparison'],
   hydration: ['cover', 'hydration', 'recommendations'],
   comparative: ['cover', 'executive_summary', 'anthropometry', 'anthropometry_results', 'anthropometry_comparison'],
   custom: [],
 };
+
+export interface ChartDefinition {
+  type: ChartType;
+  label: string;
+  availableSeries: { key: keyof ChartSeriesConfig; label: string }[];
+  requiresData: ('physiology' | 'dataPoints')[];
+}
+
+export const CHART_DEFINITIONS: ChartDefinition[] = [
+  {
+    type: 'hr_power',
+    label: 'HR vs Power by Stage',
+    availableSeries: [
+      { key: 'hr', label: 'Heart Rate (bpm)' },
+      { key: 'power', label: 'Power (W)' },
+    ],
+    requiresData: ['dataPoints'],
+  },
+  {
+    type: 'lactate_curve',
+    label: 'Lactate Curve',
+    availableSeries: [
+      { key: 'lactate', label: 'Lactate (mmol/L)' },
+      { key: 'hr', label: 'Heart Rate (bpm)' },
+    ],
+    requiresData: ['dataPoints'],
+  },
+  {
+    type: 'vo2_power',
+    label: 'VO2 vs Power',
+    availableSeries: [
+      { key: 'vo2', label: 'VO2 (ml/kg/min)' },
+      { key: 'power', label: 'Power (W)' },
+    ],
+    requiresData: ['dataPoints'],
+  },
+  {
+    type: 'rpe_stage',
+    label: 'RPE by Stage',
+    availableSeries: [
+      { key: 'rpe', label: 'RPE (1-10)' },
+    ],
+    requiresData: ['dataPoints'],
+  },
+  {
+    type: 'substrate_oxidation',
+    label: 'Substrate Oxidation (%)',
+    availableSeries: [
+      { key: 'fat_pct', label: 'Fat %' },
+      { key: 'carb_pct', label: 'Carb %' },
+    ],
+    requiresData: ['dataPoints', 'physiology'],
+  },
+  {
+    type: 'rer_stage',
+    label: 'RER by Stage',
+    availableSeries: [
+      { key: 'rer', label: 'RER' },
+    ],
+    requiresData: ['dataPoints', 'physiology'],
+  },
+];
 
 const C = {
   yellow: '#fdda36',
@@ -480,12 +574,13 @@ class PDFBuilder {
         this.pdf.text(item.label.toUpperCase(), x + 3, this.y + 4.5);
         this.textColor(C.gray900);
         this.setKronaFont(12);
+        const valueWidth = this.pdf.getTextWidth(item.value);
         this.pdf.text(item.value, x + 3, this.y + 11);
         if (item.unit) {
           this.textColor(C.gray500);
           this.pdf.setFontSize(7);
           this.pdf.setFont('helvetica', 'normal');
-          this.pdf.text(item.unit, x + 3 + this.pdf.getTextWidth(item.value) * 13 / 28 + 1, this.y + 11);
+          this.pdf.text(item.unit, x + 3 + valueWidth + 2, this.y + 11);
         }
         if (item.note) {
           this.textColor(C.gray500);
@@ -763,12 +858,13 @@ function renderVO2CardRow(b: PDFBuilder, metrics: VO2Card[]) {
     b.doc.setFontSize(13);
     b.doc.setFont('helvetica', 'bold');
     b.textColor(metric.color);
+    const valueWidth = b.doc.getTextWidth(metric.value);
     b.doc.text(metric.value, cx + 3, b.y + 14);
     if (metric.unit) {
       b.doc.setFontSize(7);
       b.doc.setFont('helvetica', 'normal');
       b.textColor(C.gray500);
-      b.doc.text(metric.unit, cx + 3 + b.doc.getTextWidth(metric.value) * 13 / 28 + 1, b.y + 14);
+      b.doc.text(metric.unit, cx + 3 + valueWidth + 2, b.y + 14);
     }
     b.doc.setFillColor(cr, cg, cb);
     b.doc.circle(cx + cardW - 5, b.y + 16, 2.5, 'F');
@@ -932,36 +1028,55 @@ function renderFatOxidation(b: PDFBuilder, data: ReportData) {
   b.spacer(4);
 }
 
-function renderTrainingZones(b: PDFBuilder, data: ReportData) {
+function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOptions) {
   b.sectionHeader(tr('secZones'));
-  const r = data.physiologyResults;
-  if (!r?.training_zones?.length) { b.paragraph('No training zones available.'); return; }
 
-  const hasPower = r.training_zones.some(z => z.power_min || z.power_max);
-  const hasPace = r.training_zones.some(z => z.pace_min || z.pace_max);
+  const zones = options.useManualZones && options.manualTrainingZones?.length
+    ? options.manualTrainingZones
+    : data.physiologyResults?.training_zones;
+
+  if (!zones?.length) { b.paragraph('No training zones available.'); return; }
+
+  const hasPower = zones.some(z => z.power_min || z.power_max);
+  const hasPace = zones.some(z => z.pace_min || z.pace_max);
+  const hasRpe = zones.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null);
 
   const cols = [
     { label: 'ZONE', width: 12 },
-    { label: 'NAME', width: 40 },
-    { label: 'HR RANGE (bpm)', width: 38 },
-    ...(hasPower ? [{ label: 'POWER (W)', width: 35 }] : []),
-    ...(hasPace ? [{ label: 'PACE', width: 30 }] : []),
-    { label: 'PURPOSE', width: hasPower || hasPace ? 35 : 70 },
+    { label: 'NAME', width: hasPower || hasPace ? 32 : 38 },
+    { label: 'HR RANGE (bpm)', width: 34 },
+    ...(hasPower ? [{ label: 'POWER (W)', width: 28 }] : []),
+    ...(hasPace ? [{ label: 'PACE', width: 24 }] : []),
+    ...(hasRpe ? [{ label: 'RPE', width: 16 }] : []),
+    { label: 'PURPOSE', width: hasPower || hasPace || hasRpe ? 34 : 70 },
   ];
   b.tableHeader(cols);
 
-  r.training_zones.forEach((zone: TrainingZone, i: number) => {
+  zones.forEach((zone: TrainingZone, i: number) => {
     const color = ZONE_COLORS[zone.zone] || C.gray500;
     const row: Array<{ value: string; width: number }> = [
       { value: `Z${zone.zone}`, width: 12 },
-      { value: zone.name, width: 40 },
-      { value: `${zone.hr_min} – ${zone.hr_max}`, width: 38 },
+      { value: zone.name, width: hasPower || hasPace ? 32 : 38 },
+      { value: `${zone.hr_min} - ${zone.hr_max}`, width: 34 },
     ];
-    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min} – ${zone.power_max}` : '—', width: 35 });
-    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min} – ${zone.pace_max}` : '—', width: 30 });
-    row.push({ value: zone.description || '', width: hasPower || hasPace ? 35 : 70 });
+    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min} - ${zone.power_max}` : '\u2014', width: 28 });
+    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min} - ${zone.pace_max}` : '\u2014', width: 24 });
+    if (hasRpe) {
+      const rpeMin = (zone as any).rpe_min;
+      const rpeMax = (zone as any).rpe_max;
+      row.push({ value: rpeMin != null && rpeMax != null ? `${rpeMin} - ${rpeMax}` : '\u2014', width: 16 });
+    }
+    row.push({ value: zone.description || '', width: hasPower || hasPace || hasRpe ? 34 : 70 });
     b.tableRow(row, i % 2 === 0, color);
   });
+
+  if (options.useManualZones && options.manualTrainingZones?.length) {
+    b.spacer(2);
+    b.textColor(C.gray500);
+    b.setJostFont(7, 'normal');
+    b.doc.text('* Manually adjusted zones', b.ml, b.y);
+    b.y += 4;
+  }
 
   b.spacer(4);
 }
@@ -1927,6 +2042,303 @@ function renderTestContext(b: PDFBuilder, data: ReportData) {
   b.spacer(4);
 }
 
+function renderEnergySubstrate(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader('% ENERGY BY SUBSTRATE');
+  const adv = data.advancedMetrics;
+  if (!adv?.energyProfile.rer_vs_stage.some(v => v !== null)) {
+    b.paragraph('No VO2 data available to calculate energy substrate profile. Provide VO2 measurements to enable this section.');
+    return;
+  }
+
+  const dp = data.dataPoints || [];
+  const sorted = [...dp].sort((a, b) => a.stage_number - b.stage_number);
+  const ep = adv.energyProfile;
+
+  b.paragraph('Estimated distribution of fat and carbohydrate as energy sources per stage, based on Respiratory Exchange Ratio (RER).');
+  b.spacer(2);
+
+  const cols = [
+    { label: 'STAGE', width: 16 },
+    { label: 'HR (bpm)', width: 22 },
+    { label: 'VO2 (ml/kg/min)', width: 30 },
+    { label: 'RER', width: 20 },
+    { label: '% FAT', width: 24 },
+    { label: '% CARB', width: 24 },
+    { label: 'VISUAL', width: 44 },
+  ];
+  b.tableHeader(cols);
+
+  sorted.forEach((point, i) => {
+    const rer = ep.rer_vs_stage[i];
+    const fatPct = ep.percent_fat_vs_stage[i];
+    const carbPct = ep.percent_carb_vs_stage[i];
+    if (rer == null) return;
+
+    const row: Array<{ value: string; width: number }> = [
+      { value: String(point.stage_number), width: 16 },
+      { value: String(point.heart_rate), width: 22 },
+      { value: point.vo2_ml_kg_min != null ? point.vo2_ml_kg_min.toFixed(1) : '\u2014', width: 30 },
+      { value: rer.toFixed(3), width: 20 },
+      { value: fatPct != null ? `${fatPct.toFixed(0)}%` : '\u2014', width: 24 },
+      { value: carbPct != null ? `${carbPct.toFixed(0)}%` : '\u2014', width: 24 },
+      { value: '', width: 44 },
+    ];
+    b.tableRow(row, i % 2 === 0);
+
+    if (fatPct != null && carbPct != null) {
+      const barX = b.ml + 16 + 22 + 30 + 20 + 24 + 24 + 2;
+      const barW = 40;
+      const barY = b.y - 5.5;
+      const fatW = (fatPct / 100) * barW;
+      const [fr, fg, fb] = hexToRgb('#10B981');
+      b.doc.setFillColor(fr, fg, fb);
+      b.doc.rect(barX, barY, fatW, 4, 'F');
+      const [cr, cg, ccb] = hexToRgb('#F59E0B');
+      b.doc.setFillColor(cr, cg, ccb);
+      b.doc.rect(barX + fatW, barY, barW - fatW, 4, 'F');
+    }
+  });
+
+  b.spacer(4);
+  b.doc.setFontSize(7);
+  b.doc.setFont('helvetica', 'normal');
+  b.textColor(C.gray500);
+  const [fr2, fg2, fb2] = hexToRgb('#10B981');
+  b.doc.setFillColor(fr2, fg2, fb2);
+  b.doc.rect(b.ml, b.y - 2, 8, 3, 'F');
+  b.doc.text('Fat', b.ml + 10, b.y);
+  const [cr2, cg2, cb2] = hexToRgb('#F59E0B');
+  b.doc.setFillColor(cr2, cg2, cb2);
+  b.doc.rect(b.ml + 28, b.y - 2, 8, 3, 'F');
+  b.doc.text('Carbohydrate', b.ml + 38, b.y);
+  b.y += 6;
+
+  b.paragraph('RER 0.70 = 100% fat oxidation. RER 1.0 = 100% carbohydrate oxidation. Crossover at RER 0.85.');
+  b.spacer(4);
+}
+
+function renderVO2Comparison(b: PDFBuilder, data: ReportData) {
+  b.sectionHeader('VO2MAX & LACTATE COMPARISON');
+  const r = data.physiologyResults;
+  if (!r?.vo2max) { b.paragraph('No VO2max data available for comparison.'); return; }
+
+  b.paragraph('Comparison of the athlete\'s key metrics against reference values from published research in sport science.');
+  b.spacer(2);
+
+  const vo2 = r.vo2max;
+  b.label('VO2max Relative: ' + vo2.toFixed(1) + ' ml/kg/min');
+  b.spacer(2);
+
+  const benchmarks = [
+    { label: 'Sedentary', min: 25, max: 35, color: '#6b7280' },
+    { label: 'Recreational', min: 35, max: 50, color: '#3b82f6' },
+    { label: 'Well-trained', min: 50, max: 60, color: '#10b981' },
+    { label: 'Competitive', min: 60, max: 70, color: '#f59e0b' },
+    { label: 'Elite / Pro', min: 70, max: 90, color: '#ef4444' },
+  ];
+
+  b.checkPage(40);
+  const barY = b.y;
+  const barX = b.ml + 30;
+  const barW = b.cw - 30;
+  const scaleMin = 20;
+  const scaleMax = 90;
+
+  benchmarks.forEach((bm, i) => {
+    const y = barY + i * 8;
+    const x1 = barX + ((bm.min - scaleMin) / (scaleMax - scaleMin)) * barW;
+    const x2 = barX + ((bm.max - scaleMin) / (scaleMax - scaleMin)) * barW;
+    const [cr, cg, cb] = hexToRgb(bm.color);
+    b.doc.setFillColor(cr, cg, cb);
+    b.doc.roundedRect(x1, y, x2 - x1, 6, 1, 1, 'F');
+    b.doc.setFontSize(7);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(bm.color);
+    b.doc.text(bm.label, b.ml, y + 4.5);
+    b.textColor(C.gray500);
+    b.doc.text(`${bm.min}-${bm.max}`, x2 + 2, y + 4.5);
+  });
+
+  const athleteX = barX + ((Math.min(Math.max(vo2, scaleMin), scaleMax) - scaleMin) / (scaleMax - scaleMin)) * barW;
+  b.doc.setLineWidth(0.8);
+  const [ar, ag, ab] = hexToRgb(C.yellow);
+  b.doc.setDrawColor(ar, ag, ab);
+  b.doc.line(athleteX, barY - 2, athleteX, barY + 5 * 8 + 2);
+  b.doc.setFontSize(7);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.yellow);
+  b.doc.text(`${vo2.toFixed(1)}`, athleteX - 3, barY - 4);
+
+  b.y = barY + 5 * 8 + 8;
+
+  if (r.lt1_hr || r.lt2_hr) {
+    b.spacer(4);
+    b.label('Lactate Thresholds');
+    b.spacer(2);
+
+    const items: Array<{ label: string; value: string; unit?: string }> = [];
+    if (r.lt1_hr) items.push({ label: 'LT1 Heart Rate', value: String(r.lt1_hr), unit: 'bpm' });
+    if (r.lt2_hr) items.push({ label: 'LT2 Heart Rate', value: String(r.lt2_hr), unit: 'bpm' });
+    if (r.lt1_hr && r.lt2_hr) {
+      const gap = r.lt2_hr - r.lt1_hr;
+      items.push({ label: 'LT1-LT2 Gap', value: String(gap), unit: 'bpm' });
+    }
+    if (r.lt1_percent_vo2max) items.push({ label: 'LT1 % VO2max', value: r.lt1_percent_vo2max.toFixed(0), unit: '%' });
+    if (r.lt2_percent_vo2max) items.push({ label: 'LT2 % VO2max', value: r.lt2_percent_vo2max.toFixed(0), unit: '%' });
+    b.metricGrid(items, 3);
+  }
+
+  b.spacer(4);
+}
+
+function renderCharts(b: PDFBuilder, data: ReportData, options: ReportOptions) {
+  const charts = options.charts?.filter(c => c.enabled);
+  if (!charts || charts.length === 0) return;
+
+  const dp = data.dataPoints;
+  if (!dp || dp.length === 0) return;
+
+  const sorted = [...dp].sort((a, b2) => a.stage_number - b2.stage_number);
+  const adv = data.advancedMetrics;
+
+  b.sectionHeader('CHARTS');
+  b.spacer(2);
+
+  const chartW = b.cw;
+  const chartH = 55;
+  const axisOffset = 12;
+  const plotW = chartW - axisOffset - 4;
+  const plotH = chartH - 12;
+
+  const SERIES_COLORS: Record<string, string> = {
+    hr: '#ef4444',
+    power: '#f97316',
+    lactate: '#dc2626',
+    vo2: '#3b82f6',
+    rpe: '#10b981',
+    fat_pct: '#10b981',
+    carb_pct: '#f59e0b',
+    rer: '#8b5cf6',
+  };
+
+  for (const chart of charts) {
+    b.checkPage(chartH + 20);
+
+    b.doc.setFontSize(9);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.dark);
+    const def = CHART_DEFINITIONS.find(d => d.type === chart.type);
+    b.doc.text(def?.label ?? chart.type, b.ml, b.y);
+    b.y += 5;
+
+    const plotX = b.ml + axisOffset;
+    const plotY = b.y;
+
+    const [bgr, bgg, bgb] = hexToRgb(C.gray100);
+    b.doc.setFillColor(bgr, bgg, bgb);
+    b.doc.roundedRect(plotX, plotY, plotW, plotH, 1, 1, 'F');
+
+    b.doc.setDrawColor(200, 200, 200);
+    b.doc.setLineWidth(0.2);
+    for (let i = 1; i < 4; i++) {
+      const gy = plotY + (plotH / 4) * i;
+      b.doc.line(plotX, gy, plotX + plotW, gy);
+    }
+    for (let i = 1; i < sorted.length; i++) {
+      const gx = plotX + (plotW / sorted.length) * i;
+      b.doc.line(gx, plotY, gx, plotY + plotH);
+    }
+
+    const enabledSeries = Object.entries(chart.series)
+      .filter(([, v]) => v)
+      .map(([k]) => k as keyof ChartSeriesConfig);
+
+    const seriesData: Record<string, (number | null)[]> = {};
+    for (const key of enabledSeries) {
+      seriesData[key] = sorted.map((p, i) => {
+        switch (key) {
+          case 'hr': return p.heart_rate;
+          case 'power': return p.power_watts ?? null;
+          case 'lactate': return p.lactate ?? null;
+          case 'vo2': return p.vo2_ml_kg_min ?? null;
+          case 'rpe': return p.rpe ?? null;
+          case 'fat_pct': return adv?.energyProfile.percent_fat_vs_stage[i] ?? null;
+          case 'carb_pct': return adv?.energyProfile.percent_carb_vs_stage[i] ?? null;
+          case 'rer': return adv?.energyProfile.rer_vs_stage[i] ?? null;
+          default: return null;
+        }
+      });
+    }
+
+    for (const key of enabledSeries) {
+      const values = seriesData[key];
+      if (!values) continue;
+      const nums = values.filter((v): v is number => v != null);
+      if (nums.length < 2) continue;
+
+      const minV = Math.min(...nums);
+      const maxV = Math.max(...nums);
+      const range = maxV - minV || 1;
+
+      const color = SERIES_COLORS[key] || '#6b7280';
+      const [sr, sg, sb] = hexToRgb(color);
+      b.doc.setDrawColor(sr, sg, sb);
+      b.doc.setLineWidth(0.6);
+
+      let prevX: number | null = null;
+      let prevYp: number | null = null;
+
+      for (let i = 0; i < values.length; i++) {
+        if (values[i] == null) { prevX = null; prevYp = null; continue; }
+        const val = values[i]!;
+        const x = plotX + (i / (sorted.length - 1)) * plotW;
+        const yp = plotY + plotH - ((val - minV) / range) * (plotH - 4) - 2;
+
+        if (prevX != null && prevYp != null) {
+          b.doc.line(prevX, prevYp, x, yp);
+        }
+        b.doc.setFillColor(sr, sg, sb);
+        b.doc.circle(x, yp, 0.8, 'F');
+        prevX = x;
+        prevYp = yp;
+      }
+
+      b.doc.setFontSize(6);
+      b.doc.setFont('helvetica', 'normal');
+      b.textColor(color);
+      b.doc.text(`${maxV.toFixed(1)}`, b.ml, plotY + 4);
+      b.doc.text(`${minV.toFixed(1)}`, b.ml, plotY + plotH - 1);
+    }
+
+    b.doc.setFontSize(6);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(C.gray500);
+    for (let i = 0; i < sorted.length; i++) {
+      const x = plotX + (i / (sorted.length - 1)) * plotW;
+      b.doc.text(String(sorted[i].stage_number), x - 1, plotY + plotH + 4);
+    }
+    b.doc.text('Stage', plotX + plotW / 2 - 3, plotY + plotH + 8);
+
+    const legendY = plotY + plotH + 10;
+    let legendX = plotX;
+    for (const key of enabledSeries) {
+      const color = SERIES_COLORS[key] || '#6b7280';
+      const [lr, lg, lb] = hexToRgb(color);
+      b.doc.setFillColor(lr, lg, lb);
+      b.doc.rect(legendX, legendY - 2, 6, 2.5, 'F');
+      b.doc.setFontSize(6);
+      b.doc.setFont('helvetica', 'normal');
+      b.textColor(C.gray500);
+      const label = def?.availableSeries.find(s => s.key === key)?.label ?? key;
+      b.doc.text(label, legendX + 8, legendY);
+      legendX += b.pdf.getTextWidth(label) + 14;
+    }
+
+    b.y = legendY + 8;
+    b.spacer(4);
+  }
+}
+
 type SectionRenderer = (b: PDFBuilder, data: ReportData, options: ReportOptions, logo: LogoInfo | null) => void;
 
 const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
@@ -1936,8 +2348,10 @@ const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
   vo2max: (b, data, opts) => renderVO2max(b, data, opts.style),
   thresholds: (b, data) => renderThresholds(b, data),
   fat_oxidation: (b, data) => renderFatOxidation(b, data),
-  training_zones: (b, data) => renderTrainingZones(b, data),
+  energy_substrate: (b, data) => renderEnergySubstrate(b, data),
+  training_zones: (b, data, opts) => renderTrainingZones(b, data, opts),
   economy_metrics: (b, data) => renderEconomy(b, data),
+  vo2_comparison: (b, data) => renderVO2Comparison(b, data),
   anthropometry: (b, data, opts) => renderAnthropometry(b, data, opts.style),
   anthropometry_results: (b, data) => renderAnthropometryResults(b, data),
   anthropometry_targets: (b, data) => renderAnthropometryTargets(b, data),
@@ -1966,6 +2380,8 @@ export async function generateReport(data: ReportData, options: ReportOptions): 
       renderer(b, data, options, logo);
     }
   }
+
+  renderCharts(b, data, options);
 
   if (!hasRecommendations && (options.reportNotes?.trim() || options.physiologyNotes?.trim() || options.anthropometryNotes?.trim() || data.anthropometryMeasurement?.coach_notes)) {
     renderRecommendations(b, data, options);

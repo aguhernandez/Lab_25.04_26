@@ -2,22 +2,27 @@ import { useState, useEffect } from 'react';
 import {
   SECTION_DEFINITIONS,
   REPORT_TYPE_PRESETS,
+  CHART_DEFINITIONS,
   type ReportSection,
   type ReportStyle,
   type ReportType,
   type ReportBranding,
   type ReportData,
+  type ChartSelection,
+  type ChartSeriesConfig,
   generateReport,
 } from '../../lib/reportGenerator';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import type { TrainingZone } from '../../types';
 
 interface Props {
   data: ReportData;
   defaultType?: ReportType;
   defaultSections?: ReportSection[];
   onClose?: () => void;
+  manualTrainingZones?: TrainingZone[];
 }
 
 const SECTION_GROUPS = ['General', 'Anthropometry', 'Physiology', 'Environmental', 'Data', 'Conclusions'];
@@ -32,7 +37,7 @@ function hasData(section: (typeof SECTION_DEFINITIONS)[0], data: ReportData): bo
   return true;
 }
 
-export default function ReportBuilder({ data, defaultType = 'custom', defaultSections, onClose }: Props) {
+export default function ReportBuilder({ data, defaultType = 'custom', defaultSections, onClose, manualTrainingZones }: Props) {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const [reportType, setReportType] = useState<ReportType>(defaultType);
@@ -52,6 +57,16 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   const [anthropometryNotes, setAnthropometryNotes] = useState('');
   const [includePhysiologyNotes, setIncludePhysiologyNotes] = useState(true);
   const [includeAnthropometryNotes, setIncludeAnthropometryNotes] = useState(true);
+  const [useManualZones, setUseManualZones] = useState(false);
+  const [chartSelections, setChartSelections] = useState<ChartSelection[]>(
+    CHART_DEFINITIONS.map(def => ({
+      type: def.type,
+      enabled: false,
+      series: Object.fromEntries(def.availableSeries.map(s => [s.key, true])) as ChartSeriesConfig,
+    }))
+  );
+
+  const hasManualZones = manualTrainingZones && manualTrainingZones.length > 0;
 
   useEffect(() => {
     loadConfig();
@@ -135,6 +150,9 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
         branding,
         physiologyNotes: includePhysiologyNotes ? physiologyNotes.trim() || undefined : undefined,
         anthropometryNotes: includeAnthropometryNotes ? anthropometryNotes.trim() || undefined : undefined,
+        useManualZones: useManualZones && hasManualZones,
+        manualTrainingZones: useManualZones && hasManualZones ? manualTrainingZones : undefined,
+        charts: chartSelections.some(c => c.enabled) ? chartSelections : undefined,
       });
     } finally {
       setGenerating(false);
@@ -291,6 +309,94 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
               ))}
             </div>
           </div>
+
+          {data.dataPoints && data.dataPoints.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Charts</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {chartSelections.filter(c => c.enabled).length} chart{chartSelections.filter(c => c.enabled).length !== 1 ? 's' : ''} selected
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setChartSelections(prev => prev.map(c => ({ ...c, enabled: true })))}
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setChartSelections(prev => prev.map(c => ({ ...c, enabled: false })))}
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    None
+                  </button>
+                </div>
+              </div>
+              <div className="p-5 space-y-3">
+                {CHART_DEFINITIONS.map((def, idx) => {
+                  const sel = chartSelections[idx];
+                  const hasRequiredData = def.requiresData.every(req => {
+                    if (req === 'dataPoints') return data.dataPoints && data.dataPoints.length > 0;
+                    if (req === 'physiology') return !!data.physiologyResults;
+                    return true;
+                  });
+                  return (
+                    <div key={def.type} className={`rounded-xl border transition-all ${
+                      sel.enabled ? 'border-[#fdda36]/50 bg-[#fdda36]/5' : 'border-gray-200 dark:border-gray-600'
+                    } ${!hasRequiredData ? 'opacity-50' : ''}`}>
+                      <button
+                        onClick={() => {
+                          if (!hasRequiredData) return;
+                          setChartSelections(prev => prev.map((c, i) => i === idx ? { ...c, enabled: !c.enabled } : c));
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3"
+                        disabled={!hasRequiredData}
+                      >
+                        <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border-2 transition-colors ${
+                          sel.enabled ? 'bg-[#fdda36] border-[#fdda36]' : 'border-gray-300 dark:border-gray-500'
+                        }`}>
+                          {sel.enabled && (
+                            <svg className="w-2.5 h-2.5 text-[#514163]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{def.label}</span>
+                        {!hasRequiredData && (
+                          <span className="ml-auto text-xs text-gray-400">No data</span>
+                        )}
+                      </button>
+                      {sel.enabled && def.availableSeries.length > 1 && (
+                        <div className="px-4 pb-3 pl-11 flex flex-wrap gap-3">
+                          {def.availableSeries.map(s => {
+                            const active = sel.series[s.key] ?? false;
+                            return (
+                              <label key={s.key} className="flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={active}
+                                  onChange={() => {
+                                    setChartSelections(prev => prev.map((c, i) => {
+                                      if (i !== idx) return c;
+                                      return { ...c, series: { ...c.series, [s.key]: !active } };
+                                    }));
+                                  }}
+                                  className="w-3 h-3 rounded border-gray-300 text-[#fdda36] focus:ring-[#fdda36]/50"
+                                />
+                                <span className="text-xs text-gray-600 dark:text-gray-400">{s.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -408,6 +514,43 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
               </div>
             </div>
           </div>
+
+          {hasManualZones && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Training Zones Data Source</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Choose which zone values to include in the report</p>
+              </div>
+              <div className="p-5 space-y-2">
+                <button
+                  onClick={() => setUseManualZones(false)}
+                  className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
+                    !useManualZones
+                      ? 'border-[#fdda36] bg-[#fdda36]/10'
+                      : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                  }`}
+                >
+                  <p className={`text-xs font-semibold ${!useManualZones ? 'text-[#514163] dark:text-[#fdda36]' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Auto-calculated zones
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">Use values computed from test thresholds</p>
+                </button>
+                <button
+                  onClick={() => setUseManualZones(true)}
+                  className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
+                    useManualZones
+                      ? 'border-[#fdda36] bg-[#fdda36]/10'
+                      : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                  }`}
+                >
+                  <p className={`text-xs font-semibold ${useManualZones ? 'text-[#514163] dark:text-[#fdda36]' : 'text-gray-700 dark:text-gray-300'}`}>
+                    Manually edited zones
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">Use your custom-adjusted HR, RPE and pace values ({manualTrainingZones!.length} zones)</p>
+                </button>
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleGenerate}

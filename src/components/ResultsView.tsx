@@ -265,6 +265,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           data={reportData}
           defaultType="lab"
           onClose={() => setShowReportBuilder(false)}
+          manualTrainingZones={trainingZones?.heart_rate_zones}
         />
       </div>
     );

@@ -513,6 +513,11 @@ const translations: Translations = {
   'reportSection.economy_metrics': { en: 'Economy & Power Metrics', es: 'Economía y Métricas de Potencia' },
   'reportSection.hydration': { en: 'Hydration Analysis', es: 'Análisis de Hidratación' },
   'reportSection.heat_adaptation': { en: 'Heat Adaptation Notes', es: 'Notas de Adaptación al Calor' },
+  'reportSection.energy_substrate': { en: '% Energy by Substrate', es: '% Energía por Sustrato' },
+  'reportSection.vo2_comparison': { en: 'VO2max & Lactate Comparison', es: 'Comparación VO2max y Lactato' },
+  'reportSection.anthropometry_results': { en: 'Body Composition Results', es: 'Resultados Composición Corporal' },
+  'reportSection.anthropometry_targets': { en: 'Body Composition Targets', es: 'Objetivos Composición Corporal' },
+  'reportSection.test_context': { en: 'Test Conditions', es: 'Condiciones del Test' },
   'reportSection.raw_data': { en: 'Appendix: Raw Stage Data', es: 'Apéndice: Datos de Etapas' },
   'reportSection.recommendations': { en: 'Recommendations', es: 'Recomendaciones' },
 

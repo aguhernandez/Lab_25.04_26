@@ -101,6 +101,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
           defaultType="lab"
           defaultSections={REPORT_TYPE_PRESETS.lab}
           onClose={() => setShowBuilder(false)}
+          manualTrainingZones={session.trainingZones?.heart_rate_zones}
         />
       </div>
     );
