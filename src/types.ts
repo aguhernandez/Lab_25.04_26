@@ -119,6 +119,8 @@ export interface TrainingZone {
   power_max?: number;
   pace_min?: string | null;
   pace_max?: string | null;
+  rpe_min?: number | null;
+  rpe_max?: number | null;
   description: string;
 }
 
