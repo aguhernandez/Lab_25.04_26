@@ -317,21 +317,21 @@ export default function TrainingZonesTable({
                         <div className="flex items-center gap-1">
                           <input
                             type="number"
-                            min={6}
-                            max={20}
+                            min={1}
+                            max={10}
                             value={row.rpe_min}
                             onChange={e => updateRow(zone.zone, 'rpe_min', e.target.value)}
-                            placeholder="6"
+                            placeholder="1"
                             className="w-12 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                           <span className="text-gray-400 text-xs">–</span>
                           <input
                             type="number"
-                            min={6}
-                            max={20}
+                            min={1}
+                            max={10}
                             value={row.rpe_max}
                             onChange={e => updateRow(zone.zone, 'rpe_max', e.target.value)}
-                            placeholder="20"
+                            placeholder="10"
                             className="w-12 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
