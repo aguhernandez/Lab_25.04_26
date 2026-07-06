@@ -87,7 +87,7 @@ export default function ReadinessEngine({ athleteId }: ReadinessEngineProps) {
       supabase.from('athlete_physiology_profiles')
         .select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, hrmax')
         .eq('athlete_id', athleteId).maybeSingle(),
-      supabase.from('force_velocity_sessions')
+      supabase.from('fv_sessions')
         .select('f0_n_kg, v0_m_s, pmax_w_kg')
         .eq('athlete_id', athleteId)
         .order('session_date', { ascending: false }).limit(1),

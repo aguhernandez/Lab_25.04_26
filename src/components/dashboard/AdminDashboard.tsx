@@ -97,7 +97,7 @@ export default function AdminDashboard() {
         supabase.from('athletes').select('id, name'),
         supabase.from('anthropometry_measurements').select('id', { count: 'exact', head: true }),
         supabase.from('hydration_sessions').select('id', { count: 'exact', head: true }),
-        supabase.from('force_velocity_sessions').select('id', { count: 'exact', head: true }),
+        supabase.from('fv_sessions').select('id', { count: 'exact', head: true }),
         supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'coach'),
       ]);
 

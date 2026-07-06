@@ -328,12 +328,12 @@ export function adaptDataFromDatabase(dbData: Record<string, any>): Anthropometr
         const value = dbData[medianKey];
         if (value !== null && value !== undefined) {
           data[varName] = {
-            m1: dbData[`${varName}_m1`],
-            m2: dbData[`${varName}_m2`],
-            m3: dbData[`${varName}_m3`],
+            m1: dbData[`${varName}_m1`] ?? undefined,
+            m2: dbData[`${varName}_m2`] ?? undefined,
+            m3: dbData[`${varName}_m3`] ?? undefined,
             median: value,
-            stdev: dbData[`${varName}_stdev`],
-            error_pct: dbData[`${varName}_error_pct`],
+            stdev: dbData[`${varName}_stdev`] ?? undefined,
+            error_pct: dbData[`${varName}_error_pct`] ?? undefined,
           };
         }
         processedVars.add(varName);

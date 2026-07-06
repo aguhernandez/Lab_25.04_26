@@ -146,7 +146,7 @@ export default function EditMeasurementModal({ measurement, onClose, onSave, sav
                       {variable.required && <span className="text-red-500 ml-1">*</span>}
                       <span className="text-gray-400 ml-1 text-xs">({variable.unit})</span>
                     </span>
-                    {triple.median !== undefined && (
+                    {triple.median != null && (
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                         hasError
                           ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'

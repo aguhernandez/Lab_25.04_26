@@ -109,7 +109,7 @@ export default function CoachDashboard() {
           .select('id', { count: 'exact', head: true })
           .in('athlete_id', athleteIds),
         supabase
-          .from('force_velocity_sessions')
+          .from('fv_sessions')
           .select('id', { count: 'exact', head: true })
           .in('athlete_id', athleteIds),
         supabase
