@@ -8,6 +8,7 @@ import { generateCompleteJSON, exportJSONToFile, getJSONSummary, MetabolicLabJSO
 import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones, lockZonesToLab, AthleteTrainingZones } from '../lib/physiologyProfile';
 import type { ZoneDefinition } from '../lib/trainingZones';
 import type { PreTestData } from '../lib/labSession';
+import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
 import MetabolicProfile from './MetabolicProfile';
 import TrainingZonesTable from './TrainingZonesTable';
 import AdvancedData from './AdvancedData';
@@ -46,6 +47,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [showReportBuilder, setShowReportBuilder] = useState(false);
   const [showEditData, setShowEditData] = useState(false);
   const [preTestData, setPreTestData] = useState<PreTestData | null>(null);
+  const [anthropometryMeasurement, setAnthropometryMeasurement] = useState<AnthropometryMeasurement | null>(null);
+  const [kerrResults, setKerrResults] = useState<KerrResults | null>(null);
 
   useEffect(() => {
     loadTestData();
@@ -141,6 +144,24 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       const zones = await fetchAthleteTrainingZones(athleteData.id);
       setTrainingZones(zones);
+
+      // Load anthropometry for report
+      const [{ data: anthroRow }, { data: kerrRow }] = await Promise.all([
+        supabase
+          .from('anthropometry_measurements')
+          .select('*')
+          .eq('athlete_id', athleteData.id)
+          .order('measurement_date', { ascending: false })
+          .limit(1),
+        supabase
+          .from('anthropometry_kerr_results')
+          .select('*')
+          .eq('athlete_id', athleteData.id)
+          .order('calculation_date', { ascending: false })
+          .limit(1),
+      ]);
+      setAnthropometryMeasurement((anthroRow?.[0] as AnthropometryMeasurement) ?? null);
+      setKerrResults((kerrRow?.[0] as KerrResults) ?? null);
     } catch (err) {
       console.error('Failed to load test data:', err);
     } finally {
@@ -287,8 +308,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       physiologyResults: results,
       dataPoints,
       advancedMetrics,
-      anthropometryMeasurement: null,
-      kerrResults: null,
+      anthropometryMeasurement,
+      kerrResults,
       hydrationSessions: [],
       preTestData,
     };

@@ -2308,6 +2308,8 @@ function renderCharts(b: PDFBuilder, data: ReportData, options: ReportOptions) {
     rer: '#8b5cf6',
   };
 
+  if (sorted.length < 2) return;
+
   for (const chart of charts) {
     b.checkPage(chartH + 20);
 
