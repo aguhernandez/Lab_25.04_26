@@ -159,31 +159,31 @@ export function calculatePhysiology(
       const closest = sortedPoints.reduce((prev, curr) =>
         Math.abs(curr.heart_rate - overrides.lt1_hr!) < Math.abs(prev.heart_rate - overrides.lt1_hr!) ? curr : prev
       );
-      lt1_hr = closest.heart_rate;
+      lt1_hr = overrides.lt1_hr;
       lt1_power = closest.power_watts || null;
       lt1_pace = closest.speed_pace || null;
       lt1_vo2 = closest.vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(closest.vo2_ml_kg_min, weightKg) : null;
       lt1_percent_vo2max = vo2max && closest.vo2_ml_kg_min ? Math.round((closest.vo2_ml_kg_min / vo2max) * 1000) / 10 : null;
-      lt1_percent_hrmax = Math.round((closest.heart_rate / hrmax) * 1000) / 10;
+      lt1_percent_hrmax = Math.round((overrides.lt1_hr / hrmax) * 1000) / 10;
       lt1_confidence = 'measured';
     }
     if (overrides.lt2_hr) {
       const closest = sortedPoints.reduce((prev, curr) =>
         Math.abs(curr.heart_rate - overrides.lt2_hr!) < Math.abs(prev.heart_rate - overrides.lt2_hr!) ? curr : prev
       );
-      lt2_hr = closest.heart_rate;
+      lt2_hr = overrides.lt2_hr;
       lt2_power = closest.power_watts || null;
       lt2_pace = closest.speed_pace || null;
       lt2_vo2 = closest.vo2_ml_kg_min && weightKg ? convertVO2ToAbsolute(closest.vo2_ml_kg_min, weightKg) : null;
       lt2_percent_vo2max = vo2max && closest.vo2_ml_kg_min ? Math.round((closest.vo2_ml_kg_min / vo2max) * 1000) / 10 : null;
-      lt2_percent_hrmax = Math.round((closest.heart_rate / hrmax) * 1000) / 10;
+      lt2_percent_hrmax = Math.round((overrides.lt2_hr / hrmax) * 1000) / 10;
       lt2_confidence = 'measured';
     }
     if (overrides.fatmax_hr) {
       const closest = sortedPoints.reduce((prev, curr) =>
         Math.abs(curr.heart_rate - overrides.fatmax_hr!) < Math.abs(prev.heart_rate - overrides.fatmax_hr!) ? curr : prev
       );
-      fatmax_hr = closest.heart_rate;
+      fatmax_hr = overrides.fatmax_hr;
       fatmax_power = closest.power_watts || null;
       fatmax_pace = closest.speed_pace || null;
       fatmax_vo2 = closest.vo2_ml_kg_min || null;
