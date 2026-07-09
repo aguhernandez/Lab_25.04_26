@@ -1,6 +1,21 @@
 import { supabase } from './supabase';
 import { getAuthenticatedHubClient } from './hubLink';
 
+const DEFAULT_COACH_EMAIL = 'agu@asciende.pro';
+let _defaultCoachIdCached: string | null | undefined = undefined;
+
+export async function getDefaultCoachId(): Promise<string | null> {
+  if (_defaultCoachIdCached !== undefined) return _defaultCoachIdCached;
+  const { data } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('full_name', DEFAULT_COACH_EMAIL)
+    .eq('role', 'coach')
+    .maybeSingle();
+  const resolved: string | null = data?.id ?? null;
+  _defaultCoachIdCached = resolved;
+  return resolved;
+}
 
 export type UserRole = 'admin' | 'coach' | 'athlete';
 

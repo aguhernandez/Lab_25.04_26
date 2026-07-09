@@ -6,6 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Users, RefreshCw, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../lib/hubLink';
+import { getDefaultCoachId } from '../lib/auth';
 
 interface AthleteListProps {
   onViewAthlete: (athlete: Athlete) => void;
@@ -54,7 +55,9 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
             const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
 
             if (missing.length > 0) {
-              // Auto-provision local athlete records for Hub athletes not yet in this lab
+              // Determine coach_id: use current coach profile, or fall back to default coach
+              const assignedCoachId = profile?.id || await getDefaultCoachId();
+
               const toInsert = missing.map(ha => ({
                 name: ha.full_name || ha.email || 'Hub Athlete',
                 email: ha.email || null,
@@ -62,7 +65,7 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
                 date_of_birth: ha.date_of_birth || null,
                 sex: (ha.sex as Athlete['sex']) || null,
                 hub_user_id: ha.id,
-                coach_id: profile?.id || null,
+                coach_id: assignedCoachId,
               }));
 
               const { data: inserted } = await supabase

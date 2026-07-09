@@ -5,6 +5,7 @@ import { LabSession, LAB_TEST_TYPES } from '../../lib/labSession';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchHubCoachAthletes } from '../../lib/hubLink';
+import { getDefaultCoachId } from '../../lib/auth';
 
 interface Props {
   session: LabSession;
@@ -53,12 +54,13 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
           const localHubIds = new Set(list.map((a) => a.hub_user_id).filter(Boolean));
           const missing = hubAthletes.filter((ha) => !localHubIds.has(ha.id));
           if (missing.length > 0) {
+            const assignedCoachId = profile?.id || await getDefaultCoachId();
             await supabase.from('athletes').insert(
               missing.map((ha) => ({
                 name: ha.full_name || ha.email || 'Athlete',
                 email: ha.email,
                 hub_user_id: ha.id,
-                coach_id: profile?.id,
+                coach_id: assignedCoachId,
                 sport: ha.sport || null,
               }))
             );
