@@ -294,31 +294,60 @@ export interface HubAthleteProfile {
 }
 
 /**
- * Fetches all athletes assigned to a coach from the Hub.
- * Queries Hub's profiles table with coach_id = coachHubUserId.
- * Returns empty array gracefully if the Hub doesn't have this column.
+ * Fetches all athletes assigned to a coach from the Hub via the planner-hub-api proxy.
+ * Uses the hub-data-proxy edge function which authenticates with X-Planner-Token.
+ * The Hub JWT token is forwarded for coach identity verification.
  */
 export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
-  const client = getHubClient();
-  if (!client || !coachHubUserId) return [];
+  if (!coachHubUserId) return [];
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) return [];
 
   try {
-    const { data, error } = await client
-      .from('profiles')
-      .select('id, email, full_name, sport, date_of_birth, sex, coach_id')
-      .eq('coach_id', coachHubUserId)
-      .eq('role', 'athlete');
+    const hubToken = localStorage.getItem('hub_session_token');
 
-    if (error) {
-      // Column may not exist or RLS may block it — fail silently
-      console.warn('[HUB] fetchHubCoachAthletes failed:', error.message);
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/hub-data-proxy/coach-athletes?coach_id=${encodeURIComponent(coachHubUserId)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
+          ...(hubToken ? { 'Authorization': `Bearer ${hubToken}` } : {}),
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.warn('[HUB] fetchHubCoachAthletes proxy returned', response.status, errText);
       return [];
     }
 
-    return data || [];
+    const data = await response.json();
+
+    // The Hub API may return { athletes: [...] } or a direct array
+    const rawAthletes: Record<string, unknown>[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.athletes)
+        ? data.athletes
+        : [];
+
+    return rawAthletes.map(a => ({
+      id: (a.id || a.hub_user_id || a.athlete_id || '') as string,
+      email: a.email as string | undefined,
+      full_name: (a.full_name || a.name) as string | undefined,
+      sport: a.sport as string | undefined,
+      date_of_birth: a.date_of_birth as string | undefined,
+      sex: a.sex as string | undefined,
+      coach_id: a.coach_id as string | undefined,
+    }));
   } catch (err) {
     console.warn('[HUB] fetchHubCoachAthletes exception:', err);
     return [];
   }
 }
+
 
