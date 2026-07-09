@@ -1,4 +1,21 @@
-import { supabase, hubClient } from './supabase';
+import { supabase } from './supabase';
+import { getAuthenticatedHubClient } from './hubLink';
+
+const DEFAULT_COACH_EMAIL = 'agu@asciende.pro';
+let _defaultCoachIdCached: string | null | undefined = undefined;
+
+export async function getDefaultCoachId(): Promise<string | null> {
+  if (_defaultCoachIdCached !== undefined) return _defaultCoachIdCached;
+  const { data } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('full_name', DEFAULT_COACH_EMAIL)
+    .eq('role', 'coach')
+    .maybeSingle();
+  const resolved: string | null = data?.id ?? null;
+  _defaultCoachIdCached = resolved;
+  return resolved;
+}
 
 export type UserRole = 'admin' | 'coach' | 'athlete';
 
@@ -18,12 +35,13 @@ export interface LocalProfile {
 
 export async function getHubAdminsAndCoaches(): Promise<HubProfile[]> {
   try {
-    if (!hubClient) {
+    const client = getAuthenticatedHubClient();
+    if (!client) {
       console.error('HUB client not configured');
       return [];
     }
 
-    const { data, error } = await hubClient
+    const { data, error } = await client
       .from('profiles')
       .select('id, role, full_name, email')
       .in('role', ['admin', 'coach', 'trainer']);
@@ -52,12 +70,13 @@ export async function getHubAdminsAndCoaches(): Promise<HubProfile[]> {
 }
 
 export async function syncHubUserToLocal(hubUserId: string, email: string): Promise<LocalProfile | null> {
-  if (!hubClient) {
+  const hubAuthClient = getAuthenticatedHubClient();
+  if (!hubAuthClient) {
     console.error('HUB client not configured');
     return null;
   }
 
-  const { data: hubProfile, error: hubError } = await hubClient
+  const { data: hubProfile, error: hubError } = await hubAuthClient
     .from('profiles')
     .select('id, role, full_name, email')
     .eq('id', hubUserId)
@@ -197,12 +216,13 @@ export async function logout() {
 
 export async function getHubAthletes(): Promise<HubProfile[]> {
   try {
-    if (!hubClient) {
+    const client = getAuthenticatedHubClient();
+    if (!client) {
       console.error('HUB client not configured');
       return [];
     }
 
-    const { data, error } = await hubClient
+    const { data, error } = await client
       .from('profiles')
       .select('id, role, full_name, email')
       .eq('role', 'athlete');
@@ -317,12 +337,13 @@ export async function checkImportedAdminsAndCoaches(hubUserIds: string[]): Promi
 
 export async function getAllHubProfiles(): Promise<HubProfile[]> {
   try {
-    if (!hubClient) {
+    const client = getAuthenticatedHubClient();
+    if (!client) {
       console.error('HUB client not configured');
       return [];
     }
 
-    const { data, error } = await hubClient
+    const { data, error } = await client
       .from('profiles')
       .select('id, role, full_name, email')
       .order('full_name');
@@ -351,7 +372,8 @@ export async function importHubProfileAsCoach(
   role: UserRole = 'coach'
 ): Promise<boolean> {
   try {
-    if (!hubClient) return false;
+    const hubAuthClient = getAuthenticatedHubClient();
+    if (!hubAuthClient) return false;
 
     const { data: existingLocal } = await supabase
       .from('profiles')
