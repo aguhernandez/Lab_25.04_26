@@ -314,3 +314,97 @@ export async function checkImportedAdminsAndCoaches(hubUserIds: string[]): Promi
     return new Set();
   }
 }
+
+export async function getAllHubProfiles(): Promise<HubProfile[]> {
+  try {
+    if (!hubClient) {
+      console.error('HUB client not configured');
+      return [];
+    }
+
+    const { data, error } = await hubClient
+      .from('profiles')
+      .select('id, role, full_name, email')
+      .order('full_name');
+
+    if (error) {
+      console.error('Error fetching all HUB profiles:', error);
+      return [];
+    }
+
+    return (data || []).map(profile => ({
+      user_id: profile.id,
+      role: profile.role === 'trainer' ? 'coach' : profile.role,
+      full_name: profile.full_name,
+      email: profile.email,
+    }));
+  } catch (err) {
+    console.error('Unexpected error fetching all HUB profiles:', err);
+    return [];
+  }
+}
+
+export async function importHubProfileAsCoach(
+  hubUserId: string,
+  email: string,
+  fullName: string,
+  role: UserRole = 'coach'
+): Promise<boolean> {
+  try {
+    if (!hubClient) return false;
+
+    const { data: existingLocal } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('hub_user_id', hubUserId)
+      .maybeSingle();
+
+    if (existingLocal) {
+      await supabase.from('profiles').update({ role, full_name: fullName || existingLocal.full_name }).eq('hub_user_id', hubUserId);
+      return true;
+    }
+
+    const { data: localUser, error: localUserError } = await supabase.auth.signUp({
+      email,
+      password: Math.random().toString(36).slice(-16),
+      options: { data: { full_name: fullName || '', hub_linked: true } }
+    });
+
+    if (localUserError || !localUser.user) {
+      console.error('Error creating local user:', localUserError);
+      return false;
+    }
+
+    const { error: profileError } = await supabase.from('profiles').insert({
+      user_id: localUser.user.id,
+      role,
+      full_name: fullName,
+      hub_user_id: hubUserId,
+    });
+
+    if (profileError) {
+      console.error('Error creating local profile:', profileError);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Error importing hub profile as coach:', err);
+    return false;
+  }
+}
+
+export async function checkImportedHubProfiles(hubUserIds: string[]): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('hub_user_id')
+      .in('hub_user_id', hubUserIds);
+
+    if (error) return new Set();
+    return new Set((data || []).map(p => p.hub_user_id).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
