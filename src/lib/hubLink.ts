@@ -17,6 +17,29 @@ function getHubClient(): SupabaseClient | null {
   return hubClient;
 }
 
+/**
+ * Creates a Hub Supabase client authenticated with the user's Hub JWT token.
+ * This makes Hub RLS apply correctly — coaches see their athletes, admins see all.
+ * Without this, queries run as anon and Hub RLS only returns own profile.
+ */
+export function getAuthenticatedHubClient(): SupabaseClient | null {
+  const hubUrl = import.meta.env.VITE_HUB_SUPABASE_URL;
+  const hubKey = import.meta.env.VITE_HUB_SUPABASE_ANON_KEY;
+
+  if (!hubUrl || !hubKey) return null;
+
+  const token = localStorage.getItem('hub_session_token');
+
+  return createClient(hubUrl, hubKey, {
+    global: {
+      headers: token
+        ? { Authorization: `Bearer ${token}`, apikey: hubKey }
+        : { apikey: hubKey },
+    },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
 export interface HubProfile {
   id: string;
   email?: string;
@@ -282,3 +305,54 @@ export async function fetchHubBodyComposition(athleteId: string): Promise<{
     return { success: false, error: 'Failed to fetch body composition from HUB' };
   }
 }
+
+export interface HubAthleteProfile {
+  id: string;
+  email?: string;
+  full_name?: string;
+  sport?: string;
+  date_of_birth?: string;
+  sex?: string;
+  coach_id?: string;
+}
+
+/**
+ * Fetches all athletes assigned to a coach from the Hub.
+ *
+ * Hub schema: `profiles` table uses `assigned_trainer_id` for the coach FK,
+ * `gender` instead of `sex`, and has `sport`, `date_of_birth`, etc.
+ */
+export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
+  if (!coachHubUserId) return [];
+
+  const client = getAuthenticatedHubClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client
+      .from('profiles')
+      .select('id, email, full_name, sport, date_of_birth, gender, assigned_trainer_id')
+      .eq('assigned_trainer_id', coachHubUserId)
+      .eq('role', 'athlete');
+
+    if (error) {
+      console.warn('[HUB] fetchHubCoachAthletes query failed:', error.message);
+      return [];
+    }
+
+    return (data || []).map(a => ({
+      id: a.id as string,
+      email: a.email as string | undefined,
+      full_name: a.full_name as string | undefined,
+      sport: a.sport as string | undefined,
+      date_of_birth: a.date_of_birth as string | undefined,
+      sex: (a.gender === 'male' || a.gender === 'female') ? a.gender : undefined,
+      coach_id: a.assigned_trainer_id as string | undefined,
+    }));
+  } catch (err) {
+    console.warn('[HUB] fetchHubCoachAthletes exception:', err);
+    return [];
+  }
+}
+
+

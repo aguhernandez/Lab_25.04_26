@@ -466,7 +466,7 @@ function HydrationSection({ athleteId, language, noData }: { athleteId: string |
 
   useEffect(() => {
     if (!athleteId) { setLoading(false); return; }
-    supabase.from('hydration_sessions').select('session_date, sweat_rate_l_h, pre_weight_kg, post_weight_kg').eq('athlete_id', athleteId).order('session_date', { ascending: false }).limit(6).then(({ data }) => {
+    supabase.from('athlete_hydration_sessions').select('session_date, sweat_rate_l_h, pre_weight_kg, post_weight_kg').eq('athlete_id', athleteId).order('session_date', { ascending: false }).limit(6).then(({ data }) => {
       setSessions(data || []);
       setLoading(false);
     });
