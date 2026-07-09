@@ -77,26 +77,11 @@ export default function CoachDashboard() {
   async function loadData() {
     setLoading(true);
     try {
-      // Use RPC to get athletes by hub_user_id (SECURITY DEFINER, immune to anon grant issues)
-      let athleteList: { id: string; name: string; sport: string }[] | null = null;
-
-      if (profile!.hub_user_id) {
-        const { data: rpcAthletes } = await supabase
-          .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: profile!.hub_user_id });
-        if (rpcAthletes && rpcAthletes.length > 0) {
-          athleteList = rpcAthletes;
-        }
-      }
-
-      // Fallback: direct query by profile.id
-      if (!athleteList || athleteList.length === 0) {
-        const { data } = await supabase
-          .from('athletes')
-          .select('id, name, sport')
-          .eq('coach_id', profile!.id)
-          .order('name');
-        athleteList = data;
-      }
+      const { data: athleteList } = await supabase
+        .from('athletes')
+        .select('id, name, sport')
+        .eq('coach_id', profile!.id)
+        .order('name');
 
       if (!athleteList || athleteList.length === 0) {
         setLoading(false);

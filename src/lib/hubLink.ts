@@ -17,29 +17,6 @@ function getHubClient(): SupabaseClient | null {
   return hubClient;
 }
 
-/**
- * Creates a Hub Supabase client authenticated with the user's Hub JWT token.
- * This makes Hub RLS apply correctly — coaches see their athletes, admins see all.
- * Without this, queries run as anon and Hub RLS only returns own profile.
- */
-export function getAuthenticatedHubClient(): SupabaseClient | null {
-  const hubUrl = import.meta.env.VITE_HUB_SUPABASE_URL;
-  const hubKey = import.meta.env.VITE_HUB_SUPABASE_ANON_KEY;
-
-  if (!hubUrl || !hubKey) return null;
-
-  const token = localStorage.getItem('hub_session_token');
-
-  return createClient(hubUrl, hubKey, {
-    global: {
-      headers: token
-        ? { Authorization: `Bearer ${token}`, apikey: hubKey }
-        : { apikey: hubKey },
-    },
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
 export interface HubProfile {
   id: string;
   email?: string;
@@ -318,18 +295,12 @@ export interface HubAthleteProfile {
 
 /**
  * Fetches all athletes assigned to a coach from the Hub.
- *
- * Strategy:
- * 1. Use authenticated Hub client (Hub JWT token) to query Hub profiles directly.
- *    This respects Hub RLS so coaches see their own athletes, admins see all.
- * 2. Try `profiles` where `coach_id = coachHubUserId AND role = 'athlete'`.
- * 3. If Hub schema uses a different column, returns empty array gracefully.
+ * Queries Hub's profiles table with coach_id = coachHubUserId.
+ * Returns empty array gracefully if the Hub doesn't have this column.
  */
 export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
-  if (!coachHubUserId) return [];
-
-  const client = getAuthenticatedHubClient();
-  if (!client) return [];
+  const client = getHubClient();
+  if (!client || !coachHubUserId) return [];
 
   try {
     const { data, error } = await client
@@ -339,23 +310,15 @@ export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<Hub
       .eq('role', 'athlete');
 
     if (error) {
-      console.warn('[HUB] fetchHubCoachAthletes query failed:', error.message);
+      // Column may not exist or RLS may block it — fail silently
+      console.warn('[HUB] fetchHubCoachAthletes failed:', error.message);
       return [];
     }
 
-    return (data || []).map(a => ({
-      id: a.id as string,
-      email: a.email as string | undefined,
-      full_name: a.full_name as string | undefined,
-      sport: a.sport as string | undefined,
-      date_of_birth: a.date_of_birth as string | undefined,
-      sex: a.sex as string | undefined,
-      coach_id: a.coach_id as string | undefined,
-    }));
+    return data || [];
   } catch (err) {
     console.warn('[HUB] fetchHubCoachAthletes exception:', err);
     return [];
   }
 }
-
 

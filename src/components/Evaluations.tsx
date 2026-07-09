@@ -34,44 +34,19 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
 
   const fetchTests = async () => {
     try {
-      const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-
-      if (effectiveRole === 'coach' && profile?.hub_user_id) {
-        // Single RPC call: joins tests+athletes+profiles in DB, bypasses all anon grant issues
-        const { data: rpcData, error: rpcError } = await supabase
-          .rpc('get_tests_by_coach_hub_id', { coach_hub_id: profile.hub_user_id });
-
-        if (!rpcError && rpcData) {
-          const mapped = rpcData.map((row: {
-            id: string; athlete_id: string; test_date: string;
-            test_type: string; status: string; created_at: string;
-            athlete_name: string; athlete_sport: string;
-          }) => ({
-            id: row.id,
-            athlete_id: row.athlete_id,
-            test_date: row.test_date,
-            test_type: row.test_type,
-            status: row.status,
-            created_at: row.created_at,
-            athletes: { name: row.athlete_name, sport: row.athlete_sport },
-          }));
-          setTests(mapped);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Fallback: direct query (works when anon grants are correct)
       let athleteIds: string[] | null = null;
 
+      const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
       if (effectiveRole === 'coach' && profile?.id) {
-        const { data: coachAthletes } = await supabase
+        const { data: coachAthletes, error: athleteError } = await supabase
           .from('athletes')
           .select('id')
           .eq('coach_id', profile.id);
+        if (athleteError) throw athleteError;
         athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
-        if (!athleteIds || athleteIds.length === 0) {
+        if (athleteIds.length === 0) {
           setTests([]);
+          setLoading(false);
           return;
         }
       }
@@ -87,7 +62,8 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
           created_at,
           athletes (
             name,
-            sport
+            sport,
+            coach_id
           )
         `)
         .order('test_date', { ascending: false });

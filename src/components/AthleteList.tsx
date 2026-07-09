@@ -6,7 +6,6 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Users, RefreshCw, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../lib/hubLink';
-import { getDefaultCoachId } from '../lib/auth';
 
 interface AthleteListProps {
   onViewAthlete: (athlete: Athlete) => void;
@@ -33,46 +32,16 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
       setLoading(true);
       setError(null);
 
+      // Step 1: load local athletes filtered by coach
+      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-
-      let merged: Athlete[] = [];
-
-      if (effectiveRole === 'athlete' && profile?.hub_user_id) {
-        const { data, error: qErr } = await supabase
-          .from('athletes')
-          .select('*')
-          .eq('hub_user_id', profile.hub_user_id)
-          .order('name', { ascending: true });
-        if (qErr) throw qErr;
-        merged = data || [];
-      } else if (effectiveRole === 'coach') {
-        // First try SECURITY DEFINER RPC (immune to anon grant issues)
-        if (profile?.hub_user_id) {
-          const { data: rpcData } = await supabase
-            .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: profile.hub_user_id });
-          if (rpcData && rpcData.length > 0) {
-            merged = rpcData;
-          }
-        }
-        // Fallback: direct query by coach_id
-        if (merged.length === 0 && profile?.id) {
-          const { data, error: qErr } = await supabase
-            .from('athletes')
-            .select('*')
-            .eq('coach_id', profile.id)
-            .order('name', { ascending: true });
-          if (qErr) throw qErr;
-          merged = data || [];
-        }
-      } else {
-        // admin or unknown: load all
-        const { data, error: qErr } = await supabase
-          .from('athletes')
-          .select('*')
-          .order('name', { ascending: true });
-        if (qErr) throw qErr;
-        merged = data || [];
+      if (effectiveRole === 'coach' && profile?.id) {
+        query = query.eq('coach_id', profile.id);
       }
+      const { data: localData, error: localError } = await query;
+      if (localError) throw localError;
+
+      let merged: Athlete[] = localData || [];
 
       // Step 2: for coaches, pull their Hub athlete roster and auto-provision missing local records
       if (effectiveRole === 'coach' && isHubLinkingEnabled()) {
@@ -85,9 +54,7 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
             const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
 
             if (missing.length > 0) {
-              // Determine coach_id: use current coach profile, or fall back to default coach
-              const assignedCoachId = profile?.id || await getDefaultCoachId();
-
+              // Auto-provision local athlete records for Hub athletes not yet in this lab
               const toInsert = missing.map(ha => ({
                 name: ha.full_name || ha.email || 'Hub Athlete',
                 email: ha.email || null,
@@ -95,7 +62,7 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
                 date_of_birth: ha.date_of_birth || null,
                 sex: (ha.sex as Athlete['sex']) || null,
                 hub_user_id: ha.id,
-                coach_id: assignedCoachId,
+                coach_id: profile?.id || null,
               }));
 
               const { data: inserted } = await supabase
@@ -108,11 +75,14 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
               }
             }
 
-            // Re-query via RPC after inserts to get complete list
-            if (profile?.hub_user_id) {
+            // Re-query to get the full, up-to-date list after inserts
+            if (profile?.id) {
               const { data: refreshed } = await supabase
-                .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: profile.hub_user_id });
-              if (refreshed && refreshed.length > 0) merged = refreshed;
+                .from('athletes')
+                .select('*')
+                .eq('coach_id', profile.id)
+                .order('name', { ascending: true });
+              if (refreshed) merged = refreshed;
             }
 
           }

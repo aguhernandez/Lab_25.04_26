@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { Athlete } from '../types';
 import { searchHubProfilesByEmail, isHubLinkingEnabled, HubProfile, fetchHubCoachAthletes } from '../lib/hubLink';
 import { Users, RefreshCw, ChevronRight, Search } from 'lucide-react';
-import { getDefaultCoachId } from '../lib/auth';
 
 interface AthleteSelectorProps {
   onSelectAthlete: (athlete: Athlete) => void;
@@ -77,7 +76,6 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
             const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
 
             if (missing.length > 0) {
-              const assignedCoachId = profile?.id || await getDefaultCoachId();
               const toInsert = missing.map(ha => ({
                 name: ha.full_name || ha.email || 'Hub Athlete',
                 email: ha.email || null,
@@ -85,7 +83,7 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
                 date_of_birth: ha.date_of_birth || null,
                 sex: (ha.sex as Athlete['sex']) || null,
                 hub_user_id: ha.id,
-                coach_id: assignedCoachId,
+                coach_id: profile?.id || null,
               }));
 
               const { data: inserted } = await supabase
@@ -147,7 +145,7 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
           email: hubProfile.email,
           sport: 'cycling',
           hub_user_id: hubProfile.id,
-          coach_id: profile?.id || await getDefaultCoachId(),
+          coach_id: profile?.id || null,
         })
         .select()
         .single();
