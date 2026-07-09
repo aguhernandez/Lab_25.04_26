@@ -282,3 +282,43 @@ export async function fetchHubBodyComposition(athleteId: string): Promise<{
     return { success: false, error: 'Failed to fetch body composition from HUB' };
   }
 }
+
+export interface HubAthleteProfile {
+  id: string;
+  email?: string;
+  full_name?: string;
+  sport?: string;
+  date_of_birth?: string;
+  sex?: string;
+  coach_id?: string;
+}
+
+/**
+ * Fetches all athletes assigned to a coach from the Hub.
+ * Queries Hub's profiles table with coach_id = coachHubUserId.
+ * Returns empty array gracefully if the Hub doesn't have this column.
+ */
+export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
+  const client = getHubClient();
+  if (!client || !coachHubUserId) return [];
+
+  try {
+    const { data, error } = await client
+      .from('profiles')
+      .select('id, email, full_name, sport, date_of_birth, sex, coach_id')
+      .eq('coach_id', coachHubUserId)
+      .eq('role', 'athlete');
+
+    if (error) {
+      // Column may not exist or RLS may block it — fail silently
+      console.warn('[HUB] fetchHubCoachAthletes failed:', error.message);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.warn('[HUB] fetchHubCoachAthletes exception:', err);
+    return [];
+  }
+}
+

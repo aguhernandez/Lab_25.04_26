@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Athlete } from '../types';
-import { searchHubProfilesByEmail, isHubLinkingEnabled, HubProfile } from '../lib/hubLink';
+import { searchHubProfilesByEmail, isHubLinkingEnabled, HubProfile, fetchHubCoachAthletes } from '../lib/hubLink';
 import { Users, RefreshCw, ChevronRight, Search } from 'lucide-react';
 
 interface AthleteSelectorProps {
@@ -11,7 +11,7 @@ interface AthleteSelectorProps {
 }
 
 export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProps) {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [hubProfiles, setHubProfiles] = useState<HubProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +23,7 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
 
   useEffect(() => {
     loadAthletes();
-  }, [profile]);
+  }, [profile, user]);
 
   useEffect(() => {
     if (hubEnabled && searchTerm.includes('@')) {
@@ -53,25 +53,70 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
   const loadAthletes = async () => {
     try {
       setLoading(true);
+
+      // Step 1: load local athletes
       let query = supabase.from('athletes').select('*').order('name', { ascending: true });
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
       if (effectiveRole === 'coach' && profile?.id) {
         query = query.eq('coach_id', profile.id);
       }
-      const { data, error } = await query;
-      if (error) throw error;
-      const athleteList = data || [];
-      setAthletes(athleteList);
+      const { data: localData, error: localError } = await query;
+      if (localError) throw localError;
 
-      // Check which athletes have actual anthropometry measurements
-      if (athleteList.length > 0) {
-        const ids = athleteList.map(a => a.id);
+      let merged: Athlete[] = localData || [];
+
+      // Step 2: for coaches, pull Hub athlete roster and auto-provision missing records
+      if (effectiveRole === 'coach' && hubEnabled) {
+        const coachHubId = user?.id || profile?.hub_user_id;
+        if (coachHubId) {
+          const hubAthletes = await fetchHubCoachAthletes(coachHubId);
+
+          if (hubAthletes.length > 0) {
+            const localHubIds = new Set(merged.map(a => a.hub_user_id).filter(Boolean));
+            const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
+
+            if (missing.length > 0) {
+              const toInsert = missing.map(ha => ({
+                name: ha.full_name || ha.email || 'Hub Athlete',
+                email: ha.email || null,
+                sport: (ha.sport as Athlete['sport']) || 'other',
+                date_of_birth: ha.date_of_birth || null,
+                sex: (ha.sex as Athlete['sex']) || null,
+                hub_user_id: ha.id,
+                coach_id: profile?.id || null,
+              }));
+
+              const { data: inserted } = await supabase
+                .from('athletes')
+                .insert(toInsert)
+                .select();
+
+              if (inserted) merged = [...merged, ...inserted];
+            }
+
+            // Refresh to get the complete list
+            if (profile?.id) {
+              const { data: refreshed } = await supabase
+                .from('athletes')
+                .select('*')
+                .eq('coach_id', profile.id)
+                .order('name', { ascending: true });
+              if (refreshed) merged = refreshed;
+            }
+          }
+        }
+      }
+
+      setAthletes(merged);
+
+      // Check which athletes have anthropometry measurements
+      if (merged.length > 0) {
+        const ids = merged.map(a => a.id);
         const { data: measurements } = await supabase
           .from('anthropometry_measurements')
           .select('athlete_id')
           .in('athlete_id', ids);
-        const withData = new Set((measurements || []).map(m => m.athlete_id));
-        setAthletesWithMeasurements(withData);
+        setAthletesWithMeasurements(new Set((measurements || []).map(m => m.athlete_id)));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load athletes');
@@ -244,6 +289,9 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
                     <div className="flex gap-1.5">
                       {athlete.sex && (
                         <span className="text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-lg capitalize">{athlete.sex}</span>
+                      )}
+                      {athlete.hub_user_id && (
+                        <span className="text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800">HUB</span>
                       )}
                       <span className={`text-xs font-medium px-2 py-1 rounded-lg ${hasData ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'}`}>
                         {hasData ? 'Data ready' : 'No measurements'}

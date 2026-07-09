@@ -5,6 +5,7 @@ import { Athlete } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Users, RefreshCw, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
+import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../lib/hubLink';
 
 interface AthleteListProps {
   onViewAthlete: (athlete: Athlete) => void;
@@ -12,7 +13,7 @@ interface AthleteListProps {
 
 export default function AthleteList({ onViewAthlete }: AthleteListProps) {
   const { t } = useLanguage();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,23 +25,71 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
 
   useEffect(() => {
     loadAthletes();
-  }, [profile]);
+  }, [profile, user]);
 
   const loadAthletes = async () => {
     try {
       setLoading(true);
       setError(null);
 
+      // Step 1: load local athletes filtered by coach
       let query = supabase.from('athletes').select('*').order('name', { ascending: true });
-
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
       if (effectiveRole === 'coach' && profile?.id) {
         query = query.eq('coach_id', profile.id);
       }
+      const { data: localData, error: localError } = await query;
+      if (localError) throw localError;
 
-      const { data, error } = await query;
-      if (error) throw error;
-      setAthletes(data || []);
+      let merged: Athlete[] = localData || [];
+
+      // Step 2: for coaches, pull their Hub athlete roster and auto-provision missing local records
+      if (effectiveRole === 'coach' && isHubLinkingEnabled()) {
+        const coachHubId = user?.id || profile?.hub_user_id;
+        if (coachHubId) {
+          const hubAthletes = await fetchHubCoachAthletes(coachHubId);
+
+          if (hubAthletes.length > 0) {
+            const localHubIds = new Set(merged.map(a => a.hub_user_id).filter(Boolean));
+            const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
+
+            if (missing.length > 0) {
+              // Auto-provision local athlete records for Hub athletes not yet in this lab
+              const toInsert = missing.map(ha => ({
+                name: ha.full_name || ha.email || 'Hub Athlete',
+                email: ha.email || null,
+                sport: (ha.sport as Athlete['sport']) || 'other',
+                date_of_birth: ha.date_of_birth || null,
+                sex: (ha.sex as Athlete['sex']) || null,
+                hub_user_id: ha.id,
+                coach_id: profile?.id || null,
+              }));
+
+              const { data: inserted } = await supabase
+                .from('athletes')
+                .insert(toInsert)
+                .select();
+
+              if (inserted) {
+                merged = [...merged, ...inserted];
+              }
+            }
+
+            // Re-query to get the full, up-to-date list after inserts
+            if (profile?.id) {
+              const { data: refreshed } = await supabase
+                .from('athletes')
+                .select('*')
+                .eq('coach_id', profile.id)
+                .order('name', { ascending: true });
+              if (refreshed) merged = refreshed;
+            }
+
+          }
+        }
+      }
+
+      setAthletes(merged);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load athletes');
     } finally {
@@ -177,6 +226,11 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
                     {athlete.sex && (
                       <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
                         {athlete.sex.charAt(0).toUpperCase() + athlete.sex.slice(1)}
+                      </span>
+                    )}
+                    {athlete.hub_user_id && (
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        HUB
                       </span>
                     )}
                   </div>
