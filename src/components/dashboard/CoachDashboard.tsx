@@ -120,7 +120,7 @@ export default function CoachDashboard() {
           .select('athlete_id, body_fat_percent, muscle_mass_kg, bmi')
           .in('athlete_id', athleteIds),
         supabase
-          .from('hydration_sessions')
+          .from('athlete_hydration_sessions')
           .select('id', { count: 'exact', head: true })
           .in('athlete_id', athleteIds),
         supabase

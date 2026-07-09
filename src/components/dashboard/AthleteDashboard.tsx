@@ -139,7 +139,7 @@ export default function AthleteDashboard() {
           .eq('athlete_id', athleteData.id)
           .maybeSingle(),
         supabase
-          .from('hydration_sessions')
+          .from('athlete_hydration_sessions')
           .select('session_date, sweat_rate_l_h')
           .eq('athlete_id', athleteData.id)
           .order('session_date', { ascending: false })
