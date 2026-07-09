@@ -83,15 +83,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
 
-      // Try multiple lookup strategies to find the existing profile
+      // Use SECURITY DEFINER RPC to bypass any anon grant issues on profiles table
       let existingProfile: Record<string, unknown> | null = null;
 
-      const { data: byHubId } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('hub_user_id', hubUser.id)
-        .maybeSingle();
-      existingProfile = byHubId;
+      const { data: rpcResult } = await supabase
+        .rpc('get_profile_by_hub_id', { hub_id: hubUser.id });
+      if (rpcResult && Array.isArray(rpcResult) && rpcResult.length > 0) {
+        existingProfile = rpcResult[0];
+      }
+
+      // Fallback: direct table query (works when grants are correct)
+      if (!existingProfile) {
+        const { data: byHubId } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('hub_user_id', hubUser.id)
+          .maybeSingle();
+        existingProfile = byHubId;
+      }
 
       if (!existingProfile) {
         const { data: byEmail } = await supabase
@@ -102,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         existingProfile = byEmail;
       }
 
-      if (!existingProfile && hubUser.name) {
+      if (!existingProfile) {
         const { data: byName } = await supabase
           .from('profiles')
           .select('*')

@@ -37,25 +37,24 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
       let athleteIds: string[] | null = null;
 
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      if (effectiveRole === 'coach' && profile?.id) {
-        // Resolve real DB profile id in case of fallback (id = hub_user_id)
-        let coachProfileId = profile.id;
-        if (profile.hub_user_id && profile.id === profile.hub_user_id) {
-          const { data: realProfile } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('hub_user_id', profile.hub_user_id)
-            .maybeSingle();
-          if (realProfile?.id) coachProfileId = realProfile.id;
+      if (effectiveRole === 'coach') {
+        // Use SECURITY DEFINER RPC to bypass any anon grant issues
+        if (profile?.hub_user_id) {
+          const { data: rpcIds } = await supabase
+            .rpc('get_athlete_ids_by_coach_hub_id', { coach_hub_id: profile.hub_user_id });
+          if (rpcIds && rpcIds.length > 0) {
+            athleteIds = rpcIds.map((r: { id: string }) => r.id);
+          }
         }
-
-        const { data: coachAthletes, error: athleteError } = await supabase
-          .from('athletes')
-          .select('id')
-          .eq('coach_id', coachProfileId);
-        if (athleteError) throw athleteError;
-        athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
-        if (athleteIds.length === 0) {
+        // Fallback: direct query by coach_id
+        if (!athleteIds && profile?.id) {
+          const { data: coachAthletes } = await supabase
+            .from('athletes')
+            .select('id')
+            .eq('coach_id', profile.id);
+          athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
+        }
+        if (!athleteIds || athleteIds.length === 0) {
           setTests([]);
           setLoading(false);
           return;
