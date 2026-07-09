@@ -60,7 +60,7 @@ export default function AthletePhysiologyProfile({ preselectedAthlete }: Physiol
         supabase.from('athlete_anthropometry_profiles').select('body_fat_percent, muscle_mass_kg, weight_kg').eq('athlete_id', athleteId).maybeSingle(),
         supabase.from('athlete_physiology_profiles').select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, hrmax').eq('athlete_id', athleteId).maybeSingle(),
         supabase.from('fv_sessions').select('id').eq('athlete_id', athleteId).limit(1),
-        supabase.from('athlete_hydration_sessions').select('sweat_rate_l_h, session_date').eq('athlete_id', athleteId).order('session_date', { ascending: false }).limit(1),
+        supabase.from('hydration_sessions').select('sweat_rate_l_h, session_date').eq('athlete_id', athleteId).order('session_date', { ascending: false }).limit(1),
         supabase.from('biochemical_tests').select('global_score, test_date, health_flags').eq('athlete_id', athleteId).order('test_date', { ascending: false }).limit(1),
       ]);
 
