@@ -17,6 +17,29 @@ function getHubClient(): SupabaseClient | null {
   return hubClient;
 }
 
+/**
+ * Creates a Hub Supabase client authenticated with the user's Hub JWT token.
+ * This makes Hub RLS apply correctly — coaches see their athletes, admins see all.
+ * Without this, queries run as anon and Hub RLS only returns own profile.
+ */
+export function getAuthenticatedHubClient(): SupabaseClient | null {
+  const hubUrl = import.meta.env.VITE_HUB_SUPABASE_URL;
+  const hubKey = import.meta.env.VITE_HUB_SUPABASE_ANON_KEY;
+
+  if (!hubUrl || !hubKey) return null;
+
+  const token = localStorage.getItem('hub_session_token');
+
+  return createClient(hubUrl, hubKey, {
+    global: {
+      headers: token
+        ? { Authorization: `Bearer ${token}`, apikey: hubKey }
+        : { apikey: hubKey },
+    },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
 export interface HubProfile {
   id: string;
   email?: string;
@@ -294,51 +317,36 @@ export interface HubAthleteProfile {
 }
 
 /**
- * Fetches all athletes assigned to a coach from the Hub via the planner-hub-api proxy.
- * Uses the hub-data-proxy edge function which authenticates with X-Planner-Token.
- * The Hub JWT token is forwarded for coach identity verification.
+ * Fetches all athletes assigned to a coach from the Hub.
+ *
+ * Strategy:
+ * 1. Use authenticated Hub client (Hub JWT token) to query Hub profiles directly.
+ *    This respects Hub RLS so coaches see their own athletes, admins see all.
+ * 2. Try `profiles` where `coach_id = coachHubUserId AND role = 'athlete'`.
+ * 3. If Hub schema uses a different column, returns empty array gracefully.
  */
 export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
   if (!coachHubUserId) return [];
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) return [];
+  const client = getAuthenticatedHubClient();
+  if (!client) return [];
 
   try {
-    const hubToken = localStorage.getItem('hub_session_token');
+    const { data, error } = await client
+      .from('profiles')
+      .select('id, email, full_name, sport, date_of_birth, sex, coach_id')
+      .eq('coach_id', coachHubUserId)
+      .eq('role', 'athlete');
 
-    const response = await fetch(
-      `${supabaseUrl}/functions/v1/hub-data-proxy/coach-athletes?coach_id=${encodeURIComponent(coachHubUserId)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseAnonKey,
-          ...(hubToken ? { 'Authorization': `Bearer ${hubToken}` } : {}),
-        },
-      }
-    );
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      console.warn('[HUB] fetchHubCoachAthletes proxy returned', response.status, errText);
+    if (error) {
+      console.warn('[HUB] fetchHubCoachAthletes query failed:', error.message);
       return [];
     }
 
-    const data = await response.json();
-
-    // The Hub API may return { athletes: [...] } or a direct array
-    const rawAthletes: Record<string, unknown>[] = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.athletes)
-        ? data.athletes
-        : [];
-
-    return rawAthletes.map(a => ({
-      id: (a.id || a.hub_user_id || a.athlete_id || '') as string,
+    return (data || []).map(a => ({
+      id: a.id as string,
       email: a.email as string | undefined,
-      full_name: (a.full_name || a.name) as string | undefined,
+      full_name: a.full_name as string | undefined,
       sport: a.sport as string | undefined,
       date_of_birth: a.date_of_birth as string | undefined,
       sex: a.sex as string | undefined,

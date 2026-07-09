@@ -4,6 +4,7 @@ import { Athlete, Sport, TestType } from '../../types';
 import { LabSession, LAB_TEST_TYPES } from '../../lib/labSession';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { fetchHubCoachAthletes } from '../../lib/hubLink';
 
 interface Props {
   session: LabSession;
@@ -21,7 +22,7 @@ const SPORT_KEYS = ['cycling', 'running', 'triathlon', 'swimming'] as const;
 
 export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) {
   const { t } = useLanguage();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -42,9 +43,37 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
         query = query.eq('coach_id', profile.id);
       }
       const { data } = await query;
-      const list = data || [];
+      let list: Athlete[] = data || [];
+
+      // For coaches, auto-provision Hub athletes not yet in local DB
+      if (effectiveRole === 'coach') {
+        const coachHubId = profile?.hub_user_id || user?.id;
+        if (coachHubId) {
+          const hubAthletes = await fetchHubCoachAthletes(coachHubId);
+          const localHubIds = new Set(list.map((a) => a.hub_user_id).filter(Boolean));
+          const missing = hubAthletes.filter((ha) => !localHubIds.has(ha.id));
+          if (missing.length > 0) {
+            await supabase.from('athletes').insert(
+              missing.map((ha) => ({
+                name: ha.full_name || ha.email || 'Athlete',
+                email: ha.email,
+                hub_user_id: ha.id,
+                coach_id: profile?.id,
+                sport: ha.sport || null,
+              }))
+            );
+            // Re-fetch after provisioning
+            const { data: refreshed } = await supabase
+              .from('athletes')
+              .select('*')
+              .eq('coach_id', profile?.id)
+              .order('name', { ascending: true });
+            list = refreshed || list;
+          }
+        }
+      }
+
       setAthletes(list);
-      // Auto-select the single athlete when logged in as athlete role
       if (effectiveRole === 'athlete' && list.length === 1 && !session.athlete) {
         onUpdate({ athlete: list[0], sport: list[0].sport });
       }
