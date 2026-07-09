@@ -83,26 +83,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
 
-      const { data: existingProfile } = await supabase
+      // Try multiple lookup strategies to find the existing profile
+      let existingProfile: Record<string, unknown> | null = null;
+
+      const { data: byHubId } = await supabase
         .from('profiles')
         .select('*')
         .eq('hub_user_id', hubUser.id)
         .maybeSingle();
+      existingProfile = byHubId;
+
+      if (!existingProfile) {
+        const { data: byEmail } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', hubUser.email)
+          .maybeSingle();
+        existingProfile = byEmail;
+      }
+
+      if (!existingProfile && hubUser.name) {
+        const { data: byName } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('full_name', hubUser.email)
+          .maybeSingle();
+        existingProfile = byName;
+      }
 
       if (existingProfile) {
         await supabase
           .from('profiles')
           .update({
+            hub_user_id: hubUser.id,
             membership_slug: hubUser.membership_slug,
             membership_name: hubUser.membership_name,
             role: normalizedRole,
             email: hubUser.email,
-            full_name: existingProfile.full_name || hubUser.name || hubUser.email,
+            full_name: (existingProfile.full_name as string) || hubUser.name || hubUser.email,
           })
-          .eq('id', existingProfile.id);
+          .eq('id', existingProfile.id as string);
 
         setProfileState({
-          ...existingProfile,
+          ...(existingProfile as unknown as LocalProfile),
+          hub_user_id: hubUser.id,
           membership_slug: hubUser.membership_slug,
           membership_name: hubUser.membership_name,
           role: normalizedRole,
@@ -111,65 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { data: profileByEmail } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('email', hubUser.email)
-        .is('hub_user_id', null)
-        .maybeSingle();
-
-      if (profileByEmail) {
-        await supabase
-          .from('profiles')
-          .update({
-            hub_user_id: hubUser.id,
-            membership_slug: hubUser.membership_slug,
-            membership_name: hubUser.membership_name,
-            role: normalizedRole,
-          })
-          .eq('id', profileByEmail.id);
-
-        setProfileState({
-          ...profileByEmail,
-          hub_user_id: hubUser.id,
-          membership_slug: hubUser.membership_slug,
-          membership_name: hubUser.membership_name,
-          role: normalizedRole,
-        });
-        return;
-      }
-
-      const { data: profileByRole } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', normalizedRole)
-        .is('hub_user_id', null)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (profileByRole && normalizedRole === 'admin') {
-        await supabase
-          .from('profiles')
-          .update({
-            hub_user_id: hubUser.id,
-            email: hubUser.email,
-            full_name: profileByRole.full_name || hubUser.name || hubUser.email,
-            membership_slug: hubUser.membership_slug,
-            membership_name: hubUser.membership_name,
-          })
-          .eq('id', profileByRole.id);
-
-        setProfileState({
-          ...profileByRole,
-          hub_user_id: hubUser.id,
-          email: hubUser.email,
-          membership_slug: hubUser.membership_slug,
-          membership_name: hubUser.membership_name,
-        });
-        return;
-      }
-
+      // Profile not found — create it
       const { error: createError } = await supabase
         .from('profiles')
         .insert({
@@ -182,50 +148,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           membership_name: hubUser.membership_name,
         });
 
-      if (createError) {
-        console.error('❌ Error creating profile:', createError, JSON.stringify(createError));
-        // Fallback: set an in-memory profile so the app doesn't stay stuck
-        setProfileState({
-          id: hubUser.id,
-          user_id: null,
-          hub_user_id: hubUser.id,
-          role: normalizedRole,
-          full_name: hubUser.name || hubUser.email,
-          email: hubUser.email,
-          membership_slug: hubUser.membership_slug,
-          membership_name: hubUser.membership_name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-        return;
+      if (!createError) {
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('hub_user_id', hubUser.id)
+          .maybeSingle();
+        if (newProfile) {
+          setProfileState(newProfile);
+          return;
+        }
+      } else {
+        console.error('❌ Error creating profile:', createError);
       }
 
-      const { data: newProfile } = await supabase
+      // Last resort: attempt one more fetch in case the row existed all along
+      const { data: finalAttempt } = await supabase
         .from('profiles')
         .select('*')
         .eq('hub_user_id', hubUser.id)
         .maybeSingle();
 
-      if (newProfile) {
-        setProfileState(newProfile);
-      } else {
-        // Fallback if re-fetch also fails
-        setProfileState({
-          id: hubUser.id,
-          user_id: null,
-          hub_user_id: hubUser.id,
-          role: normalizedRole,
-          full_name: hubUser.name || hubUser.email,
-          email: hubUser.email,
-          membership_slug: hubUser.membership_slug,
-          membership_name: hubUser.membership_name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+      if (finalAttempt) {
+        setProfileState(finalAttempt);
+        return;
       }
+
+      // Absolute fallback — use hub_user_id as placeholder id so app unblocks.
+      // NOTE: athlete queries will also check hub_user_id to compensate.
+      console.warn('⚠️ Using fallback in-memory profile — DB unreachable');
+      setProfileState({
+        id: hubUser.id,
+        user_id: null,
+        hub_user_id: hubUser.id,
+        role: normalizedRole,
+        full_name: hubUser.name || hubUser.email,
+        email: hubUser.email,
+        membership_slug: hubUser.membership_slug,
+        membership_name: hubUser.membership_name,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
     } catch (error) {
       console.error('💥 Profile sync failed:', error);
-      // Always unblock the UI even on unexpected errors
       if (hubUser) {
         const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
         setProfileState({

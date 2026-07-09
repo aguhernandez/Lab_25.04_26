@@ -77,11 +77,30 @@ export default function CoachDashboard() {
   async function loadData() {
     setLoading(true);
     try {
-      const { data: athleteList } = await supabase
+      // Primary: match by coach_id (DB profile UUID)
+      let { data: athleteList } = await supabase
         .from('athletes')
         .select('id, name, sport')
         .eq('coach_id', profile!.id)
         .order('name');
+
+      // Fallback: if coach_id returned nothing, try hub_user_id match
+      // (happens when syncProfile used hubUser.id as placeholder id)
+      if ((!athleteList || athleteList.length === 0) && profile!.hub_user_id) {
+        const { data: byHub } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('hub_user_id', profile!.hub_user_id)
+          .maybeSingle();
+        if (byHub?.id && byHub.id !== profile!.id) {
+          const { data: fallbackList } = await supabase
+            .from('athletes')
+            .select('id, name, sport')
+            .eq('coach_id', byHub.id)
+            .order('name');
+          athleteList = fallbackList;
+        }
+      }
 
       if (!athleteList || athleteList.length === 0) {
         setLoading(false);

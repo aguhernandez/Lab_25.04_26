@@ -38,10 +38,21 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
 
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
       if (effectiveRole === 'coach' && profile?.id) {
+        // Resolve real DB profile id in case of fallback (id = hub_user_id)
+        let coachProfileId = profile.id;
+        if (profile.hub_user_id && profile.id === profile.hub_user_id) {
+          const { data: realProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('hub_user_id', profile.hub_user_id)
+            .maybeSingle();
+          if (realProfile?.id) coachProfileId = realProfile.id;
+        }
+
         const { data: coachAthletes, error: athleteError } = await supabase
           .from('athletes')
           .select('id')
-          .eq('coach_id', profile.id);
+          .eq('coach_id', coachProfileId);
         if (athleteError) throw athleteError;
         athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
         if (athleteIds.length === 0) {

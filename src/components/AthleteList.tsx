@@ -33,11 +33,24 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
       setLoading(true);
       setError(null);
 
-      // Step 1: load local athletes filtered by coach
-      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      if (effectiveRole === 'coach' && profile?.id) {
-        query = query.eq('coach_id', profile.id);
+
+      // Resolve the real DB profile id (handles fallback where id = hub_user_id)
+      let coachProfileId = (effectiveRole === 'coach' && profile?.id) ? profile.id : null;
+      if (coachProfileId && profile?.hub_user_id && coachProfileId === profile.hub_user_id) {
+        const { data: realProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('hub_user_id', profile.hub_user_id)
+          .maybeSingle();
+        if (realProfile?.id) coachProfileId = realProfile.id;
+      }
+
+      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
+      if (effectiveRole === 'athlete' && profile?.hub_user_id) {
+        query = query.eq('hub_user_id', profile.hub_user_id);
+      } else if (effectiveRole === 'coach' && coachProfileId) {
+        query = query.eq('coach_id', coachProfileId);
       }
       const { data: localData, error: localError } = await query;
       if (localError) throw localError;
@@ -79,11 +92,11 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
             }
 
             // Re-query to get the full, up-to-date list after inserts
-            if (profile?.id) {
+            if (coachProfileId) {
               const { data: refreshed } = await supabase
                 .from('athletes')
                 .select('*')
-                .eq('coach_id', profile.id)
+                .eq('coach_id', coachProfileId)
                 .order('name', { ascending: true });
               if (refreshed) merged = refreshed;
             }
