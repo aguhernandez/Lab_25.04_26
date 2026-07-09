@@ -83,16 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
 
-      const { data: existingProfile, error: fetchError } = await supabase
+      const { data: existingProfile } = await supabase
         .from('profiles')
         .select('*')
         .eq('hub_user_id', hubUser.id)
         .maybeSingle();
-
-      if (fetchError) {
-        console.error('❌ Error fetching profile by hub_user_id:', fetchError);
-        return;
-      }
 
       if (existingProfile) {
         await supabase
@@ -116,14 +111,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { data: profileByEmail, error: emailFetchError } = await supabase
+      const { data: profileByEmail } = await supabase
         .from('profiles')
         .select('*')
         .eq('email', hubUser.email)
         .is('hub_user_id', null)
         .maybeSingle();
 
-      if (!emailFetchError && profileByEmail) {
+      if (profileByEmail) {
         await supabase
           .from('profiles')
           .update({
@@ -144,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { data: profileByRole, error: roleFetchError } = await supabase
+      const { data: profileByRole } = await supabase
         .from('profiles')
         .select('*')
         .eq('role', normalizedRole)
@@ -153,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .limit(1)
         .maybeSingle();
 
-      if (!roleFetchError && profileByRole && normalizedRole === 'admin') {
+      if (profileByRole && normalizedRole === 'admin') {
         await supabase
           .from('profiles')
           .update({
@@ -189,6 +184,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (createError) {
         console.error('❌ Error creating profile:', createError, JSON.stringify(createError));
+        // Fallback: set an in-memory profile so the app doesn't stay stuck
+        setProfileState({
+          id: hubUser.id,
+          user_id: null,
+          hub_user_id: hubUser.id,
+          role: normalizedRole,
+          full_name: hubUser.name || hubUser.email,
+          email: hubUser.email,
+          membership_slug: hubUser.membership_slug,
+          membership_name: hubUser.membership_name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
         return;
       }
 
@@ -200,9 +208,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (newProfile) {
         setProfileState(newProfile);
+      } else {
+        // Fallback if re-fetch also fails
+        setProfileState({
+          id: hubUser.id,
+          user_id: null,
+          hub_user_id: hubUser.id,
+          role: normalizedRole,
+          full_name: hubUser.name || hubUser.email,
+          email: hubUser.email,
+          membership_slug: hubUser.membership_slug,
+          membership_name: hubUser.membership_name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
       }
     } catch (error) {
       console.error('💥 Profile sync failed:', error);
+      // Always unblock the UI even on unexpected errors
+      if (hubUser) {
+        const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
+        setProfileState({
+          id: hubUser.id,
+          user_id: null,
+          hub_user_id: hubUser.id,
+          role: normalizedRole,
+          full_name: hubUser.name || hubUser.email,
+          email: hubUser.email,
+          membership_slug: hubUser.membership_slug,
+          membership_name: hubUser.membership_name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
     }
   };
 
