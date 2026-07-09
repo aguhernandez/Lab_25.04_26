@@ -319,11 +319,8 @@ export interface HubAthleteProfile {
 /**
  * Fetches all athletes assigned to a coach from the Hub.
  *
- * Strategy:
- * 1. Use authenticated Hub client (Hub JWT token) to query Hub profiles directly.
- *    This respects Hub RLS so coaches see their own athletes, admins see all.
- * 2. Try `profiles` where `coach_id = coachHubUserId AND role = 'athlete'`.
- * 3. If Hub schema uses a different column, returns empty array gracefully.
+ * Hub schema: `profiles` table uses `assigned_trainer_id` for the coach FK,
+ * `gender` instead of `sex`, and has `sport`, `date_of_birth`, etc.
  */
 export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
   if (!coachHubUserId) return [];
@@ -334,8 +331,8 @@ export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<Hub
   try {
     const { data, error } = await client
       .from('profiles')
-      .select('id, email, full_name, sport, date_of_birth, sex, coach_id')
-      .eq('coach_id', coachHubUserId)
+      .select('id, email, full_name, sport, date_of_birth, gender, assigned_trainer_id')
+      .eq('assigned_trainer_id', coachHubUserId)
       .eq('role', 'athlete');
 
     if (error) {
@@ -349,8 +346,8 @@ export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<Hub
       full_name: a.full_name as string | undefined,
       sport: a.sport as string | undefined,
       date_of_birth: a.date_of_birth as string | undefined,
-      sex: a.sex as string | undefined,
-      coach_id: a.coach_id as string | undefined,
+      sex: (a.gender === 'male' || a.gender === 'female') ? a.gender : undefined,
+      coach_id: a.assigned_trainer_id as string | undefined,
     }));
   } catch (err) {
     console.warn('[HUB] fetchHubCoachAthletes exception:', err);
