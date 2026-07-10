@@ -95,8 +95,8 @@ export default function ReadinessEngine({ athleteId }: ReadinessEngineProps) {
         .select('oxygen_transport, recovery, hormonal, nutrition')
         .eq('athlete_id', athleteId)
         .order('test_date', { ascending: false }).limit(1),
-      supabase.from('athlete_hydration_sessions')
-        .select('sweat_rate_l_h, usg_pre, percent_dehydration, temperature_c, humidity_percent')
+      supabase.from('hydration_sessions')
+        .select('sweat_rate_l_h, usg_pre, body_mass_change_pct, temperature_c, humidity_pct')
         .eq('athlete_id', athleteId)
         .order('session_date', { ascending: false }).limit(1),
       supabase.from('athlete_anthropometry_profiles')
@@ -124,10 +124,10 @@ export default function ReadinessEngine({ athleteId }: ReadinessEngineProps) {
       biological: extractBiologicalInputs(bioRes.data?.[0]),
       hydration: {
         usg: hydRes.data?.[0]?.usg_pre ?? null,
-        body_mass_change_pct: hydRes.data?.[0]?.percent_dehydration ?? null,
+        body_mass_change_pct: hydRes.data?.[0]?.body_mass_change_pct ?? null,
         sweat_rate_l_h: hydRes.data?.[0]?.sweat_rate_l_h ?? null,
         temperature: hydRes.data?.[0]?.temperature_c ?? null,
-        humidity: hydRes.data?.[0]?.humidity_percent ?? null,
+        humidity: hydRes.data?.[0]?.humidity_pct ?? null,
       },
       anthropometric: {
         body_fat_pct: anthroRes.data?.body_fat_percent ?? null,
