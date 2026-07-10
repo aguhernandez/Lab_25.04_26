@@ -26,7 +26,7 @@ interface MonthlyActivity {
 }
 
 export default function CoachDashboard() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { language } = useLanguage();
   const [athletes, setAthletes] = useState<AthleteSummary[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyActivity[]>([]);
@@ -77,11 +77,21 @@ export default function CoachDashboard() {
   async function loadData() {
     setLoading(true);
     try {
-      const { data: athleteList } = await supabase
-        .from('athletes')
-        .select('id, name, sport')
-        .eq('coach_id', profile!.id)
-        .order('name');
+      const coachHubId = user?.id || profile?.hub_user_id;
+      let athleteList: { id: string; name: string; sport: string }[] | null = null;
+
+      if (coachHubId) {
+        const { data } = await supabase
+          .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+        athleteList = data || [];
+      } else {
+        const { data } = await supabase
+          .from('athletes')
+          .select('id, name, sport')
+          .eq('coach_id', profile!.id)
+          .order('name');
+        athleteList = data || [];
+      }
 
       if (!athleteList || athleteList.length === 0) {
         setLoading(false);

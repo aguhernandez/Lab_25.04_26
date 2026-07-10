@@ -37,14 +37,24 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
       let athleteIds: string[] | null = null;
 
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      if (effectiveRole === 'coach' && profile?.id) {
-        const { data: coachAthletes, error: athleteError } = await supabase
-          .from('athletes')
-          .select('id')
-          .eq('coach_id', profile.id);
-        if (athleteError) throw athleteError;
-        athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
-        if (athleteIds.length === 0) {
+      if (effectiveRole === 'coach') {
+        const coachHubId = profile?.hub_user_id;
+        if (coachHubId) {
+          const { data: ids, error: rpcError } = await supabase
+            .rpc('get_athlete_ids_by_coach_hub_id', { coach_hub_id: coachHubId });
+          if (rpcError) throw rpcError;
+          athleteIds = (ids || []).map((r: { id: string }) => r.id);
+        } else if (profile?.id) {
+          const { data: coachAthletes, error: athleteError } = await supabase
+            .from('athletes')
+            .select('id')
+            .eq('coach_id', profile.id);
+          if (athleteError) throw athleteError;
+          athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
+        } else {
+          athleteIds = [];
+        }
+        if (athleteIds !== null && athleteIds.length === 0) {
           setTests([]);
           setLoading(false);
           return;

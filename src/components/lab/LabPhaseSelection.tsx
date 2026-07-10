@@ -37,14 +37,27 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
   const loadAthletes = async () => {
     try {
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
+      let list: Athlete[] = [];
+
       if (effectiveRole === 'athlete' && profile?.hub_user_id) {
-        query = query.eq('hub_user_id', profile.hub_user_id);
-      } else if (effectiveRole === 'coach' && profile?.id) {
-        query = query.eq('coach_id', profile.id);
+        const { data } = await supabase
+          .from('athletes').select('*').eq('hub_user_id', profile.hub_user_id);
+        list = data || [];
+      } else if (effectiveRole === 'coach') {
+        const coachHubId = profile?.hub_user_id || user?.id;
+        if (coachHubId) {
+          const { data } = await supabase
+            .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+          list = data || [];
+        } else if (profile?.id) {
+          const { data } = await supabase
+            .from('athletes').select('*').eq('coach_id', profile.id).order('name', { ascending: true });
+          list = data || [];
+        }
+      } else {
+        const { data } = await supabase.from('athletes').select('*').order('name', { ascending: true });
+        list = data || [];
       }
-      const { data } = await query;
-      let list: Athlete[] = data || [];
 
       // For coaches, auto-provision Hub athletes not yet in local DB
       if (effectiveRole === 'coach') {
@@ -66,10 +79,7 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
             );
             // Re-fetch after provisioning
             const { data: refreshed } = await supabase
-              .from('athletes')
-              .select('*')
-              .eq('coach_id', profile?.id)
-              .order('name', { ascending: true });
+              .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
             list = refreshed || list;
           }
         }

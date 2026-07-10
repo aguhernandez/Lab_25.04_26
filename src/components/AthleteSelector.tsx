@@ -55,16 +55,33 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
     try {
       setLoading(true);
 
-      // Step 1: load local athletes
-      let query = supabase.from('athletes').select('*').order('name', { ascending: true });
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
-      if (effectiveRole === 'coach' && profile?.id) {
-        query = query.eq('coach_id', profile.id);
-      }
-      const { data: localData, error: localError } = await query;
-      if (localError) throw localError;
 
-      let merged: Athlete[] = localData || [];
+      // Step 1: load local athletes using SECURITY DEFINER RPC for coaches
+      let localData: Athlete[];
+      if (effectiveRole === 'coach') {
+        const coachHubId = user?.id || profile?.hub_user_id;
+        if (coachHubId) {
+          const { data, error: rpcError } = await supabase
+            .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+          if (rpcError) throw rpcError;
+          localData = data || [];
+        } else if (profile?.id) {
+          const { data, error: qErr } = await supabase
+            .from('athletes').select('*').eq('coach_id', profile.id).order('name', { ascending: true });
+          if (qErr) throw qErr;
+          localData = data || [];
+        } else {
+          localData = [];
+        }
+      } else {
+        const { data, error: qErr } = await supabase
+          .from('athletes').select('*').order('name', { ascending: true });
+        if (qErr) throw qErr;
+        localData = data || [];
+      }
+
+      let merged: Athlete[] = localData;
 
       // Step 2: for coaches, pull Hub athlete roster and auto-provision missing records
       if (effectiveRole === 'coach' && hubEnabled) {
@@ -97,7 +114,12 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
             }
 
             // Refresh to get the complete list
-            if (profile?.id) {
+            const coachHubId2 = user?.id || profile?.hub_user_id;
+            if (coachHubId2) {
+              const { data: refreshed } = await supabase
+                .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId2 });
+              if (refreshed) merged = refreshed;
+            } else if (profile?.id) {
               const { data: refreshed } = await supabase
                 .from('athletes')
                 .select('*')

@@ -83,16 +83,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const normalizedRole = hubUser.role === 'trainer' ? 'coach' : hubUser.role;
 
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('hub_user_id', hubUser.id)
-        .maybeSingle();
+      // Use SECURITY DEFINER RPC to bypass anon RLS restrictions on profiles table
+      const { data: profileList, error: fetchError } = await supabase
+        .rpc('get_profile_by_hub_id', { hub_id: hubUser.id });
 
       if (fetchError) {
         console.error('❌ Error fetching profile by hub_user_id:', fetchError);
         return;
       }
+
+      const existingProfile = profileList?.[0] ?? null;
 
       if (existingProfile) {
         await supabase
