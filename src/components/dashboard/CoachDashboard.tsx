@@ -4,6 +4,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Athlete } from '../../types';
+import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../../lib/hubLink';
+import { getDefaultCoachId } from '../../lib/auth';
 
 interface AthleteSummary {
   id: string;
@@ -84,7 +86,7 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
     setLoading(true);
     try {
       const coachHubId = user?.id || profile?.hub_user_id;
-      let athleteList: { id: string; name: string; sport: string }[] | null = null;
+      let athleteList: { id: string; name: string; sport: string; hub_user_id?: string }[] = [];
 
       if (coachHubId) {
         const { data } = await supabase
@@ -99,9 +101,53 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
         athleteList = data || [];
       }
 
-      if (!athleteList || athleteList.length === 0) {
-        setLoading(false);
-        return;
+      if (athleteList.length === 0) {
+        // Even with 0 local athletes, try Hub sync before giving up
+        if (isHubLinkingEnabled() && coachHubId) {
+          const hubAthletes = await fetchHubCoachAthletes(coachHubId);
+          if (hubAthletes.length > 0) {
+            const assignedCoachId = profile?.id || await getDefaultCoachId();
+            const toInsert = hubAthletes.map(ha => ({
+              name: ha.full_name || ha.email || 'Hub Athlete',
+              email: ha.email || null,
+              sport: ha.sport || 'other',
+              hub_user_id: ha.id,
+              coach_id: assignedCoachId,
+            }));
+            await supabase.from('athletes').insert(toInsert).select();
+            const { data: refreshed } = await supabase
+              .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+            athleteList = refreshed || [];
+          }
+        }
+        if (athleteList.length === 0) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Sync Hub athletes that are not yet in local DB
+      if (isHubLinkingEnabled() && coachHubId) {
+        const hubAthletes = await fetchHubCoachAthletes(coachHubId);
+        if (hubAthletes.length > 0) {
+          const localHubIds = new Set(athleteList.map(a => a.hub_user_id).filter(Boolean));
+          const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
+          if (missing.length > 0) {
+            const assignedCoachId = profile?.id || await getDefaultCoachId();
+            await supabase.from('athletes').insert(
+              missing.map(ha => ({
+                name: ha.full_name || ha.email || 'Hub Athlete',
+                email: ha.email || null,
+                sport: ha.sport || 'other',
+                hub_user_id: ha.id,
+                coach_id: assignedCoachId,
+              }))
+            );
+            const { data: refreshed } = await supabase
+              .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+            if (refreshed) athleteList = refreshed;
+          }
+        }
       }
 
       const athleteIds = athleteList.map(a => a.id);

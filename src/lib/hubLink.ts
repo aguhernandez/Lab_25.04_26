@@ -320,14 +320,18 @@ export interface HubAthleteProfile {
  * Fetches all athletes assigned to a coach from the Hub.
  *
  * Strategy:
- * 1. Use authenticated Hub client (Hub JWT token) to query Hub profiles directly.
- *    This respects Hub RLS so coaches see their own athletes, admins see all.
- * 2. Try `profiles` where `coach_id = coachHubUserId AND role = 'athlete'`.
- * 3. If Hub schema uses a different column, returns empty array gracefully.
+ * 1. Primary: call hub-data-proxy/coach-athletes edge function which forwards to
+ *    Hub's planner-hub-api/coach-athletes using X-Planner-Token (bypasses Hub RLS).
+ * 2. Fallback: query Hub profiles directly via authenticated Hub client.
  */
 export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<HubAthleteProfile[]> {
   if (!coachHubUserId) return [];
 
+  // Primary: use hub-data-proxy which has X-Planner-Token access
+  const proxyResult = await fetchCoachAthletesViaProxy(coachHubUserId);
+  if (proxyResult.length > 0) return proxyResult;
+
+  // Fallback: direct Hub query (may be limited by Hub RLS)
   const client = getAuthenticatedHubClient();
   if (!client) return [];
 
@@ -339,7 +343,7 @@ export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<Hub
       .eq('role', 'athlete');
 
     if (error) {
-      console.warn('[HUB] fetchHubCoachAthletes query failed:', error.message);
+      console.warn('[HUB] fetchHubCoachAthletes direct query failed:', error.message);
       return [];
     }
 
@@ -354,6 +358,47 @@ export async function fetchHubCoachAthletes(coachHubUserId: string): Promise<Hub
     }));
   } catch (err) {
     console.warn('[HUB] fetchHubCoachAthletes exception:', err);
+    return [];
+  }
+}
+
+async function fetchCoachAthletesViaProxy(coachHubUserId: string): Promise<HubAthleteProfile[]> {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) return [];
+
+    const token = localStorage.getItem('hub_session_token');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'apikey': supabaseAnonKey,
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const url = `${supabaseUrl}/functions/v1/hub-data-proxy/coach-athletes?coach_id=${encodeURIComponent(coachHubUserId)}`;
+    const response = await fetch(url, { method: 'GET', headers });
+
+    if (!response.ok) {
+      console.warn('[HUB] proxy coach-athletes returned', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+    const athletes = Array.isArray(data) ? data : (data?.athletes || data?.data || []);
+
+    return athletes.map((a: any) => ({
+      id: a.id || a.user_id || '',
+      email: a.email || undefined,
+      full_name: a.full_name || a.name || undefined,
+      sport: a.sport || undefined,
+      date_of_birth: a.date_of_birth || undefined,
+      sex: a.sex || undefined,
+      coach_id: a.coach_id || undefined,
+    }));
+  } catch (err) {
+    console.warn('[HUB] fetchCoachAthletesViaProxy error:', err);
     return [];
   }
 }
