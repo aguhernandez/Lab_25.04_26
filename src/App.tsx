@@ -280,7 +280,7 @@ function AppContent() {
         </header>
 
         <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-          {currentView === 'dashboard' && <Dashboard />}
+          {currentView === 'dashboard' && <Dashboard onViewAthlete={handleViewAthlete} />}
           {currentView === 'admin' && <AdminPanel />}
           {currentView === 'users' && <UserManagement />}
           {currentView === 'settings' && <Settings />}

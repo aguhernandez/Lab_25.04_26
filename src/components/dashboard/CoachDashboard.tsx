@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Athlete } from '../../types';
 
 interface AthleteSummary {
   id: string;
@@ -12,6 +13,7 @@ interface AthleteSummary {
   lt2_hr?: number | null;
   testCount: number;
   daysWithoutTest?: number;
+  lastTestDate?: string;
   bodyFat?: number | null;
   muscleMass?: number | null;
   bmi?: number | null;
@@ -25,7 +27,11 @@ interface MonthlyActivity {
   tests: number;
 }
 
-export default function CoachDashboard() {
+interface CoachDashboardProps {
+  onViewAthlete?: (athlete: Athlete) => void;
+}
+
+export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
   const { profile, user } = useAuth();
   const { language } = useLanguage();
   const [athletes, setAthletes] = useState<AthleteSummary[]>([]);
@@ -159,6 +165,7 @@ export default function CoachDashboard() {
           vo2max: lastResult?.vo2max ?? null,
           lt2_hr: lastResult?.lt2_hr ?? null,
           daysWithoutTest,
+          lastTestDate: lastTest?.test_date ?? undefined,
           bodyFat: anthro?.body_fat_percent ?? null,
           muscleMass: anthro?.muscle_mass_kg ?? null,
           bmi: anthro?.bmi ?? null,
@@ -328,8 +335,13 @@ export default function CoachDashboard() {
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
                   {athletes.map(athlete => {
                     const overdue = athlete.daysWithoutTest !== undefined && athlete.daysWithoutTest > 60;
+                    const clickable = !!onViewAthlete;
                     return (
-                      <tr key={athlete.id} className={`transition-colors ${overdue && activeTab === 'physiology' ? 'bg-amber-50/50 dark:bg-amber-900/10' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/20'}`}>
+                      <tr
+                        key={athlete.id}
+                        onClick={clickable ? () => onViewAthlete!({ id: athlete.id, name: athlete.name, sport: athlete.sport as any, created_at: '', updated_at: '' }) : undefined}
+                        className={`transition-colors ${overdue && activeTab === 'physiology' ? 'bg-amber-50/50 dark:bg-amber-900/10' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/20'} ${clickable ? 'cursor-pointer' : ''}`}
+                      >
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-2.5">
                             <div className="w-7 h-7 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
@@ -338,8 +350,8 @@ export default function CoachDashboard() {
                               </span>
                             </div>
                             <div>
-                              <p className="text-sm font-medium text-gray-900 dark:text-white leading-tight">{athlete.name}</p>
-                              <p className="text-xs text-gray-400 dark:text-gray-500">{athlete.testCount} {t('evals')}</p>
+                              <p className={`text-sm font-medium leading-tight ${clickable ? 'text-[#514163] dark:text-[#fdda36] hover:underline' : 'text-gray-900 dark:text-white'}`}>{athlete.name}</p>
+                              <p className="text-xs text-gray-400 dark:text-gray-500">{athlete.testCount} {t('evals')}{athlete.lastTestDate ? ` · ${new Date(athlete.lastTestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</p>
                             </div>
                           </div>
                         </td>
