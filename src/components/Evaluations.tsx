@@ -34,55 +34,58 @@ export default function Evaluations({ onViewResults }: EvaluationsProps) {
 
   const fetchTests = async () => {
     try {
-      let athleteIds: string[] | null = null;
-
       const effectiveRole = profile?.role === 'trainer' ? 'coach' : profile?.role;
       if (effectiveRole === 'coach') {
         const coachHubId = profile?.hub_user_id;
         if (coachHubId) {
-          const { data: ids, error: rpcError } = await supabase
-            .rpc('get_athlete_ids_by_coach_hub_id', { coach_hub_id: coachHubId });
-          if (rpcError) throw rpcError;
-          athleteIds = (ids || []).map((r: { id: string }) => r.id);
+          const { data, error } = await supabase
+            .rpc('get_tests_by_coach_hub_id', { coach_hub_id: coachHubId });
+          if (error) throw error;
+          const mapped = (data || []).map((row: any) => ({
+            id: row.id,
+            athlete_id: row.athlete_id,
+            test_date: row.test_date,
+            test_type: row.test_type,
+            status: row.status,
+            created_at: row.created_at,
+            athletes: { name: row.athlete_name, sport: row.athlete_sport },
+          }));
+          setTests(mapped);
+          setLoading(false);
+          return;
         } else if (profile?.id) {
           const { data: coachAthletes, error: athleteError } = await supabase
             .from('athletes')
             .select('id')
             .eq('coach_id', profile.id);
           if (athleteError) throw athleteError;
-          athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
+          const athleteIds = (coachAthletes || []).map((a: { id: string }) => a.id);
+          if (athleteIds.length === 0) {
+            setTests([]);
+            setLoading(false);
+            return;
+          }
+          const { data, error } = await supabase
+            .from('tests')
+            .select(`id, athlete_id, test_date, test_type, status, created_at, athletes(name, sport, coach_id)`)
+            .in('athlete_id', athleteIds)
+            .order('test_date', { ascending: false });
+          if (error) throw error;
+          setTests((data as any) || []);
+          setLoading(false);
+          return;
         } else {
-          athleteIds = [];
-        }
-        if (athleteIds !== null && athleteIds.length === 0) {
           setTests([]);
           setLoading(false);
           return;
         }
       }
 
-      let query = supabase
+      // admin or athlete: fetch all or own
+      const { data, error } = await supabase
         .from('tests')
-        .select(`
-          id,
-          athlete_id,
-          test_date,
-          test_type,
-          status,
-          created_at,
-          athletes (
-            name,
-            sport,
-            coach_id
-          )
-        `)
+        .select(`id, athlete_id, test_date, test_type, status, created_at, athletes(name, sport, coach_id)`)
         .order('test_date', { ascending: false });
-
-      if (athleteIds !== null) {
-        query = query.in('athlete_id', athleteIds);
-      }
-
-      const { data, error } = await query;
       if (error) throw error;
       setTests((data as any) || []);
     } catch (error) {

@@ -111,7 +111,6 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
           .from('tests')
           .select('id, athlete_id, test_date, status')
           .in('athlete_id', athleteIds)
-          .eq('status', 'completed')
           .order('test_date', { ascending: false }),
         supabase
           .from('test_results')
@@ -121,7 +120,7 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
           .select('athlete_id, body_fat_percent, muscle_mass_kg, bmi')
           .in('athlete_id', athleteIds),
         supabase
-          .from('hydration_sessions')
+          .from('athlete_hydration_sessions')
           .select('id', { count: 'exact', head: true })
           .in('athlete_id', athleteIds),
         supabase
