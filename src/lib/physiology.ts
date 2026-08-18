@@ -74,6 +74,7 @@ export interface PhysiologyResults {
   has_vo2: boolean;
   has_rer: boolean;
   has_pace: boolean;
+  threshold_source: 'ventilatory' | 'lactate';
   // Unified thresholds (LT + VT)
   thresholds: UnifiedThresholds;
 }
@@ -297,6 +298,7 @@ export function calculatePhysiology(
     has_vo2,
     has_rer,
     has_pace,
+    threshold_source: thresholdSource,
     thresholds
   };
 }

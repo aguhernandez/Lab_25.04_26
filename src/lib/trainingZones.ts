@@ -342,14 +342,15 @@ export function calculateZones7(
         const midSpeed = (lt1Speed + lt2Speed) / 2;
         const z1MaxSpeed = lt1Speed * 0.90;
 
+        // For running/swimming, pace_min = faster (lower time), pace_max = slower (higher time)
         zones[0].pace_min = null;
-        zones[0].pace_max = kmhToPace(z1MaxSpeed, sport);
-        zones[1].pace_min = kmhToPace(z1MaxSpeed, sport);
-        zones[1].pace_max = kmhToPace(lt1Speed, sport);
-        zones[2].pace_min = kmhToPace(lt1Speed, sport);
-        zones[2].pace_max = kmhToPace(midSpeed, sport);
-        zones[3].pace_min = kmhToPace(midSpeed, sport);
-        zones[3].pace_max = kmhToPace(lt2Speed, sport);
+        zones[0].pace_max = kmhToPace(z1MaxSpeed, sport); // slowest in zone (90% LT1 speed)
+        zones[1].pace_min = kmhToPace(lt1Speed, sport); // fastest in zone (LT1 speed)
+        zones[1].pace_max = kmhToPace(z1MaxSpeed, sport); // slowest in zone
+        zones[2].pace_min = kmhToPace(midSpeed, sport); // fastest (closer to LT1)
+        zones[2].pace_max = kmhToPace(lt1Speed, sport); // slowest (at LT1)
+        zones[3].pace_min = kmhToPace(lt2Speed, sport); // fastest (at LT2)
+        zones[3].pace_max = kmhToPace(midSpeed, sport); // slowest (closer to LT1)
 
         // Z5-Z7 pace
         const z5MaxSpeed = lt2Speed * 1.05;
@@ -357,12 +358,12 @@ export function calculateZones7(
         const z7MinSpeed = vamSpeed * 1.05;
         const z7MaxSpeed = vamSpeed * 1.30;
 
-        zones[4].pace_min = kmhToPace(lt2Speed, sport);
-        zones[4].pace_max = kmhToPace(z5MaxSpeed, sport);
-        zones[5].pace_min = kmhToPace(z5MaxSpeed, sport);
-        zones[5].pace_max = kmhToPace(vamSpeed, sport);
-        zones[6].pace_min = kmhToPace(z7MinSpeed, sport);
-        zones[6].pace_max = kmhToPace(z7MaxSpeed, sport);
+        zones[4].pace_min = kmhToPace(z5MaxSpeed, sport); // fastest (105% LT2)
+        zones[4].pace_max = kmhToPace(lt2Speed, sport); // slowest (at LT2)
+        zones[5].pace_min = kmhToPace(vamSpeed, sport); // fastest (VAM)
+        zones[5].pace_max = kmhToPace(z5MaxSpeed, sport); // slowest (105% LT2)
+        zones[6].pace_min = kmhToPace(z7MaxSpeed, sport); // fastest (130% VAM)
+        zones[6].pace_max = kmhToPace(z7MinSpeed, sport); // slowest (105% VAM)
 
         // Interpolate HR for Z5 and Z6 using speed as the driver
         const z5HR = interpolateHR(z5MaxSpeed, lt2Speed, vamSpeed, lt2, hrmax);
