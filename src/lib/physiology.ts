@@ -1,5 +1,5 @@
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
-import { buildTrainingZonesData, TrainingZonesData } from './trainingZones';
+import { buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
 
@@ -195,15 +195,20 @@ export function calculatePhysiology(
 
   const hr_drift_percent = calculateHRDrift(sortedPoints);
 
-  const training_zones = calculateTrainingZones(
-    sortedPoints,
-    lt1_hr,
-    lt2_hr,
-    has_power,
-    has_pace,
-    athlete.sport,
-    hrmax
-  );
+  const thresholdSource: 'ventilatory' | 'lactate' = has_lactate ? 'lactate' : 'ventilatory';
+  const zoneOptions: ZoneCalculationOptions = {
+    vam_kmh,
+    pam_watts,
+    threshold_source: thresholdSource,
+    threshold_confidence: lt1_confidence,
+  };
+
+  const zones7 = calculateZones7(lt1_hr, lt2_hr, hrmax, athlete.sport, sortedPoints, zoneOptions);
+  const training_zones: TrainingZone[] = convertTo5Zones(zones7, athlete.sport).map(z => ({
+    ...z,
+    power_min: z.power_min ?? undefined,
+    power_max: z.power_max ?? undefined,
+  }));
 
   const zones_data = buildTrainingZonesData(
     lt1_hr,
@@ -211,7 +216,8 @@ export function calculatePhysiology(
     hrmax,
     athlete.sport,
     '5',
-    sortedPoints
+    sortedPoints,
+    zoneOptions
   );
 
   const { quality_text, quality_score } = assessDataQuality(
@@ -912,111 +918,6 @@ function calculateHRDrift(points: TestDataPoint[]): number | null {
   return Math.abs(drift) > 0.5 ? Math.round(drift * 10) / 10 : null;
 }
 
-function calculateTrainingZones(
-  points: TestDataPoint[],
-  lt1_hr: number | null,
-  lt2_hr: number | null,
-  hasPower: boolean,
-  hasPace: boolean,
-  sport: Sport,
-  hrmax: number
-): TrainingZone[] {
-  const lt1 = lt1_hr || Math.round(hrmax * 0.70);
-  const lt2 = lt2_hr || Math.round(hrmax * 0.90);
-
-  const zones: TrainingZone[] = [
-    {
-      zone: 1,
-      name: getZoneName(1, sport),
-      hr_min: Math.round(hrmax * 0.50),
-      hr_max: lt1,
-      description: 'Recovery and base aerobic development'
-    },
-    {
-      zone: 2,
-      name: getZoneName(2, sport),
-      hr_min: lt1 + 1,
-      hr_max: Math.round(lt1 * 1.05),
-      description: 'Aerobic endurance'
-    },
-    {
-      zone: 3,
-      name: getZoneName(3, sport),
-      hr_min: Math.round(lt1 * 1.05) + 1,
-      hr_max: lt2,
-      description: 'Tempo and sustainable pace'
-    },
-    {
-      zone: 4,
-      name: getZoneName(4, sport),
-      hr_min: lt2 + 1,
-      hr_max: Math.round(lt2 * 1.05),
-      description: 'Lactate threshold training'
-    },
-    {
-      zone: 5,
-      name: getZoneName(5, sport),
-      hr_min: Math.round(lt2 * 1.05) + 1,
-      hr_max: hrmax,
-      description: 'VO2max and anaerobic capacity'
-    }
-  ];
-
-  if (hasPower) {
-    const maxPower = Math.max(...points.map(p => p.power_watts || 0));
-    const lt1Power = points.find(p => p.heart_rate >= lt1)?.power_watts || maxPower * 0.55;
-    const lt2Power = points.find(p => p.heart_rate >= lt2)?.power_watts || maxPower * 0.75;
-
-    zones[0].power_min = Math.round(maxPower * 0.40);
-    zones[0].power_max = Math.round(lt1Power * 0.90);
-    zones[1].power_min = Math.round(lt1Power * 0.90) + 1;
-    zones[1].power_max = Math.round(lt1Power * 1.05);
-    zones[2].power_min = Math.round(lt1Power * 1.05) + 1;
-    zones[2].power_max = Math.round(lt2Power * 0.95);
-    zones[3].power_min = Math.round(lt2Power * 0.95) + 1;
-    zones[3].power_max = Math.round(lt2Power * 1.05);
-    zones[4].power_min = Math.round(lt2Power * 1.05) + 1;
-    zones[4].power_max = Math.round(maxPower * 1.20);
-  }
-
-  if (hasPace) {
-    const lt1PacePoint = points.reduce((prev, curr) =>
-      Math.abs(curr.heart_rate - lt1) < Math.abs(prev.heart_rate - lt1) ? curr : prev
-    );
-    const lt2PacePoint = points.reduce((prev, curr) =>
-      Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev
-    );
-
-    const pacePoints = points.filter(p => p.speed_pace && p.speed_pace.trim() !== '');
-    if (pacePoints.length >= 2) {
-      const lt1Pace = lt1PacePoint.speed_pace || null;
-      const lt2Pace = lt2PacePoint.speed_pace || null;
-
-      zones[0].pace_max = lt1Pace;
-      zones[1].pace_min = lt1Pace;
-      zones[1].pace_max = lt1Pace;
-      zones[2].pace_min = lt1Pace;
-      zones[2].pace_max = lt2Pace;
-      zones[3].pace_min = lt2Pace;
-      zones[3].pace_max = lt2Pace;
-      zones[4].pace_min = lt2Pace;
-    }
-  }
-
-  return zones;
-}
-
-function getZoneName(zone: number, sport: Sport): string {
-  const names: Record<number, Record<Sport, string>> = {
-    1: { cycling: 'Active Recovery', running: 'Easy', triathlon: 'Recovery', swimming: 'Easy', other: 'Recovery' },
-    2: { cycling: 'Endurance', running: 'Aerobic', triathlon: 'Endurance', swimming: 'Aerobic', other: 'Endurance' },
-    3: { cycling: 'Tempo', running: 'Tempo', triathlon: 'Tempo', swimming: 'Threshold', other: 'Tempo' },
-    4: { cycling: 'Threshold', running: 'Threshold', triathlon: 'Threshold', swimming: 'VO2max', other: 'Threshold' },
-    5: { cycling: 'VO2max', running: 'VO2max', triathlon: 'VO2max', swimming: 'Sprint', other: 'VO2max' }
-  };
-
-  return names[zone][sport];
-}
 
 function assessDataQuality(
   points: TestDataPoint[],

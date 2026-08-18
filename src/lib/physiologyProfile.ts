@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { createClient } from '@supabase/supabase-js';
 import { PhysiologyResults } from './physiology';
 import { Athlete, Test, TrainingZone } from '../types';
-import { calculateZones7, convertTo5Zones, ZoneDefinition } from './trainingZones';
+import { calculateZones7, convertTo5Zones, ZoneDefinition, ZoneCalculationOptions } from './trainingZones';
 import { Sport } from '../types';
 
 export interface PhysiologyProfileSnapshot {
@@ -86,67 +86,20 @@ export interface AthleteTrainingZones {
 }
 
 function buildPhysiologyZones(results: PhysiologyResults): TrainingZone[] {
-  const hrmax = results.hrmax;
-  const lt1 = results.lt1_hr || Math.round(hrmax * 0.70);
-  const lt2 = results.lt2_hr || Math.round(hrmax * 0.90);
-
-  return [
-    {
-      zone: 1,
-      name: 'Zone 1 — Recovery',
-      hr_min: Math.round(hrmax * 0.50),
-      hr_max: lt1,
-      power_min: results.pam_watts ? Math.round(results.pam_watts * 0.40) : undefined,
-      power_max: results.lt1_power ? Math.round(results.lt1_power * 0.90) : undefined,
-      pace_max: results.lt1_pace || undefined,
-      description: '< LT1 — Recovery and base aerobic development'
-    },
-    {
-      zone: 2,
-      name: 'Zone 2 — Aerobic',
-      hr_min: lt1 + 1,
-      hr_max: results.fatmax_hr || Math.round(lt1 * 1.05),
-      power_min: results.lt1_power ? Math.round(results.lt1_power * 0.90) + 1 : undefined,
-      power_max: results.fatmax_power ? Math.round(results.fatmax_power) : undefined,
-      pace_min: results.lt1_pace || undefined,
-      pace_max: results.fatmax_pace || undefined,
-      description: 'LT1 to FatMax — Aerobic endurance and fat oxidation'
-    },
-    {
-      zone: 3,
-      name: 'Zone 3 — Tempo',
-      hr_min: (results.fatmax_hr || Math.round(lt1 * 1.05)) + 1,
-      hr_max: lt2,
-      power_min: results.fatmax_power ? Math.round(results.fatmax_power) + 1 : undefined,
-      power_max: results.lt2_power ? Math.round(results.lt2_power * 0.95) : undefined,
-      pace_min: results.fatmax_pace || undefined,
-      pace_max: results.lt2_pace || undefined,
-      description: 'FatMax to LT2 — Tempo and sustained effort'
-    },
-    {
-      zone: 4,
-      name: 'Zone 4 — Threshold',
-      hr_min: lt2 + 1,
-      hr_max: results.vo2max_ml_kg_min
-        ? Math.round(hrmax * 0.95)
-        : Math.round(lt2 * 1.05),
-      power_min: results.lt2_power ? Math.round(results.lt2_power * 0.95) + 1 : undefined,
-      power_max: results.pam_watts ? Math.round(results.pam_watts * 0.95) : undefined,
-      pace_min: results.lt2_pace || undefined,
-      description: 'LT2 to 95% VO2max — Lactate threshold training'
-    },
-    {
-      zone: 5,
-      name: 'Zone 5 — VO2max',
-      hr_min: results.vo2max_ml_kg_min
-        ? Math.round(hrmax * 0.95) + 1
-        : Math.round(lt2 * 1.05) + 1,
-      hr_max: hrmax,
-      power_min: results.pam_watts ? Math.round(results.pam_watts * 0.95) + 1 : undefined,
-      power_max: results.pam_watts ? Math.round(results.pam_watts * 1.20) : undefined,
-      description: '95% VO2max+ — Maximal aerobic and anaerobic capacity'
-    }
-  ];
+  const sport: Sport = (results as any).sport ?? 'other';
+  const dataPoints = (results as any).stage_analysis ?? [];
+  const options: ZoneCalculationOptions = {
+    vam_kmh: results.vam_kmh,
+    pam_watts: results.pam_watts,
+    threshold_source: results.has_lactate ? 'lactate' : 'ventilatory',
+    threshold_confidence: results.lt1_confidence,
+  };
+  const zones7 = calculateZones7(results.lt1_hr, results.lt2_hr, results.hrmax, sport, dataPoints, options);
+  return convertTo5Zones(zones7, sport).map(z => ({
+    ...z,
+    power_min: z.power_min ?? undefined,
+    power_max: z.power_max ?? undefined,
+  }));
 }
 
 export async function fetchAthletePhysiologyProfile(
@@ -336,7 +289,13 @@ function buildZonesFromManualInput(input: ManualPhysiologyInput): TrainingZone[]
   const zoneMode = input.zone_mode || '5';
 
   const dataPoints = buildManualDataPoints(input);
-  const zones7 = calculateZones7(input.lt1_hr, input.lt2_hr, hrmax, sport, dataPoints);
+  const options: ZoneCalculationOptions = {
+    vam_kmh: input.vam_kmh ?? null,
+    pam_watts: input.pam_watts ?? null,
+    threshold_source: 'lactate',
+    threshold_confidence: 'measured',
+  };
+  const zones7 = calculateZones7(input.lt1_hr, input.lt2_hr, hrmax, sport, dataPoints, options);
 
   if (zoneMode === '7') {
     return toTrainingZones(zones7);

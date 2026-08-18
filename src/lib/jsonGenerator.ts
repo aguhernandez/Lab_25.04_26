@@ -295,12 +295,14 @@ function generateFatMax(results: PhysiologyResults) {
 
 function generateTrainingZonesJSON(results: PhysiologyResults, weightKg: number) {
   return results.training_zones.map(zone => {
-    const hr_range = `${zone.hr_min}-${zone.hr_max}`;
+    const hr_min = zone.hr_min ?? 0;
+    const hr_max = zone.hr_max ?? 0;
+    const hr_range = `${hr_min}-${hr_max}`;
 
     let vo2_range_L_min: string | undefined = undefined;
     if (results.has_vo2 && results.vo2max_ml_kg_min) {
-      const vo2_min_L = ((zone.hr_min / results.hrmax) * results.vo2max_ml_kg_min * weightKg) / 1000;
-      const vo2_max_L = ((zone.hr_max / results.hrmax) * results.vo2max_ml_kg_min * weightKg) / 1000;
+      const vo2_min_L = ((hr_min / results.hrmax) * results.vo2max_ml_kg_min * weightKg) / 1000;
+      const vo2_max_L = ((hr_max / results.hrmax) * results.vo2max_ml_kg_min * weightKg) / 1000;
       vo2_range_L_min = `${vo2_min_L.toFixed(2)}-${vo2_max_L.toFixed(2)}`;
     }
 

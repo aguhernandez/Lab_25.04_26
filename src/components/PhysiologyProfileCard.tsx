@@ -121,7 +121,11 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     try {
       const effectiveSport: Sport = (sport as Sport) || 'other';
       const hrmax = profile.hrmax || 190;
-      const zones7 = calculateZones7(profile.lt1_hr, profile.lt2_hr, hrmax, effectiveSport);
+      const zones7 = calculateZones7(
+        profile.lt1_hr, profile.lt2_hr, hrmax, effectiveSport,
+        undefined,
+        { vam_kmh: profile.vam_kmh, pam_watts: profile.pam_watts, threshold_confidence: 'measured' },
+      );
       const newZones = mode === '7' ? zones7 : convertTo5Zones(zones7, effectiveSport);
       const ok = await updateTrainingZonesManual(athleteId, newZones as TrainingZone[], 'coach');
       if (ok) {

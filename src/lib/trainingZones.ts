@@ -1,10 +1,12 @@
 import { Sport } from '../types';
 
+export type ZoneConfidence = 'measured' | 'estimated' | 'inferred';
+
 export interface ZoneDefinition {
   zone: number;
   name: string;
-  hr_min: number;
-  hr_max: number;
+  hr_min: number | null;
+  hr_max: number | null;
   power_min?: number | null;
   power_max?: number | null;
   pace_min?: string | null;
@@ -12,6 +14,14 @@ export interface ZoneDefinition {
   rpe_min?: number | null;
   rpe_max?: number | null;
   description: string;
+  confidence?: ZoneConfidence;
+}
+
+export interface ZoneCalculationOptions {
+  vam_kmh?: number | null;
+  pam_watts?: number | null;
+  threshold_source?: 'ventilatory' | 'lactate';
+  threshold_confidence?: ZoneConfidence;
 }
 
 export interface TrainingZonesData {
@@ -59,21 +69,155 @@ const ZONE5_DESCRIPTIONS: Record<number, string> = {
   5: 'VO2max, anaerobic capacity and sprint efforts',
 };
 
+// ---- Internal pace/speed helpers ----
+
+function paceToKmh(pace: string, sport: Sport): number | null {
+  if (!pace || pace.trim() === '') return null;
+  const trimmed = pace.trim();
+
+  if (sport === 'cycling' || sport === 'triathlon') {
+    const num = parseFloat(trimmed.replace(',', '.'));
+    return !isNaN(num) && num > 0 ? num : null;
+  }
+
+  if (sport === 'running') {
+    if (trimmed.includes(':')) {
+      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
+      if (parts.length >= 2) {
+        const mins = parseInt(parts[0]);
+        const secs = parseInt(parts[1]);
+        if (!isNaN(mins) && !isNaN(secs) && (mins + secs / 60) > 0) {
+          return 60 / (mins + secs / 60);
+        }
+      }
+    }
+    const num = parseFloat(trimmed.replace(',', '.'));
+    return !isNaN(num) && num > 0 ? num : null;
+  }
+
+  if (sport === 'swimming') {
+    if (trimmed.includes(':')) {
+      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
+      if (parts.length >= 2) {
+        const mins = parseInt(parts[0]);
+        const secs = parseInt(parts[1]);
+        const totalMins = mins + secs / 60;
+        if (!isNaN(totalMins) && totalMins > 0) {
+          return (0.1 / totalMins) * 60;
+        }
+      }
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function kmhToPace(kmh: number, sport: Sport): string | null {
+  if (!kmh || kmh <= 0) return null;
+
+  if (sport === 'cycling' || sport === 'triathlon') {
+    return (Math.round(kmh * 10) / 10).toString();
+  }
+
+  if (sport === 'running') {
+    const minsPerKm = 60 / kmh;
+    const m = Math.floor(minsPerKm);
+    const s = Math.round((minsPerKm - m) * 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  if (sport === 'swimming') {
+    const minsPer100m = 6 / kmh;
+    const m = Math.floor(minsPer100m);
+    const s = Math.round((minsPer100m - m) * 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  return null;
+}
+
+function interpolateHR(
+  currentVal: number,
+  lowVal: number,
+  highVal: number,
+  lowHR: number,
+  highHR: number,
+): number {
+  if (highVal === lowVal) return lowHR;
+  const ratio = Math.max(0, Math.min(1, (currentVal - lowVal) / (highVal - lowVal)));
+  return Math.round(lowHR + ratio * (highHR - lowHR));
+}
+
+function ensureValidRange(min: number | null, max: number | null): { min: number | null; max: number | null } {
+  if (min == null || max == null) return { min, max };
+  if (min === max) return { min: min - 1, max: max + 1 };
+  if (min > max) return { min: max, max: min };
+  return { min, max };
+}
+
+// ---- Main unified zone calculation ----
+
 export function calculateZones7(
   lt1_hr: number | null,
   lt2_hr: number | null,
   hrmax: number,
   sport: Sport,
   dataPoints?: Array<{ heart_rate: number; power_watts?: number | null; speed_pace?: string | null }>,
+  options?: ZoneCalculationOptions,
 ): ZoneDefinition[] {
   const lt1 = lt1_hr ?? Math.round(hrmax * 0.72);
   const lt2 = lt2_hr ?? Math.round(hrmax * 0.87);
   const midLT = Math.round((lt1 + lt2) / 2);
-  const hr90max = Math.round(hrmax * 0.90);
+  const thresholdConfidence = options?.threshold_confidence ?? 'estimated';
 
   const hasPower = !!dataPoints?.some(p => p.power_watts != null && p.power_watts > 0);
   const hasPace = !!dataPoints?.some(p => p.speed_pace && p.speed_pace.trim() !== '');
 
+  // Resolve VAM/PAM
+  let vamKmh: number | null = options?.vam_kmh ?? null;
+  let pamWatts: number | null = options?.pam_watts ?? null;
+  let vamPamConfidence: ZoneConfidence = 'measured';
+
+  // If not provided, try to derive from data points
+  if (!vamKmh && dataPoints && hasPace) {
+    let maxSpeed = 0;
+    for (const p of dataPoints) {
+      if (p.speed_pace && p.speed_pace.trim() !== '') {
+        const speed = paceToKmh(p.speed_pace, sport);
+        if (speed !== null && speed > maxSpeed) maxSpeed = speed;
+      }
+    }
+    if (maxSpeed > 0) vamKmh = Math.round(maxSpeed * 10) / 10;
+  }
+
+  if (!pamWatts && dataPoints && hasPower) {
+    const maxPwr = Math.max(...dataPoints.map(p => p.power_watts ?? 0));
+    if (maxPwr > 0) pamWatts = maxPwr;
+  }
+
+  // Fallback if still no VAM/PAM
+  if (!vamKmh && !pamWatts) {
+    vamPamConfidence = 'estimated';
+    if (hasPower && dataPoints) {
+      const lt2Power = dataPoints.find(p => p.heart_rate >= lt2)?.power_watts ?? null;
+      if (lt2Power && lt2Power > 0) pamWatts = Math.round(lt2Power * 1.30);
+    }
+    if (hasPace && dataPoints) {
+      const lt2PacePoint = dataPoints
+        .filter(p => p.speed_pace && p.speed_pace.trim() !== '')
+        .reduce((prev, curr) =>
+          Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev,
+        );
+      const lt2Speed = lt2PacePoint?.speed_pace ? paceToKmh(lt2PacePoint.speed_pace, sport) : null;
+      if (lt2Speed && lt2Speed > 0) vamKmh = Math.round(lt2Speed * 1.20 * 10) / 10;
+    }
+  }
+
+  const zoneConfidence: ZoneConfidence =
+    thresholdConfidence === 'measured' && vamPamConfidence === 'measured' ? 'measured' : 'estimated';
+
+  // Build base HR zones (Z1-Z4 unchanged, Z5-Z7 derived)
   const zones: ZoneDefinition[] = [
     {
       zone: 1,
@@ -83,6 +227,7 @@ export function calculateZones7(
       rpe_min: 1,
       rpe_max: 3,
       description: ZONE7_DESCRIPTIONS[1],
+      confidence: zoneConfidence,
     },
     {
       zone: 2,
@@ -92,6 +237,7 @@ export function calculateZones7(
       rpe_min: 3,
       rpe_max: 4,
       description: ZONE7_DESCRIPTIONS[2],
+      confidence: zoneConfidence,
     },
     {
       zone: 3,
@@ -101,6 +247,7 @@ export function calculateZones7(
       rpe_min: 4,
       rpe_max: 5,
       description: ZONE7_DESCRIPTIONS[3],
+      confidence: zoneConfidence,
     },
     {
       zone: 4,
@@ -110,85 +257,149 @@ export function calculateZones7(
       rpe_min: 5,
       rpe_max: 6,
       description: ZONE7_DESCRIPTIONS[4],
+      confidence: zoneConfidence,
     },
     {
       zone: 5,
       name: ZONE7_NAMES[5][sport],
       hr_min: lt2 + 1,
-      hr_max: hr90max,
+      hr_max: null, // derived below
       rpe_min: 7,
       rpe_max: 8,
       description: ZONE7_DESCRIPTIONS[5],
+      confidence: zoneConfidence,
     },
     {
       zone: 6,
       name: ZONE7_NAMES[6][sport],
-      hr_min: hr90max + 1,
+      hr_min: null, // derived below
       hr_max: hrmax,
       rpe_min: 8,
       rpe_max: 9,
       description: ZONE7_DESCRIPTIONS[6],
+      confidence: vamPamConfidence,
     },
     {
       zone: 7,
       name: ZONE7_NAMES[7][sport],
-      hr_min: hrmax + 1,
-      hr_max: hrmax + 15,
+      hr_min: null,
+      hr_max: null,
       rpe_min: 9,
       rpe_max: 10,
       description: ZONE7_DESCRIPTIONS[7],
+      confidence: vamPamConfidence,
     },
   ];
 
+  // ---- Power zones (cycling) ----
   if (hasPower && dataPoints) {
     const maxPower = Math.max(...dataPoints.map(p => p.power_watts ?? 0));
     const lt1Power = dataPoints.find(p => p.heart_rate >= lt1)?.power_watts ?? maxPower * 0.55;
     const lt2Power = dataPoints.find(p => p.heart_rate >= lt2)?.power_watts ?? maxPower * 0.75;
+    const midPower = (lt1Power + lt2Power) / 2;
+
+    const z5MaxPower = Math.round(lt2Power * 1.05);
+    const z6MaxPower = pamWatts ?? Math.round(lt2Power * 1.30);
+    const z7MinPower = Math.round(z6MaxPower * 1.05);
+    const z7MaxPower = Math.round(z6MaxPower * 1.30);
 
     zones[0].power_min = Math.round(maxPower * 0.35);
-    zones[0].power_max = Math.round(lt1Power * 0.85);
-    zones[1].power_min = Math.round(lt1Power * 0.85) + 1;
-    zones[1].power_max = Math.round(lt1Power * 0.97);
-    zones[2].power_min = Math.round(lt1Power * 0.97) + 1;
-    zones[2].power_max = Math.round((lt1Power + lt2Power) / 2 * 0.99);
-    zones[3].power_min = Math.round((lt1Power + lt2Power) / 2 * 0.99) + 1;
-    zones[3].power_max = Math.round(lt2Power * 1.00);
+    zones[0].power_max = Math.round(lt1Power * 0.90);
+    zones[1].power_min = Math.round(lt1Power * 0.90) + 1;
+    zones[1].power_max = Math.round(lt1Power);
+    zones[2].power_min = Math.round(lt1Power) + 1;
+    zones[2].power_max = Math.round(midPower);
+    zones[3].power_min = Math.round(midPower) + 1;
+    zones[3].power_max = Math.round(lt2Power);
     zones[4].power_min = Math.round(lt2Power) + 1;
-    zones[4].power_max = Math.round(lt2Power * 1.08);
-    zones[5].power_min = Math.round(lt2Power * 1.08) + 1;
-    zones[5].power_max = Math.round(maxPower * 1.05);
-    zones[6].power_min = Math.round(maxPower * 1.05) + 1;
-    zones[6].power_max = Math.round(maxPower * 1.30);
+    zones[4].power_max = z5MaxPower;
+    zones[5].power_min = z5MaxPower + 1;
+    zones[5].power_max = z6MaxPower;
+    zones[6].power_min = z7MinPower;
+    zones[6].power_max = z7MaxPower;
+
+    // Interpolate HR for Z5 and Z6 using power as the driver
+    const z5HR = interpolateHR(z5MaxPower, lt2Power, z6MaxPower, lt2, hrmax);
+    zones[4].hr_max = z5HR;
+    zones[5].hr_min = z5HR + 1;
   }
 
+  // ---- Pace zones (running/swimming) ----
   if (hasPace && dataPoints) {
     const points = dataPoints.filter(p => p.speed_pace && p.speed_pace.trim() !== '');
     if (points.length >= 2) {
       const lt1PacePoint = points.reduce((prev, curr) =>
-        Math.abs(curr.heart_rate - lt1) < Math.abs(prev.heart_rate - lt1) ? curr : prev
+        Math.abs(curr.heart_rate - lt1) < Math.abs(prev.heart_rate - lt1) ? curr : prev,
       );
       const lt2PacePoint = points.reduce((prev, curr) =>
-        Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev
+        Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev,
       );
-      const lt1Pace = lt1PacePoint.speed_pace ?? null;
-      const lt2Pace = lt2PacePoint.speed_pace ?? null;
 
-      zones[0].pace_max = lt1Pace;
-      zones[1].pace_min = lt1Pace;
-      zones[1].pace_max = lt1Pace;
-      zones[2].pace_min = lt1Pace;
-      zones[2].pace_max = lt2Pace;
-      zones[3].pace_min = lt2Pace;
-      zones[3].pace_max = lt2Pace;
-      zones[4].pace_min = lt2Pace;
+      const lt1Speed = lt1PacePoint.speed_pace ? paceToKmh(lt1PacePoint.speed_pace, sport) : null;
+      const lt2Speed = lt2PacePoint.speed_pace ? paceToKmh(lt2PacePoint.speed_pace, sport) : null;
+
+      if (lt1Speed && lt2Speed) {
+        const midSpeed = (lt1Speed + lt2Speed) / 2;
+        const z1MaxSpeed = lt1Speed * 0.90;
+
+        zones[0].pace_min = null;
+        zones[0].pace_max = kmhToPace(z1MaxSpeed, sport);
+        zones[1].pace_min = kmhToPace(z1MaxSpeed, sport);
+        zones[1].pace_max = kmhToPace(lt1Speed, sport);
+        zones[2].pace_min = kmhToPace(lt1Speed, sport);
+        zones[2].pace_max = kmhToPace(midSpeed, sport);
+        zones[3].pace_min = kmhToPace(midSpeed, sport);
+        zones[3].pace_max = kmhToPace(lt2Speed, sport);
+
+        // Z5-Z7 pace
+        const z5MaxSpeed = lt2Speed * 1.05;
+        const vamSpeed = vamKmh ?? lt2Speed * 1.20;
+        const z7MinSpeed = vamSpeed * 1.05;
+        const z7MaxSpeed = vamSpeed * 1.30;
+
+        zones[4].pace_min = kmhToPace(lt2Speed, sport);
+        zones[4].pace_max = kmhToPace(z5MaxSpeed, sport);
+        zones[5].pace_min = kmhToPace(z5MaxSpeed, sport);
+        zones[5].pace_max = kmhToPace(vamSpeed, sport);
+        zones[6].pace_min = kmhToPace(z7MinSpeed, sport);
+        zones[6].pace_max = kmhToPace(z7MaxSpeed, sport);
+
+        // Interpolate HR for Z5 and Z6 using speed as the driver
+        const z5HR = interpolateHR(z5MaxSpeed, lt2Speed, vamSpeed, lt2, hrmax);
+        zones[4].hr_max = z5HR;
+        zones[5].hr_min = z5HR + 1;
+      }
+    }
+  }
+
+  // ---- HR-only fallback for Z5 (no power or pace) ----
+  if (!hasPower && !hasPace) {
+    const z5HR = Math.round(lt2 + (hrmax - lt2) * 0.25);
+    zones[4].hr_max = z5HR;
+    zones[5].hr_min = z5HR + 1;
+  }
+
+  // ---- Validate all ranges ----
+  for (const zone of zones) {
+    const hr = ensureValidRange(zone.hr_min, zone.hr_max);
+    zone.hr_min = hr.min;
+    zone.hr_max = hr.max;
+
+    if (zone.power_min != null && zone.power_max != null) {
+      const pwr = ensureValidRange(zone.power_min, zone.power_max);
+      zone.power_min = pwr.min;
+      zone.power_max = pwr.max;
     }
   }
 
   return zones;
 }
 
+// ---- 5-zone collapse: group 7 zones into 5 ----
+// Grouping: 5Z1 = 7Z1+7Z2, 5Z2 = 7Z3, 5Z3 = 7Z4, 5Z4 = 7Z5+7Z6, 5Z5 = 7Z7
+
 export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDefinition[] {
-  const z = (n: number) => zones7.find(z => z.zone === n)!;
+  const z = (n: number) => zones7.find(zd => zd.zone === n)!;
 
   const hasPower = zones7.some(zone => zone.power_min != null);
   const hasPace = zones7.some(zone => zone.pace_min != null || zone.pace_max != null);
@@ -198,23 +409,25 @@ export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDef
       zone: 1,
       name: ZONE5_NAMES[1][sport],
       hr_min: z(1).hr_min,
-      hr_max: z(1).hr_max,
+      hr_max: z(2).hr_max,
       rpe_min: 1,
-      rpe_max: 3,
+      rpe_max: 4,
       description: ZONE5_DESCRIPTIONS[1],
-      ...(hasPower ? { power_min: z(1).power_min, power_max: z(1).power_max } : {}),
-      ...(hasPace ? { pace_max: z(1).pace_max } : {}),
+      confidence: z(1).confidence,
+      ...(hasPower ? { power_min: z(1).power_min, power_max: z(2).power_max } : {}),
+      ...(hasPace ? { pace_min: z(1).pace_min ?? z(2).pace_min, pace_max: z(2).pace_max } : {}),
     },
     {
       zone: 2,
       name: ZONE5_NAMES[2][sport],
-      hr_min: z(2).hr_min,
+      hr_min: z(3).hr_min,
       hr_max: z(3).hr_max,
-      rpe_min: 3,
+      rpe_min: 4,
       rpe_max: 5,
       description: ZONE5_DESCRIPTIONS[2],
-      ...(hasPower ? { power_min: z(2).power_min, power_max: z(3).power_max } : {}),
-      ...(hasPace ? { pace_min: z(2).pace_min, pace_max: z(3).pace_max } : {}),
+      confidence: z(3).confidence,
+      ...(hasPower ? { power_min: z(3).power_min, power_max: z(3).power_max } : {}),
+      ...(hasPace ? { pace_min: z(3).pace_min, pace_max: z(3).pace_max } : {}),
     },
     {
       zone: 3,
@@ -224,6 +437,7 @@ export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDef
       rpe_min: 5,
       rpe_max: 6,
       description: ZONE5_DESCRIPTIONS[3],
+      confidence: z(4).confidence,
       ...(hasPower ? { power_min: z(4).power_min, power_max: z(4).power_max } : {}),
       ...(hasPace ? { pace_min: z(4).pace_min, pace_max: z(4).pace_max } : {}),
     },
@@ -231,23 +445,25 @@ export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDef
       zone: 4,
       name: ZONE5_NAMES[4][sport],
       hr_min: z(5).hr_min,
-      hr_max: z(5).hr_max,
+      hr_max: z(6).hr_max,
       rpe_min: 7,
-      rpe_max: 8,
+      rpe_max: 9,
       description: ZONE5_DESCRIPTIONS[4],
-      ...(hasPower ? { power_min: z(5).power_min, power_max: z(5).power_max } : {}),
-      ...(hasPace ? { pace_min: z(5).pace_min, pace_max: z(5).pace_max } : {}),
+      confidence: z(5).confidence,
+      ...(hasPower ? { power_min: z(5).power_min, power_max: z(6).power_max } : {}),
+      ...(hasPace ? { pace_min: z(5).pace_min, pace_max: z(6).pace_max } : {}),
     },
     {
       zone: 5,
       name: ZONE5_NAMES[5][sport],
-      hr_min: z(6).hr_min,
+      hr_min: z(7).hr_min,
       hr_max: z(7).hr_max,
       rpe_min: 9,
       rpe_max: 10,
       description: ZONE5_DESCRIPTIONS[5],
-      ...(hasPower ? { power_min: z(6).power_min, power_max: z(7).power_max } : {}),
-      ...(hasPace ? { pace_min: z(6).pace_min } : {}),
+      confidence: z(7).confidence,
+      ...(hasPower ? { power_min: z(7).power_min, power_max: z(7).power_max } : {}),
+      ...(hasPace ? { pace_min: z(7).pace_min, pace_max: z(7).pace_max } : {}),
     },
   ];
 
@@ -261,8 +477,9 @@ export function buildTrainingZonesData(
   sport: Sport,
   defaultDisplay: '5' | '7' = '5',
   dataPoints?: Array<{ heart_rate: number; power_watts?: number | null; speed_pace?: string | null }>,
+  options?: ZoneCalculationOptions,
 ): TrainingZonesData {
-  const zones7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, dataPoints);
+  const zones7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, dataPoints, options);
   const zones5 = convertTo5Zones(zones7, sport);
 
   return {

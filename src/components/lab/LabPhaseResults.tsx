@@ -102,7 +102,7 @@ function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSes
     hrmax,
     hrmax_confidence: m.hrmax ? 'measured' : 'estimated',
     training_zones: zones,
-    zones_data: buildTrainingZonesData(m.lt1_hr ?? null, m.lt2_hr ?? null, hrmax, athlete.sport ?? 'other', '5'),
+    zones_data: buildTrainingZonesData(m.lt1_hr ?? null, m.lt2_hr ?? null, hrmax, athlete.sport ?? 'other', '5', undefined, { vam_kmh: m.vam_kmh ?? null, pam_watts: m.pam_watts ?? null }),
     data_quality: 'Manual Entry (VO\u2082 Master)',
     data_quality_score: 95,
     metabolic_profile: { aerobic_capacity: 'Manual entry', fat_utilization: 'unknown', anaerobic_contribution: 'unknown', durability: 'unknown' },
@@ -307,6 +307,8 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
             lt1_hr={activeResults.lt1_hr}
             lt2_hr={activeResults.lt2_hr}
             hrmax={activeResults.hrmax}
+            vam_kmh={activeResults.vam_kmh}
+            pam_watts={activeResults.pam_watts}
           />
 
           {(dataPoints.length > 0 || advancedMetrics) && (

@@ -13,6 +13,8 @@ interface TrainingZonesTableProps {
   lt1_hr?: number | null;
   lt2_hr?: number | null;
   hrmax?: number | null;
+  vam_kmh?: number | null;
+  pam_watts?: number | null;
   isLocked?: boolean;
   athleteId?: string;
   modifiedBy?: 'coach' | 'athlete';
@@ -36,6 +38,8 @@ export default function TrainingZonesTable({
   lt1_hr,
   lt2_hr,
   hrmax,
+  vam_kmh,
+  pam_watts,
   isLocked = false,
   athleteId,
   modifiedBy = 'coach',
@@ -56,7 +60,7 @@ export default function TrainingZonesTable({
     }
     if (zones && zones.length > 0) {
       if (mode === '7' && zones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
-        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport);
+        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts });
         const hasPower = zones.some(z => z.power_min != null);
         if (hasPower) {
           z7.forEach((z, i) => {
@@ -85,8 +89,8 @@ export default function TrainingZonesTable({
     const rows: Record<number, EditRow> = {};
     displayZones.forEach(z => {
       rows[z.zone] = {
-        hr_min: String(z.hr_min),
-        hr_max: String(z.hr_max),
+        hr_min: z.hr_min != null ? String(z.hr_min) : '',
+        hr_max: z.hr_max != null ? String(z.hr_max) : '',
         pace_min: z.pace_min ?? '',
         pace_max: z.pace_max ?? '',
         rpe_min: z.rpe_min != null ? String(z.rpe_min) : '',
@@ -114,8 +118,8 @@ export default function TrainingZonesTable({
       if (!row) return z;
       return {
         ...z,
-        hr_min: parseInt(row.hr_min) || z.hr_min,
-        hr_max: parseInt(row.hr_max) || z.hr_max,
+        hr_min: row.hr_min ? parseInt(row.hr_min) : (z.hr_min ?? 0),
+        hr_max: row.hr_max ? parseInt(row.hr_max) : (z.hr_max ?? 0),
         pace_min: row.pace_min || null,
         pace_max: row.pace_max || null,
         rpe_min: row.rpe_min ? parseInt(row.rpe_min) : null,
@@ -267,7 +271,11 @@ export default function TrainingZonesTable({
                         </div>
                       ) : (
                         <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
-                          {zone.hr_min} – {zone.hr_max} bpm
+                          {zone.hr_min != null && zone.hr_max != null
+                            ? `${zone.hr_min} – ${zone.hr_max} bpm`
+                            : zone.hr_min != null
+                              ? `${zone.hr_min}+ bpm`
+                              : '—'}
                         </span>
                       )}
                     </td>

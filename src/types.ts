@@ -110,18 +110,21 @@ export interface TestDataPoint {
   created_at: string;
 }
 
+export type ZoneConfidence = 'measured' | 'estimated' | 'inferred';
+
 export interface TrainingZone {
   zone: number;
   name: string;
-  hr_min: number;
-  hr_max: number;
-  power_min?: number;
-  power_max?: number;
+  hr_min: number | null;
+  hr_max: number | null;
+  power_min?: number | null;
+  power_max?: number | null;
   pace_min?: string | null;
   pace_max?: string | null;
   rpe_min?: number | null;
   rpe_max?: number | null;
   description: string;
+  confidence?: ZoneConfidence;
 }
 
 export interface TestResults {
