@@ -83,35 +83,35 @@ const ZONE7_DESCRIPTIONS: Record<Language, Record<number, string>> = {
 
 const ZONE5_NAMES: Record<Language, Record<number, string>> = {
   en: {
-    1: 'Recovery / Base',
+    1: 'Recovery',
     2: 'Aerobic',
     3: 'Threshold',
     4: 'VO2max',
-    5: 'Anaerobic / Sprint',
+    5: 'Anaerobic / Speed',
   },
   es: {
-    1: 'Recuperación / Base',
+    1: 'Recuperación',
     2: 'Aeróbico',
     3: 'Umbral',
     4: 'VO2max',
-    5: 'Anaeróbico / Sprint',
+    5: 'Anaeróbico / Velocidad',
   },
 };
 
 const ZONE5_DESCRIPTIONS: Record<Language, Record<number, string>> = {
   en: {
-    1: 'Recovery and very easy aerobic work',
-    2: 'Aerobic base and endurance development',
-    3: 'Threshold and sustainable pace work',
-    4: 'VO2max and high-intensity intervals',
-    5: 'Anaerobic capacity and sprint efforts',
+    1: 'Recovery, very light effort below threshold 1',
+    2: 'Aerobic base and endurance, below threshold 1',
+    3: 'Threshold, sustained efforts between threshold 1 and 2',
+    4: 'VO2max, high-intensity efforts between threshold 2 and VAM/PAM',
+    5: 'Anaerobic / speed, maximal efforts above VAM/PAM',
   },
   es: {
-    1: 'Recuperación y trabajo aeróbico muy suave',
-    2: 'Desarrollo de base aeróbica y resistencia',
-    3: 'Trabajo de umbral y ritmo sostenible',
-    4: 'VO2max e intervalos de alta intensidad',
-    5: 'Capacidad anaeróbica y esfuerzos de sprint',
+    1: 'Recuperación, esfuerzo muy ligero por debajo del umbral 1',
+    2: 'Base aeróbica y resistencia, por debajo del umbral 1',
+    3: 'Umbral, esfuerzos sostenidos entre umbral 1 y 2',
+    4: 'VO2max, esfuerzos de alta intensidad entre umbral 2 y VAM/PAM',
+    5: 'Anaeróbico / velocidad, esfuerzos máximos por encima de VAM/PAM',
   },
 };
 
@@ -514,6 +514,8 @@ export function calculateZones7(
 // ---- 5-zone collapse: group 7 zones into 5 ----
 // Grouping: 5Z1 = 7Z1+7Z2, 5Z2 = 7Z3, 5Z3 = 7Z4, 5Z4 = 7Z5+7Z6, 5Z5 = 7Z7
 
+// Z1/Z2 split is a practical training convention, not a measured physiological threshold.
+// The 85% of threshold 1 boundary is reused from the 7-zone model to separate recovery from aerobic.
 export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, language?: Language): ZoneDefinition[] {
   const lang: Language = language ?? 'en';
   const z = (n: number) => zones7.find(zd => zd.zone === n)!;
@@ -521,30 +523,37 @@ export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, languag
   const hasPower = zones7.some(zone => zone.power_min != null);
   const hasPace = zones7.some(zone => zone.pace_min != null || zone.pace_max != null);
 
+  const naLabel = lang === 'es' ? 'No aplica' : 'N/A';
+
+  // 5Z1 = 7Z1 (Recovery: below 85% of threshold 1)
+  // 5Z2 = 7Z2 + 7Z3 (Aerobic: 85% of threshold 1 up to threshold 1)
+  // 5Z3 = 7Z4 (Threshold: threshold 1 to threshold 2)
+  // 5Z4 = 7Z5 (VO2max: threshold 2 to VAM/PAM)
+  // 5Z5 = 7Z6 + 7Z7 (Anaerobic/Speed: above VAM/PAM, HR not applicable)
   const zones5: ZoneDefinition[] = [
     {
       zone: 1,
       name: getZone5Name(1, lang),
       hr_min: z(1).hr_min,
-      hr_max: z(2).hr_max,
+      hr_max: z(1).hr_max,
       rpe_min: 1,
-      rpe_max: 4,
+      rpe_max: 3,
       description: getZone5Description(1, lang),
       confidence: z(1).confidence,
-      ...(hasPower ? { power_min: z(1).power_min, power_max: z(2).power_max } : {}),
-      ...(hasPace ? { pace_min: z(1).pace_min ?? z(2).pace_min, pace_max: z(2).pace_max } : {}),
+      ...(hasPower ? { power_min: z(1).power_min, power_max: z(1).power_max } : {}),
+      ...(hasPace ? { pace_min: z(1).pace_min, pace_max: z(1).pace_max } : {}),
     },
     {
       zone: 2,
       name: getZone5Name(2, lang),
-      hr_min: z(3).hr_min,
+      hr_min: z(2).hr_min,
       hr_max: z(3).hr_max,
-      rpe_min: 4,
+      rpe_min: 3,
       rpe_max: 5,
       description: getZone5Description(2, lang),
-      confidence: z(3).confidence,
-      ...(hasPower ? { power_min: z(3).power_min, power_max: z(3).power_max } : {}),
-      ...(hasPace ? { pace_min: z(3).pace_min, pace_max: z(3).pace_max } : {}),
+      confidence: z(2).confidence,
+      ...(hasPower ? { power_min: z(2).power_min, power_max: z(3).power_max } : {}),
+      ...(hasPace ? { pace_min: z(2).pace_min ?? z(3).pace_min, pace_max: z(3).pace_max } : {}),
     },
     {
       zone: 3,
@@ -562,27 +571,26 @@ export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, languag
       zone: 4,
       name: getZone5Name(4, lang),
       hr_min: z(5).hr_min,
-      hr_max: z(6).hr_max,
-      hr_label: z(6).hr_label,
+      hr_max: z(5).hr_max,
       rpe_min: 7,
-      rpe_max: 9,
+      rpe_max: 8,
       description: getZone5Description(4, lang),
       confidence: z(5).confidence,
-      ...(hasPower ? { power_min: z(5).power_min, power_max: z(6).power_max } : {}),
-      ...(hasPace ? { pace_min: z(5).pace_min, pace_max: z(6).pace_max } : {}),
+      ...(hasPower ? { power_min: z(5).power_min, power_max: z(5).power_max } : {}),
+      ...(hasPace ? { pace_min: z(5).pace_min, pace_max: z(5).pace_max } : {}),
     },
     {
       zone: 5,
       name: getZone5Name(5, lang),
-      hr_min: z(7).hr_min,
-      hr_max: z(7).hr_max,
-      hr_label: z(7).hr_label,
+      hr_min: null,
+      hr_max: null,
+      hr_label: naLabel,
       rpe_min: 9,
       rpe_max: 10,
       description: getZone5Description(5, lang),
-      confidence: z(7).confidence,
-      ...(hasPower ? { power_min: z(7).power_min, power_max: z(7).power_max } : {}),
-      ...(hasPace ? { pace_min: z(7).pace_min, pace_max: z(7).pace_max } : {}),
+      confidence: z(6).confidence,
+      ...(hasPower ? { power_min: z(6).power_min, power_max: z(7).power_max } : {}),
+      ...(hasPace ? { pace_min: z(6).pace_min ?? z(7).pace_min, pace_max: z(7).pace_max } : {}),
     },
   ];
 
