@@ -124,6 +124,8 @@ const PDF_STRINGS: Record<string, { en: string; es: string }> = {
   noData: { en: 'No data available.', es: 'Sin datos disponibles.' },
 
   zone: { en: 'Zone', es: 'Zona' },
+  zones5Title: { en: '5-Zone Model', es: 'Modelo de 5 Zonas' },
+  zones7Title: { en: '7-Zone Model', es: 'Modelo de 7 Zonas' },
   hrRange: { en: 'HR Range', es: 'Rango FC' },
   powerRange: { en: 'Power Range', es: 'Rango Potencia' },
   description: { en: 'Description', es: 'Descripción' },
@@ -200,6 +202,8 @@ export interface ChartSelection {
   series: ChartSeriesConfig;
 }
 
+export type ZoneDisplayMode = '5' | '7' | 'both';
+
 export interface ReportOptions {
   sections: ReportSection[];
   style: ReportStyle;
@@ -209,6 +213,7 @@ export interface ReportOptions {
   anthropometryNotes?: string;
   useManualZones?: boolean;
   manualTrainingZones?: TrainingZone[];
+  zoneDisplayMode?: ZoneDisplayMode;
   charts?: ChartSelection[];
 }
 
@@ -1028,18 +1033,12 @@ function renderFatOxidation(b: PDFBuilder, data: ReportData) {
   b.spacer(4);
 }
 
-function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOptions) {
-  b.sectionHeader(tr('secZones'));
-
-  const zones = options.useManualZones && options.manualTrainingZones?.length
-    ? options.manualTrainingZones
-    : data.physiologyResults?.training_zones;
-
-  if (!zones?.length) { b.paragraph('No training zones available.'); return; }
-
-  const hasPower = zones.some(z => z.power_min || z.power_max);
-  const hasPace = zones.some(z => z.pace_min || z.pace_max);
-  const hasRpe = zones.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null);
+function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, hasPower: boolean, hasPace: boolean, hasRpe: boolean) {
+  b.doc.setFontSize(9);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor(C.gray700);
+  b.doc.text(title, b.ml, b.y);
+  b.y += 5;
 
   const cols = [
     { label: 'ZONE', width: 12 },
@@ -1057,7 +1056,9 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
     const row: Array<{ value: string; width: number }> = [
       { value: `Z${zone.zone}`, width: 12 },
       { value: zone.name, width: hasPower || hasPace ? 32 : 38 },
-      { value: `${zone.hr_min} - ${zone.hr_max}`, width: 34 },
+      { value: zone.hr_min != null && zone.hr_max != null
+          ? `${zone.hr_min} - ${zone.hr_max}`
+          : (zone as any).hr_label || '\u2014', width: 34 },
     ];
     if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min} - ${zone.power_max}` : '\u2014', width: 28 });
     if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min} - ${zone.pace_max}` : '\u2014', width: 24 });
@@ -1069,6 +1070,34 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
     row.push({ value: zone.description || '', width: hasPower || hasPace || hasRpe ? 34 : 70 });
     b.tableRow(row, i % 2 === 0, color);
   });
+  b.spacer(3);
+}
+
+function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOptions) {
+  b.sectionHeader(tr('secZones'));
+
+  const zones = options.useManualZones && options.manualTrainingZones?.length
+    ? options.manualTrainingZones
+    : data.physiologyResults?.training_zones;
+
+  if (!zones?.length) { b.paragraph('No training zones available.'); return; }
+
+  const hasPower = zones.some(z => z.power_min || z.power_max);
+  const hasPace = zones.some(z => z.pace_min || z.pace_max);
+  const hasRpe = zones.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null);
+
+  const mode: ZoneDisplayMode = options.zoneDisplayMode ?? '5';
+  const zonesData = data.physiologyResults?.zones_data;
+
+  if (mode === 'both' && zonesData) {
+    renderZoneTable(b, zonesData.zones5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', hasPower, hasPace, hasRpe);
+    b.spacer(3);
+    renderZoneTable(b, zonesData.zones7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', hasPower, hasPace, hasRpe);
+  } else if (mode === '7' && zonesData) {
+    renderZoneTable(b, zonesData.zones7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', hasPower, hasPace, hasRpe);
+  } else {
+    renderZoneTable(b, zones, tr('zones5Title') || '5-Zone Model', hasPower, hasPace, hasRpe);
+  }
 
   if (options.useManualZones && options.manualTrainingZones?.length) {
     b.spacer(2);

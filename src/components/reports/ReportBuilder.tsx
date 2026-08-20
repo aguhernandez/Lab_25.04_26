@@ -10,6 +10,7 @@ import {
   type ReportData,
   type ChartSelection,
   type ChartSeriesConfig,
+  type ZoneDisplayMode,
   generateReport,
 } from '../../lib/reportGenerator';
 import { supabase } from '../../lib/supabase';
@@ -60,6 +61,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   const [useManualZones, setUseManualZones] = useState(
     !!(manualTrainingZones && manualTrainingZones.length > 0)
   );
+  const [zoneDisplayMode, setZoneDisplayMode] = useState<ZoneDisplayMode>('5');
   const [chartSelections, setChartSelections] = useState<ChartSelection[]>(
     CHART_DEFINITIONS.map(def => ({
       type: def.type,
@@ -154,6 +156,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
         anthropometryNotes: includeAnthropometryNotes ? anthropometryNotes.trim() || undefined : undefined,
         useManualZones: useManualZones && hasManualZones,
         manualTrainingZones: useManualZones && hasManualZones ? manualTrainingZones : undefined,
+        zoneDisplayMode,
         charts: chartSelections.some(c => c.enabled) ? chartSelections : undefined,
       });
     } finally {
@@ -550,6 +553,37 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">Use your custom-adjusted HR, RPE and pace values ({manualTrainingZones!.length} zones)</p>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {data.physiologyResults?.zones_data && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Training Zone Model</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Choose which zone model(s) to include in the report</p>
+              </div>
+              <div className="p-5 space-y-2">
+                {([
+                  { value: '5' as const, label: '5-Zone Model', desc: 'Simplified: Recovery, Aerobic, Threshold, VO2max, Anaerobic' },
+                  { value: '7' as const, label: '7-Zone Model', desc: 'Detailed: 7 physiological zones anchored to LT1/LT2/VAM-PAM' },
+                  { value: 'both' as const, label: 'Both Models', desc: 'Include both 5-zone and 7-zone tables in the report' },
+                ]).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setZoneDisplayMode(opt.value)}
+                    className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
+                      zoneDisplayMode === opt.value
+                        ? 'border-[#fdda36] bg-[#fdda36]/10'
+                        : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                    }`}
+                  >
+                    <p className={`text-xs font-semibold ${zoneDisplayMode === opt.value ? 'text-[#514163] dark:text-[#fdda36]' : 'text-gray-700 dark:text-gray-300'}`}>
+                      {opt.label}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
+                  </button>
+                ))}
               </div>
             </div>
           )}
