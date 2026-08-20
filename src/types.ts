@@ -103,6 +103,7 @@ export interface TestDataPoint {
   power_watts?: number | null;
   speed_pace?: string | null;
   vo2_ml_kg_min?: number | null;
+  vco2_ml_kg_min?: number | null;
   lactate?: number | null;
   rpe?: number | null;
   vt1_marker: boolean;

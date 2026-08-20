@@ -54,6 +54,7 @@ export interface PhysiologyResults {
   fatmax_pace: string | null;
   fatmax_vo2: number | null;
   fatmax_confidence: ConfidenceLevel;
+  fatmax_method: 'calorimetry' | 'lt1_proxy' | 'inferred';
   vam_kmh: number | null;
   pam_watts: number | null;
   hr_drift_percent: number | null;
@@ -88,6 +89,7 @@ function normalizeDataPoints(dataPoints: TestDataPoint[]): TestDataPoint[] {
     heart_rate: Number(p.heart_rate),
     power_watts: p.power_watts != null ? Number(p.power_watts) : null,
     vo2_ml_kg_min: p.vo2_ml_kg_min != null ? Number(p.vo2_ml_kg_min) : null,
+    vco2_ml_kg_min: p.vco2_ml_kg_min != null ? Number(p.vco2_ml_kg_min) : null,
     lactate: p.lactate != null ? Number(p.lactate) : null,
     rpe: p.rpe != null ? Number(p.rpe) : null,
   }));
@@ -117,7 +119,7 @@ export function calculatePhysiology(
   const has_power = sortedPoints.some(p => p.power_watts !== null && p.power_watts !== undefined);
   const has_lactate = sortedPoints.some(p => p.lactate !== null && p.lactate !== undefined);
   const has_vo2 = sortedPoints.some(p => p.vo2_ml_kg_min !== null && p.vo2_ml_kg_min !== undefined);
-  const has_rer = false;
+  const has_rer = sortedPoints.some(p => p.vco2_ml_kg_min != null && p.vco2_ml_kg_min > 0);
   const has_pace = sortedPoints.some(p => p.speed_pace !== null && p.speed_pace !== undefined && p.speed_pace !== '');
 
   const leanBodyMassKg = calculateLeanBodyMass(athlete);
@@ -148,10 +150,15 @@ export function calculatePhysiology(
     athlete.weight_kg || null
   );
 
-  let { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence } = calculateFatMax(
+  let { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence, fatmax_method } = calculateFatMax(
     sortedPoints,
-    vo2max,
-    hrmax
+    null,
+    hrmax,
+    has_lactate,
+    has_rer,
+    lt1_hr,
+    lt1_confidence,
+    athlete.weight_kg || null
   );
 
   // Apply manual threshold overrides if provided
@@ -284,6 +291,7 @@ export function calculatePhysiology(
     fatmax_pace,
     fatmax_vo2,
     fatmax_confidence,
+    fatmax_method,
     vam_kmh,
     pam_watts,
     hr_drift_percent,
@@ -708,71 +716,99 @@ function findClosestPointByVO2(points: TestDataPoint[], targetVO2_ml_kg_min: num
   );
 }
 
-function calculateFatMax(
-  points: TestDataPoint[],
-  vo2max: number | null,
-  hrmax: number
-): {
+const FATMAX_OFFSET_STEPS = 0;
+
+interface FatMaxResult {
   fatmax_hr: number | null;
   fatmax_power: number | null;
   fatmax_pace: string | null;
   fatmax_vo2: number | null;
   fatmax_confidence: ConfidenceLevel;
-} {
-  let fatMaxPoint: TestDataPoint | null = null;
-  let confidence: ConfidenceLevel = 'inferred';
+  fatmax_method: 'calorimetry' | 'lt1_proxy' | 'inferred';
+}
 
-  if (vo2max && points.length > 0) {
-    const vo2maxPoint = points.reduce((prev, curr) => {
-      if (!prev.vo2_ml_kg_min) return curr;
-      if (!curr.vo2_ml_kg_min) return prev;
-      return curr.vo2_ml_kg_min > prev.vo2_ml_kg_min ? curr : prev;
-    });
+function calculateFatMax(
+  points: TestDataPoint[],
+  _vo2max: number | null,
+  hrmax: number,
+  hasLactate: boolean,
+  hasRER: boolean,
+  lt1Hr: number | null,
+  _lt1Confidence: ConfidenceLevel,
+  weightKg: number | null
+): FatMaxResult {
+  const sorted = [...points].sort((a, b) => a.stage_number - b.stage_number);
 
-    const validPoints = points.filter(p => {
-      if (!p.vo2_ml_kg_min) return false;
-      const percentVO2max = (p.vo2_ml_kg_min / vo2max) * 100;
-      return percentVO2max <= 65 && p.id !== vo2maxPoint.id;
-    });
+  // Path 1: Real indirect calorimetry via Frayn equation when VCO2/RQ is available
+  if (hasRER && sorted.some(p => p.vo2_ml_kg_min && p.vco2_ml_kg_min)) {
+    let maxFatOxidation = -1;
+    let fatMaxPoint: TestDataPoint | null = null;
 
-    if (validPoints.length > 0) {
-      let maxFatOxidation = 0;
-
-      for (const point of validPoints) {
-        if (!point.vo2_ml_kg_min) continue;
-
-        const percentVO2max = (point.vo2_ml_kg_min / vo2max) * 100;
-        const estimatedRER = estimateRERFromVO2Percent(percentVO2max);
-        const fatOxidation = calculateFatOxidationRate(estimatedRER, point.vo2_ml_kg_min, vo2max);
-
-        if (fatOxidation > maxFatOxidation) {
-          maxFatOxidation = fatOxidation;
-          fatMaxPoint = point;
-        }
+    for (const point of sorted) {
+      if (!point.vo2_ml_kg_min || !point.vco2_ml_kg_min) continue;
+      const vo2_L_min = (point.vo2_ml_kg_min * (weightKg ?? 1)) / 1000;
+      const vco2_L_min = (point.vco2_ml_kg_min * (weightKg ?? 1)) / 1000;
+      const fatOxidation = 1.695 * vo2_L_min - 1.701 * vco2_L_min;
+      if (fatOxidation > maxFatOxidation) {
+        maxFatOxidation = fatOxidation;
+        fatMaxPoint = point;
       }
+    }
 
-      if (fatMaxPoint) {
-        confidence = 'estimated';
+    if (fatMaxPoint && maxFatOxidation > 0) {
+      return {
+        fatmax_hr: fatMaxPoint.heart_rate,
+        fatmax_power: fatMaxPoint.power_watts || null,
+        fatmax_pace: fatMaxPoint.speed_pace || null,
+        fatmax_vo2: fatMaxPoint.vo2_ml_kg_min || null,
+        fatmax_confidence: 'measured',
+        fatmax_method: 'calorimetry',
+      };
+    }
+  }
+
+  // Path 2: LT1-proxy — FatMax estimated from LT1 crossing, with optional step offset
+  if (hasLactate && lt1Hr != null && sorted.length >= 3) {
+    const lactatePoints = sorted.filter(p => p.lactate !== null && p.lactate !== undefined);
+    if (lactatePoints.length >= 3) {
+      const baseline = Math.min(...lactatePoints.map(p => p.lactate!));
+      const lt1Threshold = baseline + 0.5;
+      const crossingIndex = lactatePoints.findIndex(p => p.lactate! >= lt1Threshold);
+
+      if (crossingIndex >= 0) {
+        // The step AT or just before the LT1 crossing is the proxy FatMax
+        const proxyIndex = Math.max(0, crossingIndex + FATMAX_OFFSET_STEPS);
+        const fatMaxPoint = lactatePoints[proxyIndex] ?? lactatePoints[crossingIndex];
+
+        const fatmax_vo2 = fatMaxPoint.vo2_ml_kg_min || null;
+
+        return {
+          fatmax_hr: fatMaxPoint.heart_rate,
+          fatmax_power: fatMaxPoint.power_watts || null,
+          fatmax_pace: fatMaxPoint.speed_pace || null,
+          fatmax_vo2: fatmax_vo2,
+          fatmax_confidence: 'estimated' as const,
+          fatmax_method: 'lt1_proxy',
+        };
       }
     }
   }
 
-  if (!fatMaxPoint) {
-    const estimatedFatMaxHR = Math.round(hrmax * 0.60);
-    fatMaxPoint = points.reduce((prev, curr) =>
-      Math.abs(curr.heart_rate - estimatedFatMaxHR) < Math.abs(prev.heart_rate - estimatedFatMaxHR)
-        ? curr
-        : prev
-    );
-    confidence = 'inferred';
-  }
+  // Path 3: Fallback — estimate from 60% HRmax (no lactate, no RER)
+  const estimatedFatMaxHR = Math.round(hrmax * 0.60);
+  const fatMaxPoint = sorted.reduce((prev, curr) =>
+    Math.abs(curr.heart_rate - estimatedFatMaxHR) < Math.abs(prev.heart_rate - estimatedFatMaxHR)
+      ? curr
+      : prev
+  );
 
   return {
     fatmax_hr: fatMaxPoint.heart_rate,
     fatmax_power: fatMaxPoint.power_watts || null,
     fatmax_pace: fatMaxPoint.speed_pace || null,
     fatmax_vo2: fatMaxPoint.vo2_ml_kg_min || null,
-    fatmax_confidence: confidence
+    fatmax_confidence: 'inferred',
+    fatmax_method: 'inferred',
   };
 }
 
@@ -875,17 +911,6 @@ export function parseSpeedToKmh(speedPace: string, sport: Sport): number | null 
   }
 
   return null;
-}
-
-function calculateFatOxidationRate(rer: number, vo2_ml_kg_min: number, _vo2max: number): number {
-  // Jeukendrup & Wallis (2005): fat oxidation (g/min) = 1.695 * VO2 - 1.701 * VCO2
-  // where VCO2 = RER * VO2
-  // Normalized to relative VO2 for comparison across stages
-  const clampedRER = Math.max(0.70, Math.min(1.05, rer));
-  const vo2_L_min = vo2_ml_kg_min / 1000; // approximate per kg, used for relative comparison
-
-  const fatOxidation_g_min = 1.695 * vo2_L_min - 1.701 * (clampedRER * vo2_L_min);
-  return Math.max(0, fatOxidation_g_min);
 }
 
 function calculateHRDrift(points: TestDataPoint[]): number | null {

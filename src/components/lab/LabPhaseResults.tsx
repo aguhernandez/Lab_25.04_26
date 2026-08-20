@@ -94,6 +94,7 @@ function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSes
     fatmax_pace: null,
     fatmax_vo2: null,
     fatmax_confidence: 'measured',
+    fatmax_method: 'lt1_proxy' as const,
     vam_kmh: m.vam_kmh ?? null,
     pam_watts: m.pam_watts ?? null,
     hr_drift_percent: null,
@@ -276,7 +277,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
               {activeResults.lt1_power && <Metric label="LT1 Power" value={activeResults.lt1_power} unit="W" />}
               <Metric label="LT2 HR" value={activeResults.lt2_hr} unit="bpm" />
               {activeResults.lt2_power && <Metric label="LT2 Power" value={activeResults.lt2_power} unit="W" />}
-              {activeResults.fatmax_hr && <Metric label="FatMax HR" value={activeResults.fatmax_hr} unit="bpm" />}
+              {activeResults.fatmax_hr && <Metric label={activeResults.fatmax_method === 'calorimetry' ? 'FatMax HR' : 'FatMax HR (proxy)'} value={activeResults.fatmax_hr} unit="bpm" />}
               {activeResults.vam_kmh && <Metric label="VAM" value={activeResults.vam_kmh.toFixed(1)} unit="km/h" />}
               {activeResults.pam_watts && <Metric label="PAM" value={activeResults.pam_watts} unit="W" />}
               {activeResults.hr_drift_percent !== null && activeResults.hr_drift_percent !== undefined && (

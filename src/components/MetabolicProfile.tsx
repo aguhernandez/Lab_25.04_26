@@ -153,7 +153,11 @@ export default function MetabolicProfile({ results, onEdit }: MetabolicProfilePr
 
         <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
           <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            FatMax
+            {results.fatmax_method === 'calorimetry'
+              ? 'FatMax (Calorimetry)'
+              : results.fatmax_method === 'lt1_proxy'
+              ? 'FatMax (proxy de LT1)'
+              : 'FatMax (estimated)'}
           </h4>
           <div className="flex justify-between items-start">
             <div className="space-y-2">
@@ -173,6 +177,11 @@ export default function MetabolicProfile({ results, onEdit }: MetabolicProfilePr
               {fatmaxPercentVO2max && (
                 <div className="text-sm text-gray-600 dark:text-gray-400">
                   {fatmaxPercentVO2max}% VO₂max
+                </div>
+              )}
+              {results.fatmax_method !== 'calorimetry' && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Not a direct measurement — estimated from LT1
                 </div>
               )}
             </div>
