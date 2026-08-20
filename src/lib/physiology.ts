@@ -1,5 +1,6 @@
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
 import { buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
+import { getCurrentLanguage } from '../contexts/LanguageContext';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
 
@@ -202,10 +203,11 @@ export function calculatePhysiology(
     pam_watts,
     threshold_source: thresholdSource,
     threshold_confidence: lt1_confidence,
+    language: getCurrentLanguage(),
   };
 
   const zones7 = calculateZones7(lt1_hr, lt2_hr, hrmax, athlete.sport, sortedPoints, zoneOptions);
-  const training_zones: TrainingZone[] = convertTo5Zones(zones7, athlete.sport).map(z => ({
+  const training_zones: TrainingZone[] = convertTo5Zones(zones7, athlete.sport, getCurrentLanguage()).map(z => ({
     ...z,
     power_min: z.power_min ?? undefined,
     power_max: z.power_max ?? undefined,

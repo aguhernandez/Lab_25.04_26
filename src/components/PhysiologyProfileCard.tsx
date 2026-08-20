@@ -11,6 +11,7 @@ import { TrainingZone } from '../types';
 import ManualPhysiologyForm from './ManualPhysiologyForm';
 import { calculateZones7, convertTo5Zones } from '../lib/trainingZones';
 import { Sport } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface PhysiologyProfileCardProps {
   athleteId: string;
@@ -21,6 +22,7 @@ interface PhysiologyProfileCardProps {
 type TabKey = 'physiology' | 'zones' | 'history';
 
 export default function PhysiologyProfileCard({ athleteId, sport, onToast }: PhysiologyProfileCardProps) {
+  const { language } = useLanguage();
   const [profile, setProfile] = useState<AthletePhysiologyProfile | null>(null);
   const [zones, setZones] = useState<AthleteTrainingZones | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,13 +122,13 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     setRecalculating(true);
     try {
       const effectiveSport: Sport = (sport as Sport) || 'other';
-      const hrmax = profile.hrmax || 190;
+      const hrmax = profile.hrmax || 0;
       const zones7 = calculateZones7(
         profile.lt1_hr, profile.lt2_hr, hrmax, effectiveSport,
         undefined,
-        { vam_kmh: profile.vam_kmh, pam_watts: profile.pam_watts, threshold_confidence: 'measured' },
+        { vam_kmh: profile.vam_kmh, pam_watts: profile.pam_watts, threshold_confidence: 'measured', language, threshold_source: 'lactate' },
       );
-      const newZones = mode === '7' ? zones7 : convertTo5Zones(zones7, effectiveSport);
+      const newZones = mode === '7' ? zones7 : convertTo5Zones(zones7, effectiveSport, language);
       const ok = await updateTrainingZonesManual(athleteId, newZones as TrainingZone[], 'coach');
       if (ok) {
         await loadProfile();

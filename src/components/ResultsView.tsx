@@ -643,6 +643,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             lt1_hr={results.lt1_hr}
             lt2_hr={results.lt2_hr}
             hrmax={results.hrmax}
+            thresholdSource={results.threshold_source}
             athleteId={athlete?.id}
             onSaved={handleZonesSaved}
           />
@@ -659,6 +660,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             lt1_hr={results.lt1_hr}
             lt2_hr={results.lt2_hr}
             hrmax={results.hrmax}
+            thresholdSource={results.threshold_source}
             athleteId={athlete?.id}
             onSaved={handleZonesSaved}
           />

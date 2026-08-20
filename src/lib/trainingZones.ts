@@ -2,11 +2,14 @@ import { Sport } from '../types';
 
 export type ZoneConfidence = 'measured' | 'estimated' | 'inferred';
 
+export type Language = 'en' | 'es';
+
 export interface ZoneDefinition {
   zone: number;
   name: string;
   hr_min: number | null;
   hr_max: number | null;
+  hr_label?: string | null;
   power_min?: number | null;
   power_max?: number | null;
   pace_min?: string | null;
@@ -22,6 +25,7 @@ export interface ZoneCalculationOptions {
   pam_watts?: number | null;
   threshold_source?: 'ventilatory' | 'lactate';
   threshold_confidence?: ZoneConfidence;
+  language?: Language;
 }
 
 export interface TrainingZonesData {
@@ -33,41 +37,128 @@ export interface TrainingZonesData {
 
 export type ZoneDisplayMode = '5' | '7';
 
-const ZONE7_NAMES: Record<number, Record<Sport, string>> = {
-  1: { cycling: 'Active Recovery', running: 'Easy', triathlon: 'Recovery', swimming: 'Easy', other: 'Recovery' },
-  2: { cycling: 'Endurance Base', running: 'Aerobic Base', triathlon: 'Endurance', swimming: 'Aerobic', other: 'Endurance' },
-  3: { cycling: 'Aerobic', running: 'Aerobic', triathlon: 'Aerobic', swimming: 'Aerobic', other: 'Aerobic' },
-  4: { cycling: 'Tempo', running: 'Tempo', triathlon: 'Tempo', swimming: 'Tempo', other: 'Tempo' },
-  5: { cycling: 'Threshold', running: 'Threshold', triathlon: 'Threshold', swimming: 'Threshold', other: 'Threshold' },
-  6: { cycling: 'VO2max', running: 'VO2max', triathlon: 'VO2max', swimming: 'VO2max', other: 'VO2max' },
-  7: { cycling: 'Neuromuscular', running: 'Speed', triathlon: 'Anaerobic', swimming: 'Sprint', other: 'Anaerobic' },
+// ---- Localized zone names ----
+
+const ZONE7_NAMES: Record<Language, Record<number, string>> = {
+  en: {
+    1: 'Recovery',
+    2: 'Aerobic / Base',
+    3: 'Tempo (sub-VT1)',
+    4: 'Threshold (VT1→VT2)',
+    5: 'VO2max / supra-threshold',
+    6: 'Anaerobic Capacity',
+    7: 'Neuromuscular / Sprint',
+  },
+  es: {
+    1: 'Recuperación',
+    2: 'Aeróbico / Base',
+    3: 'Tempo (sub-VT1)',
+    4: 'Umbral (VT1→VT2)',
+    5: 'VO2max / supra-umbral',
+    6: 'Capacidad anaeróbica',
+    7: 'Neuromuscular / Sprint',
+  },
 };
 
-const ZONE7_DESCRIPTIONS: Record<number, string> = {
-  1: 'Active recovery, very light effort below aerobic threshold',
-  2: 'Base aerobic development, fat oxidation predominates',
-  3: 'Aerobic endurance, sustainable long efforts',
-  4: 'Tempo, moderate-high intensity between LT1 and LT2',
-  5: 'Lactate threshold, sustained high-intensity work',
-  6: 'VO2max stimulus, high cardiac demand',
-  7: 'Neuromuscular power, anaerobic and sprint efforts',
+const ZONE7_DESCRIPTIONS: Record<Language, Record<number, string>> = {
+  en: {
+    1: 'Active recovery, very light effort below threshold 1',
+    2: 'Base aerobic development, fat oxidation predominates',
+    3: 'Aerobic endurance, sustainable long efforts',
+    4: 'Threshold, sustained efforts between threshold 1 and 2',
+    5: 'VO2max stimulus, high cardiac demand above threshold 2',
+    6: 'Anaerobic capacity, efforts above VAM/PAM',
+    7: 'Neuromuscular power, maximal sprint efforts',
+  },
+  es: {
+    1: 'Recuperación activa, esfuerzo muy ligero por debajo del umbral 1',
+    2: 'Desarrollo aeróbico base, predomina la oxidación de grasas',
+    3: 'Resistencia aeróbica, esfuerzos largos sostenibles',
+    4: 'Umbral, esfuerzos sostenidos entre umbral 1 y 2',
+    5: 'Estímulo VO2max, alta demanda cardíaca por encima del umbral 2',
+    6: 'Capacidad anaeróbica, esfuerzos por encima de VAM/PAM',
+    7: 'Potencia neuromuscular, esfuerzos máximos de sprint',
+  },
 };
 
-const ZONE5_NAMES: Record<number, Record<Sport, string>> = {
-  1: { cycling: 'Active Recovery', running: 'Easy', triathlon: 'Recovery', swimming: 'Easy', other: 'Recovery' },
-  2: { cycling: 'Endurance', running: 'Aerobic', triathlon: 'Endurance', swimming: 'Aerobic', other: 'Endurance' },
-  3: { cycling: 'Tempo', running: 'Tempo', triathlon: 'Tempo', swimming: 'Threshold', other: 'Tempo' },
-  4: { cycling: 'Threshold', running: 'Threshold', triathlon: 'Threshold', swimming: 'VO2max', other: 'Threshold' },
-  5: { cycling: 'VO2max / Anaerobic', running: 'VO2max / Speed', triathlon: 'VO2max', swimming: 'Sprint', other: 'VO2max' },
+const ZONE5_NAMES: Record<Language, Record<number, string>> = {
+  en: {
+    1: 'Recovery / Base',
+    2: 'Aerobic',
+    3: 'Threshold',
+    4: 'VO2max',
+    5: 'Anaerobic / Sprint',
+  },
+  es: {
+    1: 'Recuperación / Base',
+    2: 'Aeróbico',
+    3: 'Umbral',
+    4: 'VO2max',
+    5: 'Anaeróbico / Sprint',
+  },
 };
 
-const ZONE5_DESCRIPTIONS: Record<number, string> = {
-  1: 'Recovery and very easy aerobic work',
-  2: 'Aerobic base and endurance development',
-  3: 'Tempo and sustainable pace work',
-  4: 'Lactate threshold training',
-  5: 'VO2max, anaerobic capacity and sprint efforts',
+const ZONE5_DESCRIPTIONS: Record<Language, Record<number, string>> = {
+  en: {
+    1: 'Recovery and very easy aerobic work',
+    2: 'Aerobic base and endurance development',
+    3: 'Threshold and sustainable pace work',
+    4: 'VO2max and high-intensity intervals',
+    5: 'Anaerobic capacity and sprint efforts',
+  },
+  es: {
+    1: 'Recuperación y trabajo aeróbico muy suave',
+    2: 'Desarrollo de base aeróbica y resistencia',
+    3: 'Trabajo de umbral y ritmo sostenible',
+    4: 'VO2max e intervalos de alta intensidad',
+    5: 'Capacidad anaeróbica y esfuerzos de sprint',
+  },
 };
+
+function getZone7Name(zone: number, lang: Language, thresholdSource: 'ventilatory' | 'lactate'): string {
+  const names = ZONE7_NAMES[lang];
+  let name = names[zone] ?? names[zone];
+  if (zone === 3) {
+    const t1Label = thresholdSource === 'lactate' ? 'LT1' : 'VT1';
+    name = name.replace('VT1', t1Label);
+  }
+  if (zone === 4) {
+    const t1Label = thresholdSource === 'lactate' ? 'LT1' : 'VT1';
+    const t2Label = thresholdSource === 'lactate' ? 'LT2' : 'VT2';
+    name = name.replace(/VT1→VT2/, `${t1Label}→${t2Label}`);
+  }
+  if (zone === 5) {
+    const t2Label = thresholdSource === 'lactate' ? 'umbral' : 'threshold';
+    if (lang === 'es') {
+      name = name.replace('umbral', t2Label);
+    }
+  }
+  return name;
+}
+
+function getZone7Description(zone: number, lang: Language): string {
+  return ZONE7_DESCRIPTIONS[lang][zone] ?? ZONE7_DESCRIPTIONS[lang][zone];
+}
+
+function getZone5Name(zone: number, lang: Language): string {
+  return ZONE5_NAMES[lang][zone] ?? ZONE5_NAMES[lang][zone];
+}
+
+function getZone5Description(zone: number, lang: Language): string {
+  return ZONE5_DESCRIPTIONS[lang][zone] ?? ZONE5_DESCRIPTIONS[lang][zone];
+}
+
+// ---- HR label helpers for Z6/Z7 ----
+
+function getHRLabel(zone: number, lang: Language): string | null {
+  if (zone === 6) {
+    return lang === 'es' ? 'Cerca del máximo, no discrimina' : 'Near maximum, not discriminative';
+  }
+  if (zone === 7) {
+    return lang === 'es' ? 'No aplica' : 'N/A';
+  }
+  return null;
+}
 
 // ---- Internal pace/speed helpers ----
 
@@ -166,9 +257,11 @@ export function calculateZones7(
   dataPoints?: Array<{ heart_rate: number; power_watts?: number | null; speed_pace?: string | null }>,
   options?: ZoneCalculationOptions,
 ): ZoneDefinition[] {
+  const lang: Language = options?.language ?? 'en';
+  const thresholdSource: 'ventilatory' | 'lactate' = options?.threshold_source ?? 'lactate';
+
   const lt1 = lt1_hr ?? Math.round(hrmax * 0.72);
   const lt2 = lt2_hr ?? Math.round(hrmax * 0.87);
-  const midLT = Math.round((lt1 + lt2) / 2);
   const thresholdConfidence = options?.threshold_confidence ?? 'estimated';
 
   const hasPower = !!dataPoints?.some(p => p.power_watts != null && p.power_watts > 0);
@@ -179,7 +272,6 @@ export function calculateZones7(
   let pamWatts: number | null = options?.pam_watts ?? null;
   let vamPamConfidence: ZoneConfidence = 'measured';
 
-  // If not provided, try to derive from data points
   if (!vamKmh && dataPoints && hasPace) {
     let maxSpeed = 0;
     for (const p of dataPoints) {
@@ -217,76 +309,89 @@ export function calculateZones7(
   const zoneConfidence: ZoneConfidence =
     thresholdConfidence === 'measured' && vamPamConfidence === 'measured' ? 'measured' : 'estimated';
 
-  // Build base HR zones (Z1-Z4 unchanged, Z5-Z7 derived)
+  // ---- HR band boundaries ----
+  // Z1: everything below 85% of threshold 1 HR
+  // Z2 & Z3: split the range [85% of threshold 1, threshold 1] into two equal bands
+  // Z4: exact range [threshold 1, threshold 2]
+  // Z5: from threshold 2 to VAM/PAM (HR interpolated)
+  // Z6 & Z7: above VAM/PAM — HR is null (not discriminative at these intensities)
+
+  const t1LowerBound = Math.round(lt1 * 0.85);
+  const z2z3Range = lt1 - t1LowerBound;
+  const z2Upper = t1LowerBound + Math.round(z2z3Range / 2);
+  const z3Upper = lt1;
+
   const zones: ZoneDefinition[] = [
     {
       zone: 1,
-      name: ZONE7_NAMES[1][sport],
+      name: getZone7Name(1, lang, thresholdSource),
       hr_min: Math.round(hrmax * 0.50),
-      hr_max: Math.round(lt1 * 0.90),
+      hr_max: t1LowerBound,
       rpe_min: 1,
       rpe_max: 3,
-      description: ZONE7_DESCRIPTIONS[1],
+      description: getZone7Description(1, lang),
       confidence: zoneConfidence,
     },
     {
       zone: 2,
-      name: ZONE7_NAMES[2][sport],
-      hr_min: Math.round(lt1 * 0.90) + 1,
-      hr_max: lt1,
+      name: getZone7Name(2, lang, thresholdSource),
+      hr_min: t1LowerBound + 1,
+      hr_max: z2Upper,
       rpe_min: 3,
       rpe_max: 4,
-      description: ZONE7_DESCRIPTIONS[2],
+      description: getZone7Description(2, lang),
       confidence: zoneConfidence,
     },
     {
       zone: 3,
-      name: ZONE7_NAMES[3][sport],
-      hr_min: lt1 + 1,
-      hr_max: midLT,
+      name: getZone7Name(3, lang, thresholdSource),
+      hr_min: z2Upper + 1,
+      hr_max: z3Upper,
       rpe_min: 4,
       rpe_max: 5,
-      description: ZONE7_DESCRIPTIONS[3],
+      description: getZone7Description(3, lang),
       confidence: zoneConfidence,
     },
     {
       zone: 4,
-      name: ZONE7_NAMES[4][sport],
-      hr_min: midLT + 1,
+      name: getZone7Name(4, lang, thresholdSource),
+      hr_min: lt1 + 1,
       hr_max: lt2,
       rpe_min: 5,
       rpe_max: 6,
-      description: ZONE7_DESCRIPTIONS[4],
+      description: getZone7Description(4, lang),
       confidence: zoneConfidence,
     },
     {
       zone: 5,
-      name: ZONE7_NAMES[5][sport],
+      name: getZone7Name(5, lang, thresholdSource),
       hr_min: lt2 + 1,
       hr_max: null, // derived below
       rpe_min: 7,
       rpe_max: 8,
-      description: ZONE7_DESCRIPTIONS[5],
+      description: getZone7Description(5, lang),
       confidence: zoneConfidence,
     },
     {
       zone: 6,
-      name: ZONE7_NAMES[6][sport],
-      hr_min: null, // derived below
-      hr_max: hrmax,
+      name: getZone7Name(6, lang, thresholdSource),
+      hr_min: null,
+      hr_max: null,
+      hr_label: getHRLabel(6, lang),
       rpe_min: 8,
       rpe_max: 9,
-      description: ZONE7_DESCRIPTIONS[6],
+      description: getZone7Description(6, lang),
       confidence: vamPamConfidence,
     },
     {
       zone: 7,
-      name: ZONE7_NAMES[7][sport],
+      name: getZone7Name(7, lang, thresholdSource),
       hr_min: null,
       hr_max: null,
+      hr_label: getHRLabel(7, lang),
       rpe_min: 9,
       rpe_max: 10,
-      description: ZONE7_DESCRIPTIONS[7],
+      description: getZone7Description(7, lang),
       confidence: vamPamConfidence,
     },
   ];
@@ -296,30 +401,36 @@ export function calculateZones7(
     const maxPower = Math.max(...dataPoints.map(p => p.power_watts ?? 0));
     const lt1Power = dataPoints.find(p => p.heart_rate >= lt1)?.power_watts ?? maxPower * 0.55;
     const lt2Power = dataPoints.find(p => p.heart_rate >= lt2)?.power_watts ?? maxPower * 0.75;
-    const midPower = (lt1Power + lt2Power) / 2;
 
-    const z5MaxPower = Math.round(lt2Power * 1.05);
-    const z6MaxPower = pamWatts ?? Math.round(lt2Power * 1.30);
-    const z7MinPower = Math.round(z6MaxPower * 1.05);
-    const z7MaxPower = Math.round(z6MaxPower * 1.30);
+    // Z1: below 85% of LT1 power
+    const t1PowerLower = Math.round(lt1Power * 0.85);
+    const z2z3PowerRange = lt1Power - t1PowerLower;
+    const z2PowerUpper = t1PowerLower + Math.round(z2z3PowerRange / 2);
+
+    // Z5: LT2 to PAM
+    const z5MaxPower = pamWatts ?? Math.round(lt2Power * 1.30);
+    // Z6 & Z7: above PAM, split into two equal bands
+    const z67PowerRange = Math.round(maxPower * 1.30) - z5MaxPower;
+    const z6MaxPower = z5MaxPower + Math.round(z67PowerRange / 2);
+    const z7MaxPower = z5MaxPower + z67PowerRange;
 
     zones[0].power_min = Math.round(maxPower * 0.35);
-    zones[0].power_max = Math.round(lt1Power * 0.90);
-    zones[1].power_min = Math.round(lt1Power * 0.90) + 1;
-    zones[1].power_max = Math.round(lt1Power);
-    zones[2].power_min = Math.round(lt1Power) + 1;
-    zones[2].power_max = Math.round(midPower);
-    zones[3].power_min = Math.round(midPower) + 1;
+    zones[0].power_max = t1PowerLower;
+    zones[1].power_min = t1PowerLower + 1;
+    zones[1].power_max = z2PowerUpper;
+    zones[2].power_min = z2PowerUpper + 1;
+    zones[2].power_max = Math.round(lt1Power);
+    zones[3].power_min = Math.round(lt1Power) + 1;
     zones[3].power_max = Math.round(lt2Power);
     zones[4].power_min = Math.round(lt2Power) + 1;
     zones[4].power_max = z5MaxPower;
     zones[5].power_min = z5MaxPower + 1;
     zones[5].power_max = z6MaxPower;
-    zones[6].power_min = z7MinPower;
+    zones[6].power_min = z6MaxPower + 1;
     zones[6].power_max = z7MaxPower;
 
-    // Interpolate HR for Z5 and Z6 using power as the driver
-    const z5HR = interpolateHR(z5MaxPower, lt2Power, z6MaxPower, lt2, hrmax);
+    // Interpolate HR for Z5 using power as the driver
+    const z5HR = interpolateHR(z5MaxPower, lt2Power, z5MaxPower, lt2, hrmax);
     zones[4].hr_max = z5HR;
     zones[5].hr_min = z5HR + 1;
   }
@@ -339,34 +450,36 @@ export function calculateZones7(
       const lt2Speed = lt2PacePoint.speed_pace ? paceToKmh(lt2PacePoint.speed_pace, sport) : null;
 
       if (lt1Speed && lt2Speed) {
-        const midSpeed = (lt1Speed + lt2Speed) / 2;
-        const z1MaxSpeed = lt1Speed * 0.90;
+        // Z1: below 85% of LT1 speed (slower = lower speed)
+        const t1SpeedLower = lt1Speed * 0.85;
+        const z2z3SpeedRange = lt1Speed - t1SpeedLower;
+        const z2SpeedUpper = t1SpeedLower + z2z3SpeedRange / 2;
 
-        // For running/swimming, pace_min = faster (lower time), pace_max = slower (higher time)
-        zones[0].pace_min = null;
-        zones[0].pace_max = kmhToPace(z1MaxSpeed, sport); // slowest in zone (90% LT1 speed)
-        zones[1].pace_min = kmhToPace(lt1Speed, sport); // fastest in zone (LT1 speed)
-        zones[1].pace_max = kmhToPace(z1MaxSpeed, sport); // slowest in zone
-        zones[2].pace_min = kmhToPace(midSpeed, sport); // fastest (closer to LT1)
-        zones[2].pace_max = kmhToPace(lt1Speed, sport); // slowest (at LT1)
-        zones[3].pace_min = kmhToPace(lt2Speed, sport); // fastest (at LT2)
-        zones[3].pace_max = kmhToPace(midSpeed, sport); // slowest (closer to LT1)
-
-        // Z5-Z7 pace
-        const z5MaxSpeed = lt2Speed * 1.05;
+        // Z5: LT2 to VAM
         const vamSpeed = vamKmh ?? lt2Speed * 1.20;
-        const z7MinSpeed = vamSpeed * 1.05;
-        const z7MaxSpeed = vamSpeed * 1.30;
+        // Z6 & Z7: above VAM, split into two equal bands
+        const z67SpeedRange = vamSpeed * 1.30 - vamSpeed;
+        const z6SpeedUpper = vamSpeed + z67SpeedRange / 2;
+        const z7SpeedUpper = vamSpeed + z67SpeedRange;
 
-        zones[4].pace_min = kmhToPace(z5MaxSpeed, sport); // fastest (105% LT2)
-        zones[4].pace_max = kmhToPace(lt2Speed, sport); // slowest (at LT2)
-        zones[5].pace_min = kmhToPace(vamSpeed, sport); // fastest (VAM)
-        zones[5].pace_max = kmhToPace(z5MaxSpeed, sport); // slowest (105% LT2)
-        zones[6].pace_min = kmhToPace(z7MaxSpeed, sport); // fastest (130% VAM)
-        zones[6].pace_max = kmhToPace(z7MinSpeed, sport); // slowest (105% VAM)
+        // For running/swimming: pace_min = faster (higher speed = lower time), pace_max = slower
+        zones[0].pace_min = null;
+        zones[0].pace_max = kmhToPace(t1SpeedLower, sport);
+        zones[1].pace_min = kmhToPace(z2SpeedUpper, sport);
+        zones[1].pace_max = kmhToPace(t1SpeedLower, sport);
+        zones[2].pace_min = kmhToPace(lt1Speed, sport);
+        zones[2].pace_max = kmhToPace(z2SpeedUpper, sport);
+        zones[3].pace_min = kmhToPace(lt2Speed, sport);
+        zones[3].pace_max = kmhToPace(lt1Speed, sport);
+        zones[4].pace_min = kmhToPace(vamSpeed, sport);
+        zones[4].pace_max = kmhToPace(lt2Speed, sport);
+        zones[5].pace_min = kmhToPace(z7SpeedUpper, sport);
+        zones[5].pace_max = kmhToPace(vamSpeed, sport);
+        zones[6].pace_min = kmhToPace(z7SpeedUpper * 1.0, sport);
+        zones[6].pace_max = kmhToPace(z6SpeedUpper, sport);
 
-        // Interpolate HR for Z5 and Z6 using speed as the driver
-        const z5HR = interpolateHR(z5MaxSpeed, lt2Speed, vamSpeed, lt2, hrmax);
+        // Interpolate HR for Z5 using speed as the driver
+        const z5HR = interpolateHR(vamSpeed, lt2Speed, vamSpeed, lt2, hrmax);
         zones[4].hr_max = z5HR;
         zones[5].hr_min = z5HR + 1;
       }
@@ -380,11 +493,13 @@ export function calculateZones7(
     zones[5].hr_min = z5HR + 1;
   }
 
-  // ---- Validate all ranges ----
+  // ---- Validate ranges (skip Z6/Z7 HR since they're intentionally null) ----
   for (const zone of zones) {
-    const hr = ensureValidRange(zone.hr_min, zone.hr_max);
-    zone.hr_min = hr.min;
-    zone.hr_max = hr.max;
+    if (zone.zone <= 5) {
+      const hr = ensureValidRange(zone.hr_min, zone.hr_max);
+      zone.hr_min = hr.min;
+      zone.hr_max = hr.max;
+    }
 
     if (zone.power_min != null && zone.power_max != null) {
       const pwr = ensureValidRange(zone.power_min, zone.power_max);
@@ -399,7 +514,8 @@ export function calculateZones7(
 // ---- 5-zone collapse: group 7 zones into 5 ----
 // Grouping: 5Z1 = 7Z1+7Z2, 5Z2 = 7Z3, 5Z3 = 7Z4, 5Z4 = 7Z5+7Z6, 5Z5 = 7Z7
 
-export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDefinition[] {
+export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, language?: Language): ZoneDefinition[] {
+  const lang: Language = language ?? 'en';
   const z = (n: number) => zones7.find(zd => zd.zone === n)!;
 
   const hasPower = zones7.some(zone => zone.power_min != null);
@@ -408,60 +524,62 @@ export function convertTo5Zones(zones7: ZoneDefinition[], sport: Sport): ZoneDef
   const zones5: ZoneDefinition[] = [
     {
       zone: 1,
-      name: ZONE5_NAMES[1][sport],
+      name: getZone5Name(1, lang),
       hr_min: z(1).hr_min,
       hr_max: z(2).hr_max,
       rpe_min: 1,
       rpe_max: 4,
-      description: ZONE5_DESCRIPTIONS[1],
+      description: getZone5Description(1, lang),
       confidence: z(1).confidence,
       ...(hasPower ? { power_min: z(1).power_min, power_max: z(2).power_max } : {}),
       ...(hasPace ? { pace_min: z(1).pace_min ?? z(2).pace_min, pace_max: z(2).pace_max } : {}),
     },
     {
       zone: 2,
-      name: ZONE5_NAMES[2][sport],
+      name: getZone5Name(2, lang),
       hr_min: z(3).hr_min,
       hr_max: z(3).hr_max,
       rpe_min: 4,
       rpe_max: 5,
-      description: ZONE5_DESCRIPTIONS[2],
+      description: getZone5Description(2, lang),
       confidence: z(3).confidence,
       ...(hasPower ? { power_min: z(3).power_min, power_max: z(3).power_max } : {}),
       ...(hasPace ? { pace_min: z(3).pace_min, pace_max: z(3).pace_max } : {}),
     },
     {
       zone: 3,
-      name: ZONE5_NAMES[3][sport],
+      name: getZone5Name(3, lang),
       hr_min: z(4).hr_min,
       hr_max: z(4).hr_max,
       rpe_min: 5,
       rpe_max: 6,
-      description: ZONE5_DESCRIPTIONS[3],
+      description: getZone5Description(3, lang),
       confidence: z(4).confidence,
       ...(hasPower ? { power_min: z(4).power_min, power_max: z(4).power_max } : {}),
       ...(hasPace ? { pace_min: z(4).pace_min, pace_max: z(4).pace_max } : {}),
     },
     {
       zone: 4,
-      name: ZONE5_NAMES[4][sport],
+      name: getZone5Name(4, lang),
       hr_min: z(5).hr_min,
       hr_max: z(6).hr_max,
+      hr_label: z(6).hr_label,
       rpe_min: 7,
       rpe_max: 9,
-      description: ZONE5_DESCRIPTIONS[4],
+      description: getZone5Description(4, lang),
       confidence: z(5).confidence,
       ...(hasPower ? { power_min: z(5).power_min, power_max: z(6).power_max } : {}),
       ...(hasPace ? { pace_min: z(5).pace_min, pace_max: z(6).pace_max } : {}),
     },
     {
       zone: 5,
-      name: ZONE5_NAMES[5][sport],
+      name: getZone5Name(5, lang),
       hr_min: z(7).hr_min,
       hr_max: z(7).hr_max,
+      hr_label: z(7).hr_label,
       rpe_min: 9,
       rpe_max: 10,
-      description: ZONE5_DESCRIPTIONS[5],
+      description: getZone5Description(5, lang),
       confidence: z(7).confidence,
       ...(hasPower ? { power_min: z(7).power_min, power_max: z(7).power_max } : {}),
       ...(hasPace ? { pace_min: z(7).pace_min, pace_max: z(7).pace_max } : {}),
@@ -481,7 +599,7 @@ export function buildTrainingZonesData(
   options?: ZoneCalculationOptions,
 ): TrainingZonesData {
   const zones7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, dataPoints, options);
-  const zones5 = convertTo5Zones(zones7, sport);
+  const zones5 = convertTo5Zones(zones7, sport, options?.language);
 
   return {
     baseMethod: 'LT1_LT2_physiological',

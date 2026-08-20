@@ -7,7 +7,7 @@ import MetabolicProfile from '../MetabolicProfile';
 import TrainingZonesTable from '../TrainingZonesTable';
 import AdvancedData from '../AdvancedData';
 import CoachNotes from '../CoachNotes';
-import { useLanguage } from '../../contexts/LanguageContext';
+import { useLanguage, getCurrentLanguage } from '../../contexts/LanguageContext';
 
 interface Props {
   session: LabSession;
@@ -56,9 +56,7 @@ function ManualField({ label, value, unit, onChange, step, placeholder }: {
 }
 
 function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSession['athlete']>): PhysiologyResults {
-  const hrmax = m.hrmax ?? 220 - (athlete.date_of_birth
-    ? new Date().getFullYear() - new Date(athlete.date_of_birth).getFullYear()
-    : 30);
+  const hrmax = m.hrmax ?? 0;
 
   const zones: TrainingZone[] = [];
   if (m.lt1_hr && m.lt2_hr) {
@@ -102,7 +100,7 @@ function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSes
     hrmax,
     hrmax_confidence: m.hrmax ? 'measured' : 'estimated',
     training_zones: zones,
-    zones_data: buildTrainingZonesData(m.lt1_hr ?? null, m.lt2_hr ?? null, hrmax, athlete.sport ?? 'other', '5', undefined, { vam_kmh: m.vam_kmh ?? null, pam_watts: m.pam_watts ?? null }),
+    zones_data: buildTrainingZonesData(m.lt1_hr ?? null, m.lt2_hr ?? null, hrmax, athlete.sport ?? 'other', '5', undefined, { vam_kmh: m.vam_kmh ?? null, pam_watts: m.pam_watts ?? null, language: getCurrentLanguage(), threshold_source: 'lactate' }),
     data_quality: 'Manual Entry (VO\u2082 Master)',
     data_quality_score: 95,
     metabolic_profile: { aerobic_capacity: 'Manual entry', fat_utilization: 'unknown', anaerobic_contribution: 'unknown', durability: 'unknown' },
@@ -310,6 +308,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
             hrmax={activeResults.hrmax}
             vam_kmh={activeResults.vam_kmh}
             pam_watts={activeResults.pam_watts}
+            thresholdSource={activeResults.threshold_source}
           />
 
           {(dataPoints.length > 0 || advancedMetrics) && (

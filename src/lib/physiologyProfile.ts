@@ -4,6 +4,7 @@ import { PhysiologyResults } from './physiology';
 import { Athlete, Test, TrainingZone } from '../types';
 import { calculateZones7, convertTo5Zones, ZoneDefinition, ZoneCalculationOptions } from './trainingZones';
 import { Sport } from '../types';
+import { getCurrentLanguage } from '../contexts/LanguageContext';
 
 export interface PhysiologyProfileSnapshot {
   date: string;
@@ -93,9 +94,10 @@ function buildPhysiologyZones(results: PhysiologyResults): TrainingZone[] {
     pam_watts: results.pam_watts,
     threshold_source: results.has_lactate ? 'lactate' : 'ventilatory',
     threshold_confidence: results.lt1_confidence,
+    language: getCurrentLanguage(),
   };
   const zones7 = calculateZones7(results.lt1_hr, results.lt2_hr, results.hrmax, sport, dataPoints, options);
-  return convertTo5Zones(zones7, sport).map(z => ({
+  return convertTo5Zones(zones7, sport, getCurrentLanguage()).map(z => ({
     ...z,
     power_min: z.power_min ?? undefined,
     power_max: z.power_max ?? undefined,
@@ -284,7 +286,7 @@ function toTrainingZones(zones: ZoneDefinition[]): TrainingZone[] {
 }
 
 function buildZonesFromManualInput(input: ManualPhysiologyInput): TrainingZone[] {
-  const hrmax = input.hrmax || 190;
+  const hrmax = input.hrmax || 0;
   const sport: Sport = input.sport || 'other';
   const zoneMode = input.zone_mode || '5';
 
@@ -294,13 +296,14 @@ function buildZonesFromManualInput(input: ManualPhysiologyInput): TrainingZone[]
     pam_watts: input.pam_watts ?? null,
     threshold_source: 'lactate',
     threshold_confidence: 'measured',
+    language: getCurrentLanguage(),
   };
   const zones7 = calculateZones7(input.lt1_hr, input.lt2_hr, hrmax, sport, dataPoints, options);
 
   if (zoneMode === '7') {
     return toTrainingZones(zones7);
   }
-  return toTrainingZones(convertTo5Zones(zones7, sport));
+  return toTrainingZones(convertTo5Zones(zones7, sport, getCurrentLanguage()));
 }
 
 function buildManualDataPoints(

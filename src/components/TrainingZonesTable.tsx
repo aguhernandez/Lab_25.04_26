@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
 import { Sport } from '../types';
-import { ZoneDefinition, ZoneDisplayMode, TrainingZonesData, getZoneColor, getZoneTextColor, convertTo5Zones, calculateZones7 } from '../lib/trainingZones';
+import { ZoneDefinition, ZoneDisplayMode, TrainingZonesData, getZoneColor, getZoneTextColor, convertTo5Zones, calculateZones7, Language } from '../lib/trainingZones';
 import { updateTrainingZonesManual } from '../lib/physiologyProfile';
 import { TrainingZone } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TrainingZonesTableProps {
   zones?: ZoneDefinition[] | null;
@@ -15,6 +16,7 @@ interface TrainingZonesTableProps {
   hrmax?: number | null;
   vam_kmh?: number | null;
   pam_watts?: number | null;
+  thresholdSource?: 'ventilatory' | 'lactate';
   isLocked?: boolean;
   athleteId?: string;
   modifiedBy?: 'coach' | 'athlete';
@@ -40,11 +42,14 @@ export default function TrainingZonesTable({
   hrmax,
   vam_kmh,
   pam_watts,
+  thresholdSource = 'lactate',
   isLocked = false,
   athleteId,
   modifiedBy = 'coach',
   onSaved,
 }: TrainingZonesTableProps) {
+  const { language } = useLanguage();
+  const lang: Language = language;
   const inferredDefault: ZoneDisplayMode = defaultMode ?? zonesData?.defaultDisplay ?? '5';
   const [mode, setMode] = useState<ZoneDisplayMode>(inferredDefault);
   const [editing, setEditing] = useState(false);
@@ -60,7 +65,7 @@ export default function TrainingZonesTable({
     }
     if (zones && zones.length > 0) {
       if (mode === '7' && zones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
-        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts });
+        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts, threshold_source: thresholdSource, language: lang });
         const hasPower = zones.some(z => z.power_min != null);
         if (hasPower) {
           z7.forEach((z, i) => {
@@ -71,7 +76,7 @@ export default function TrainingZonesTable({
         return z7;
       }
       if (mode === '5' && zones.length === 7) {
-        return convertTo5Zones(zones as ZoneDefinition[], sport);
+        return convertTo5Zones(zones as ZoneDefinition[], sport, lang);
       }
       return zones as ZoneDefinition[];
     }
@@ -273,9 +278,11 @@ export default function TrainingZonesTable({
                         <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
                           {zone.hr_min != null && zone.hr_max != null
                             ? `${zone.hr_min} – ${zone.hr_max} bpm`
-                            : zone.hr_min != null
-                              ? `${zone.hr_min}+ bpm`
-                              : '—'}
+                            : zone.hr_label
+                              ? zone.hr_label
+                              : zone.hr_min != null
+                                ? `${zone.hr_min}+ bpm`
+                                : '—'}
                         </span>
                       )}
                     </td>

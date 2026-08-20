@@ -157,7 +157,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
       hrmax,
       hrmax_confidence: 'measured',
       training_zones: (p.physiology_zones as unknown[]) ?? [],
-      zones_data: buildTrainingZonesData(p.lt1_hr, p.lt2_hr, hrmax, 'other', '5'),
+      zones_data: buildTrainingZonesData(p.lt1_hr, p.lt2_hr, hrmax, 'other', '5', undefined, { language, threshold_source: 'lactate' }),
       data_quality: 'profile',
       data_quality_score: 0,
       metabolic_profile: { aerobic_capacity: '', fat_utilization: '', anaerobic_contribution: '', durability: '' },
@@ -241,7 +241,9 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
             r.lt2_hr as number ?? null,
             hrmax,
             'other',
-            '5'
+            '5',
+            undefined,
+            { language, threshold_source: 'lactate' }
           ),
           data_quality: (r.data_quality as string) || '',
           data_quality_score: 0,
