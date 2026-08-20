@@ -374,26 +374,11 @@ function buildUnifiedThresholds(
 }
 
 function determineHRMax(
-  athlete: Athlete,
+  _athlete: Athlete,
   points: TestDataPoint[]
 ): { hrmax: number; hrmax_confidence: ConfidenceLevel } {
   const observedMaxHR = Math.max(...points.map(p => p.heart_rate));
-
-  if (observedMaxHR >= 180) {
-    return { hrmax: observedMaxHR, hrmax_confidence: 'measured' };
-  }
-
-  const age = athlete.date_of_birth
-    ? new Date().getFullYear() - new Date(athlete.date_of_birth).getFullYear()
-    : 30;
-
-  const formulaMaxHR = Math.round(208 - 0.7 * age);
-
-  if (observedMaxHR >= formulaMaxHR * 0.95) {
-    return { hrmax: observedMaxHR, hrmax_confidence: 'measured' };
-  }
-
-  return { hrmax: formulaMaxHR, hrmax_confidence: 'estimated' };
+  return { hrmax: observedMaxHR, hrmax_confidence: 'measured' };
 }
 
 function calculateVO2max(

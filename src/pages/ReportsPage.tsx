@@ -123,7 +123,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
   };
 
   const buildPhysiologyFromProfile = (p: AthletePhysiologyProfile): PhysiologyResults => {
-    const hrmax = p.hrmax || 190;
+    const hrmax = p.hrmax ?? 0;
     return {
       vo2max: p.vo2max_relative_ml_kg_min,
       vo2max_confidence: (p.vo2max_confidence as 'measured' | 'estimated') || 'estimated',
@@ -155,7 +155,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
       pam_watts: p.pam_watts,
       hr_drift_percent: null,
       hrmax,
-      hrmax_confidence: 'estimated',
+      hrmax_confidence: 'measured',
       training_zones: (p.physiology_zones as unknown[]) ?? [],
       zones_data: buildTrainingZonesData(p.lt1_hr, p.lt2_hr, hrmax, 'other', '5'),
       data_quality: 'profile',
@@ -198,7 +198,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
 
       if (resultRow) {
         const r = resultRow as TestResultRecord & Record<string, unknown>;
-        const hrmax = (r.hrmax as number) || 190;
+        const hrmax = (r.hrmax as number) ?? 0;
         physiologyResults = {
           vo2max: r.vo2max as number ?? null,
           vo2max_confidence: (r.vo2max_measured ? 'measured' : 'estimated') as 'measured' | 'estimated',
@@ -234,7 +234,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
           pam_watts: null,
           hr_drift_percent: r.hr_drift_percent as number ?? null,
           hrmax,
-          hrmax_confidence: 'estimated',
+          hrmax_confidence: 'measured',
           training_zones: (r.training_zones as unknown[]) ?? [],
           zones_data: buildTrainingZonesData(
             r.lt1_hr as number ?? null,
