@@ -126,6 +126,8 @@ const PDF_STRINGS: Record<string, { en: string; es: string }> = {
   zone: { en: 'Zone', es: 'Zona' },
   zones5Title: { en: '5-Zone Model', es: 'Modelo de 5 Zonas' },
   zones7Title: { en: '7-Zone Model', es: 'Modelo de 7 Zonas' },
+  vtTitle: { en: 'Ventilatory Thresholds (VT1 / VT2)', es: 'Umbrales Ventilatorios (VT1 / VT2)' },
+  vtEstimatedNote: { en: 'Note: VT values estimated from lactate thresholds. Not directly measured.', es: 'Nota: Valores de VT estimados a partir de umbrales de lactato. No medidos directamente.' },
   hrRange: { en: 'HR Range', es: 'Rango FC' },
   powerRange: { en: 'Power Range', es: 'Rango Potencia' },
   description: { en: 'Description', es: 'Descripción' },
@@ -924,6 +926,55 @@ function renderVO2max(b: PDFBuilder, data: ReportData, style: ReportStyle) {
     b.paragraph(`Fat utilization: ${r.metabolic_profile.fat_utilization}`);
     b.paragraph(`Anaerobic contribution: ${r.metabolic_profile.anaerobic_contribution}`);
   }
+
+  if (r.thresholds && (r.thresholds.VT1.hr || r.thresholds.VT2.hr)) {
+    b.spacer(4);
+    b.doc.setFontSize(9);
+    b.doc.setFont('helvetica', 'bold');
+    b.textColor(C.gray700);
+    b.doc.text(tr('vtTitle'), b.ml, b.y);
+    b.y += 6;
+
+    const vt = r.thresholds;
+    const vtCols = [
+      { label: 'THRESHOLD', width: 38 },
+      { label: 'HR (bpm)', width: 28 },
+      { label: 'POWER (W)', width: 28 },
+      { label: 'VO\u2082 (ml/kg/min)', width: 38 },
+      { label: '% VO\u2082max', width: 28 },
+      { label: '% HRmax', width: 22 },
+    ];
+    b.tableHeader(vtCols);
+
+    if (vt.VT1.hr) {
+      b.tableRow([
+        { value: 'VT1 (First Ventilatory)', width: 38 },
+        { value: val(vt.VT1.hr), width: 28 },
+        { value: val(vt.VT1.power), width: 28 },
+        { value: val(vt.VT1.vo2, 1), width: 38 },
+        { value: vt.VT1.percent_vo2max ? `${vt.VT1.percent_vo2max}%` : '\u2014', width: 28 },
+        { value: vt.VT1.percent_hrmax ? `${vt.VT1.percent_hrmax}%` : '\u2014', width: 22 },
+      ], true);
+    }
+    if (vt.VT2.hr) {
+      b.tableRow([
+        { value: 'VT2 (Second Ventilatory)', width: 38 },
+        { value: val(vt.VT2.hr), width: 28 },
+        { value: val(vt.VT2.power), width: 28 },
+        { value: val(vt.VT2.vo2, 1), width: 38 },
+        { value: vt.VT2.percent_vo2max ? `${vt.VT2.percent_vo2max}%` : '\u2014', width: 28 },
+        { value: vt.VT2.percent_hrmax ? `${vt.VT2.percent_hrmax}%` : '\u2014', width: 22 },
+      ], false);
+    }
+    b.spacer(2);
+    if (vt.vt_source === 'estimated_from_lt') {
+      b.textColor(C.gray500);
+      b.setJostFont(7.5, 'normal');
+      b.doc.text(tr('vtEstimatedNote'), b.ml, b.y);
+      b.y += 4;
+    }
+  }
+
   b.spacer(4);
 }
 
@@ -1082,21 +1133,30 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
 
   if (!zones?.length) { b.paragraph('No training zones available.'); return; }
 
-  const hasPower = zones.some(z => z.power_min || z.power_max);
-  const hasPace = zones.some(z => z.pace_min || z.pace_max);
-  const hasRpe = zones.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null);
-
   const mode: ZoneDisplayMode = options.zoneDisplayMode ?? '5';
   const zonesData = data.physiologyResults?.zones_data;
 
+  const computeFlags = (zs: TrainingZone[]) => ({
+    hasPower: zs.some(z => z.power_min || z.power_max),
+    hasPace: zs.some(z => z.pace_min || z.pace_max),
+    hasRpe: zs.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null),
+  });
+
   if (mode === 'both' && zonesData) {
-    renderZoneTable(b, zonesData.zones5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', hasPower, hasPace, hasRpe);
+    const z5 = zonesData.zones5 as unknown as TrainingZone[];
+    const z7 = zonesData.zones7 as unknown as TrainingZone[];
+    const f5 = computeFlags(z5);
+    const f7 = computeFlags(z7);
+    renderZoneTable(b, z5, tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
     b.spacer(3);
-    renderZoneTable(b, zonesData.zones7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', hasPower, hasPace, hasRpe);
+    renderZoneTable(b, z7, tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
   } else if (mode === '7' && zonesData) {
-    renderZoneTable(b, zonesData.zones7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', hasPower, hasPace, hasRpe);
+    const z7 = zonesData.zones7 as unknown as TrainingZone[];
+    const f7 = computeFlags(z7);
+    renderZoneTable(b, z7, tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
   } else {
-    renderZoneTable(b, zones, tr('zones5Title') || '5-Zone Model', hasPower, hasPace, hasRpe);
+    const f = computeFlags(zones);
+    renderZoneTable(b, zones, tr('zones5Title') || '5-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
   }
 
   if (options.useManualZones && options.manualTrainingZones?.length) {
