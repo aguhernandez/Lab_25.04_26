@@ -108,7 +108,8 @@ function normalizeAthlete(athlete: Athlete): Athlete {
 export function calculatePhysiology(
   athlete: Athlete,
   dataPoints: TestDataPoint[],
-  overrides?: ThresholdOverrides
+  overrides?: ThresholdOverrides,
+  breathVT?: { VT1: ThresholdData; VT2: ThresholdData; vt_source: VTSource } | null
 ): PhysiologyResults {
   const athlete_ = normalizeAthlete(athlete);
   const sortedPoints = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
@@ -261,7 +262,8 @@ export function calculatePhysiology(
     { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence },
     overrides,
     hrmax,
-    vo2max
+    vo2max,
+    breathVT
   );
 
   return {
@@ -323,9 +325,10 @@ function buildUnifiedThresholds(
   lt2: { lt2_hr: number | null; lt2_power: number | null; lt2_pace: string | null; lt2_vo2: number | null; lt2_percent_vo2max: number | null; lt2_percent_hrmax: number | null; lt2_confidence: ConfidenceLevel },
   overrides: ThresholdOverrides | undefined,
   hrmax: number,
-  vo2max: number | null
+  vo2max: number | null,
+  breathVT?: { VT1: ThresholdData; VT2: ThresholdData; vt_source: VTSource } | null
 ): UnifiedThresholds {
-  const vt_source: VTSource = overrides?.vt_source ?? 'estimated_from_lt';
+  const vt_source: VTSource = breathVT?.vt_source ?? overrides?.vt_source ?? 'estimated_from_lt';
 
   const LT1: ThresholdData = {
     hr: lt1.lt1_hr,
@@ -350,7 +353,10 @@ function buildUnifiedThresholds(
   let VT1: ThresholdData;
   let VT2: ThresholdData;
 
-  if (vt_source === 'manual' && overrides) {
+  if (vt_source === 'direct_measurement' && breathVT) {
+    VT1 = breathVT.VT1;
+    VT2 = breathVT.VT2;
+  } else if (vt_source === 'manual' && overrides) {
     const vt1_hr = overrides.vt1_hr ?? null;
     const vt2_hr = overrides.vt2_hr ?? null;
     VT1 = {

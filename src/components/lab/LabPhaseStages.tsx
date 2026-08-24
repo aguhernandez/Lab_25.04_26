@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { saveTestAnthropometry } from '../../lib/anthropometry';
 import { LabSession } from '../../lib/labSession';
-import { Test, TestDataPoint } from '../../types';
+import { Test, TestDataPoint, UnifiedThresholds } from '../../types';
 import DataInput from '../DataInput';
+import BreathDataImport from './BreathDataImport';
 import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
+import type { BreathSample, DeviceProfile } from '../../types/breathData.types';
 
 interface Props {
   session: LabSession;
@@ -21,6 +23,9 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [breathData, setBreathData] = useState<BreathSample[] | null>(session.breathData);
+  const [deviceProfile, setDeviceProfile] = useState<DeviceProfile | null>(session.deviceProfile);
+  const [breathVT, setBreathVT] = useState<UnifiedThresholds | null>(null);
 
   useEffect(() => {
     if (!currentTest) {
@@ -78,12 +83,22 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         .update({ status: 'completed' })
         .eq('id', currentTest.id);
 
-      onUpdate({ dataPoints: points });
+      onUpdate({ dataPoints: points, breathData, deviceProfile, breathVT });
       onNext();
     } catch (err) {
       console.error('Failed to complete test:', err);
       setToast({ message: 'Failed to save test. Please try again.', type: 'error' });
     }
+  };
+
+  const handleBreathDataChange = (
+    samples: BreathSample[] | null,
+    profile: DeviceProfile | null,
+    vt: UnifiedThresholds | null
+  ) => {
+    setBreathData(samples);
+    setDeviceProfile(profile);
+    setBreathVT(vt);
   };
 
   const effectiveNumStages = session.numStages + (session.includeCooldown ? 1 : 0);
@@ -151,6 +166,14 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
           )}
         </div>
       )}
+
+      <BreathDataImport
+        breathData={breathData}
+        deviceProfile={deviceProfile}
+        onChange={handleBreathDataChange}
+        hrmax={null}
+        vo2max={null}
+      />
 
       <DataInput
         test={currentTest}

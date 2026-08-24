@@ -1,7 +1,8 @@
-import { Athlete, Test, TestDataPoint, TestType, Sport, AnthropometryData } from '../types';
+import { Athlete, Test, TestDataPoint, TestType, Sport, AnthropometryData, UnifiedThresholds } from '../types';
 import { PhysiologyResults } from './physiology';
 import { AdvancedMetrics } from '../types';
 import { AthleteTrainingZones } from './physiologyProfile';
+import type { BreathSample, DeviceProfile } from '../types/breathData.types';
 
 export type LabPhase =
   | 'selection'
@@ -75,6 +76,9 @@ export interface LabSession {
   testId: string | null;
   manualResultsMode: boolean;
   manualResults: ManualResults | null;
+  breathData: BreathSample[] | null;
+  deviceProfile: DeviceProfile | null;
+  breathVT: UnifiedThresholds | null;
 }
 
 export const initialLabSession = (): LabSession => ({
@@ -97,6 +101,9 @@ export const initialLabSession = (): LabSession => ({
   testId: null,
   manualResultsMode: false,
   manualResults: null,
+  breathData: null,
+  deviceProfile: null,
+  breathVT: null,
 });
 
 export const LAB_TEST_TYPES: { value: TestType; label: string; description: string; icon: string }[] = [

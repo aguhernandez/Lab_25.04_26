@@ -92,7 +92,16 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         athleteForCalc.sex = anthro.sex;
       }
 
-      const results: PhysiologyResults = calculatePhysiology(athleteForCalc, dataPoints);
+      const breathVT = session.breathData && session.breathData.length >= 4 && session.breathVT
+        ? { VT1: session.breathVT.VT1, VT2: session.breathVT.VT2, vt_source: 'direct_measurement' as const }
+        : null;
+
+      const results: PhysiologyResults = calculatePhysiology(
+        athleteForCalc,
+        dataPoints,
+        undefined,
+        breathVT
+      );
       markStep(1);
       await delay(350);
       markStep(2);
@@ -130,6 +139,9 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         training_zones: results.training_zones,
         data_quality: results.data_quality,
         advanced_metrics: advanced,
+        thresholds: results.thresholds,
+        breath_data: session.breathData,
+        device_profile_id: session.deviceProfile?.id ?? null,
       });
 
       const { success } = await updateAthletePhysiologyProfile(athlete, testData, results);
