@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, FileText, CircleAlert as AlertCircle, CircleCheck as CheckCircle, Loader as Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { parseBreathFile, extractHeaders, autoDetectProfile, hasCO2Data, getDefaultProfiles } from '../../lib/breathDataParser';
 import { calculateVentilatoryThresholds } from '../../lib/ventilatoryThresholds';
