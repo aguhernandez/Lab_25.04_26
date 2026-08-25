@@ -100,13 +100,13 @@ export default function LabPhasePretest({ session, onUpdate, onNext, onBack }: P
 
       const { data: profileData } = await supabase
         .from('athlete_physiology_profiles')
-        .select('vo2max, lt1_hr, lt2_hr, updated_at')
+        .select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, updated_at')
         .eq('athlete_id', athlete.id)
         .maybeSingle();
 
       if (profileData) {
         setProfile({
-          vo2max: profileData.vo2max,
+          vo2max: profileData.vo2max_relative_ml_kg_min,
           lt1_hr: profileData.lt1_hr,
           lt2_hr: profileData.lt2_hr,
           last_test_date: profileData.updated_at,

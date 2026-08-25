@@ -113,6 +113,10 @@ export function calculatePhysiology(
 ): PhysiologyResults {
   const athlete_ = normalizeAthlete(athlete);
   const sortedPoints = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
+
+  if (sortedPoints.length === 0) {
+    return emptyPhysiologyResults();
+  }
   // shadow original parameters so all downstream code uses normalized values
   athlete = athlete_;
   dataPoints = sortedPoints;
@@ -312,6 +316,21 @@ export function calculatePhysiology(
     has_pace,
     threshold_source: thresholdSource,
     thresholds
+  };
+}
+
+function emptyPhysiologyResults(): PhysiologyResults {
+  return {
+    vo2max: null, vo2max_confidence: 'inferred', vo2max_ml_kg_min: null,
+    vo2max_ml_kg_lbm_min: null, vo2max_ml_kg_ffm_min: null, vo2max_ml_kg_muscle_min: null, vo2max_ml_min: null,
+    lt1_hr: null, lt1_power: null, lt1_pace: null, lt1_vo2: null, lt1_percent_vo2max: null, lt1_percent_hrmax: null, lt1_confidence: 'inferred',
+    lt2_hr: null, lt2_power: null, lt2_pace: null, lt2_vo2: null, lt2_percent_vo2max: null, lt2_percent_hrmax: null, lt2_confidence: 'inferred',
+    fatmax_hr: null, fatmax_power: null, fatmax_pace: null, fatmax_vo2: null, fatmax_confidence: 'inferred', fatmax_method: 'inferred',
+    vam_kmh: null, pam_watts: null, hr_drift_percent: null, hrmax: 0, hrmax_confidence: 'inferred',
+    training_zones: [], zones_data: {} as TrainingZonesData, data_quality: 'No data', data_quality_score: 0,
+    metabolic_profile: { aerobic_capacity: 'Unknown', fat_utilization: 'Unknown', anaerobic_contribution: 'Unknown', durability: 'Unknown' },
+    stage_analysis: [], has_power: false, has_lactate: false, has_vo2: false, has_rer: false, has_pace: false,
+    threshold_source: 'lactate', thresholds: { LT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, LT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, vt_source: 'estimated_from_lt', delta_lt1_vt1_hr: null, delta_lt2_vt2_hr: null },
   };
 }
 
@@ -549,7 +568,7 @@ function calculateLT1(
     }
   }
 
-  if (!lt1Point) {
+  if (!lt1Point && points.length > 0) {
     const estimatedLT1_HR = Math.round(hrmax * 0.70);
     lt1Point = points.reduce((prev, curr) =>
       Math.abs(curr.heart_rate - estimatedLT1_HR) < Math.abs(prev.heart_rate - estimatedLT1_HR)
@@ -557,6 +576,13 @@ function calculateLT1(
         : prev
     );
     confidence = 'estimated';
+  }
+
+  if (!lt1Point) {
+    return {
+      lt1_hr: null, lt1_power: null, lt1_pace: null, lt1_vo2: null,
+      lt1_percent_vo2max: null, lt1_percent_hrmax: null, lt1_confidence: 'inferred',
+    };
   }
 
   const lt1_vo2_ml_kg_min = lt1Point.vo2_ml_kg_min || null;
@@ -640,7 +666,7 @@ function calculateLT2(
     }
   }
 
-  if (!lt2Point) {
+  if (!lt2Point && points.length > 0) {
     const estimatedLT2_HR = Math.round(hrmax * 0.90);
     lt2Point = points.reduce((prev, curr) =>
       Math.abs(curr.heart_rate - estimatedLT2_HR) < Math.abs(prev.heart_rate - estimatedLT2_HR)
@@ -648,6 +674,13 @@ function calculateLT2(
         : prev
     );
     confidence = 'estimated';
+  }
+
+  if (!lt2Point) {
+    return {
+      lt2_hr: null, lt2_power: null, lt2_pace: null, lt2_vo2: null,
+      lt2_percent_vo2max: null, lt2_percent_hrmax: null, lt2_confidence: 'inferred',
+    };
   }
 
   const lt2_vo2_ml_kg_min = lt2Point.vo2_ml_kg_min || null;
