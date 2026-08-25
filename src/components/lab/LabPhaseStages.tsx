@@ -31,7 +31,9 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
   }
   if (currentGroup.length > 0) groups.push(currentGroup);
 
-  const avg = (arr: number[]) =>
+  const avgInt = (arr: number[]) =>
+    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+  const avgDec = (arr: number[]) =>
     arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
 
   return groups
@@ -42,7 +44,7 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
       const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
       const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
 
-      const hr = avg(heartRates);
+      const hr = avgInt(heartRates);
       if (hr == null) return null;
 
       return {
@@ -55,10 +57,10 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
         heart_rate: hr,
         power_watts: null,
         speed_pace: speeds[0] ?? null,
-        vo2_ml_kg_min: avg(vo2s),
+        vo2_ml_kg_min: avgDec(vo2s),
         vco2_ml_kg_min: null,
-        lactate: avg(lactates),
-        rpe: avg(rpes),
+        lactate: avgDec(lactates),
+        rpe: avgInt(rpes),
         vt1_marker: false,
         vt2_marker: false,
         created_at: new Date().toISOString(),
@@ -136,12 +138,12 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
           test_id: currentTest.id,
           stage_number: Math.max(1, Math.round(Number(p.stage_number))),
           duration_seconds: Math.max(1, Math.round(Number(p.duration_seconds))),
-          heart_rate: p.heart_rate,
+          heart_rate: Math.round(Number(p.heart_rate)),
           power_watts: p.power_watts,
           speed_pace: p.speed_pace,
           vo2_ml_kg_min: p.vo2_ml_kg_min,
           lactate: p.lactate,
-          rpe: p.rpe,
+          rpe: p.rpe != null ? Math.round(Number(p.rpe)) : null,
           vt1_marker: p.vt1_marker,
           vt2_marker: p.vt2_marker,
         }));
