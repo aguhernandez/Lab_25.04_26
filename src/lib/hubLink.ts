@@ -218,8 +218,46 @@ export async function fetchHubAnthropometry(athleteId: string): Promise<{
       .maybeSingle();
 
     if (error) {
-      console.error('Error fetching HUB anthropometry:', error);
-      return { success: false, error: error.message };
+      const { data: dataSimple, error: errorSimple } = await client
+        .from('anthropometry_measurements')
+        .select('*')
+        .eq('athlete_id', athleteId)
+        .order('measurement_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (errorSimple) {
+        return { success: false, error: errorSimple.message };
+      }
+
+      if (!dataSimple) {
+        return { success: false, error: 'No anthropometry data found in HUB' };
+      }
+
+      const measurementSimple = dataSimple as HubAnthropometryData;
+      const weight_kg_s = calculateMedian([
+        measurementSimple.weight_m1,
+        measurementSimple.weight_m2,
+        measurementSimple.weight_m3
+      ]);
+      const height_cm_s = calculateMedian([
+        measurementSimple.height_m1,
+        measurementSimple.height_m2,
+        measurementSimple.height_m3
+      ]);
+
+      return {
+        success: true,
+        data: {
+          weight_kg: weight_kg_s,
+          height_cm: height_cm_s,
+          age: undefined,
+          sex: measurementSimple.sex,
+          bodyFatPercent: undefined,
+          leanBodyMassKg: undefined,
+          measurementDate: measurementSimple.measurement_date
+        }
+      };
     }
 
     if (!data) {

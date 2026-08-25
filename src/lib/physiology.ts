@@ -327,7 +327,7 @@ function emptyPhysiologyResults(): PhysiologyResults {
     lt2_hr: null, lt2_power: null, lt2_pace: null, lt2_vo2: null, lt2_percent_vo2max: null, lt2_percent_hrmax: null, lt2_confidence: 'inferred',
     fatmax_hr: null, fatmax_power: null, fatmax_pace: null, fatmax_vo2: null, fatmax_confidence: 'inferred', fatmax_method: 'inferred',
     vam_kmh: null, pam_watts: null, hr_drift_percent: null, hrmax: 0, hrmax_confidence: 'inferred',
-    training_zones: [], zones_data: {} as TrainingZonesData, data_quality: 'No data', data_quality_score: 0,
+    training_zones: [], zones_data: { baseMethod: 'LT1_LT2_physiological', zones7: [], zones5: [], defaultDisplay: '5' }, data_quality: 'No data', data_quality_score: 0,
     metabolic_profile: { aerobic_capacity: 'Unknown', fat_utilization: 'Unknown', anaerobic_contribution: 'Unknown', durability: 'Unknown' },
     stage_analysis: [], has_power: false, has_lactate: false, has_vo2: false, has_rer: false, has_pace: false,
     threshold_source: 'lactate', thresholds: { LT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, LT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, vt_source: 'estimated_from_lt', delta_lt1_vt1_hr: null, delta_lt2_vt2_hr: null },

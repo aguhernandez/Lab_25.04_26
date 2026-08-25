@@ -131,6 +131,7 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
 
       // Also save as test_data_points for backward compatibility
       if (dataPoints.length > 0) {
+        await supabase.from('test_data_points').delete().eq('test_id', currentTest.id);
         const pointsToInsert = dataPoints.map(p => ({
           test_id: currentTest.id,
           stage_number: p.stage_number,
@@ -144,7 +145,8 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
           vt1_marker: p.vt1_marker,
           vt2_marker: p.vt2_marker,
         }));
-        await supabase.from('test_data_points').insert(pointsToInsert);
+        const { error: insertErr } = await supabase.from('test_data_points').insert(pointsToInsert);
+        if (insertErr) console.warn('Could not save test_data_points:', insertErr.message);
       }
 
       await supabase
