@@ -3,9 +3,11 @@ import type { BreathSample, DeviceProfile } from '../types/breathData.types';
 import { VO2_MASTER_PROFILE } from '../types/breathData.types';
 import type { TimelineSample } from '../types/timeline.types';
 
+export type ColumnMapping = Record<string, keyof BreathSample>;
+
 export function parseTimelineFile(
   file: File,
-  profile: DeviceProfile,
+  mapping: ColumnMapping,
   offset_s: number = 0
 ): Promise<TimelineSample[]> {
   return new Promise((resolve, reject) => {
@@ -33,7 +35,7 @@ export function parseTimelineFile(
           return;
         }
 
-        const samples = rows.map((row, idx) => mapToTimeline(row, profile.column_mapping, offset_s, idx));
+        const samples = rows.map((row, idx) => mapToTimeline(row, mapping, offset_s, idx));
         resolve(samples);
       } catch (err) {
         reject(err);
@@ -61,7 +63,7 @@ function parseDelimited(text: string): Record<string, unknown>[] {
 
 function mapToTimeline(
   row: Record<string, unknown>,
-  mapping: Record<string, keyof BreathSample>,
+  mapping: ColumnMapping,
   offset_s: number,
   idx: number
 ): TimelineSample {
@@ -103,22 +105,48 @@ function findColumnValue(row: Record<string, unknown>, colName: string): unknown
   return null;
 }
 
-export function autoDetectProfile(
+export function autoDetectMapping(
   headers: string[],
   profiles: DeviceProfile[]
-): DeviceProfile | null {
+): { profile: DeviceProfile | null; mapping: ColumnMapping } {
   let bestMatch: DeviceProfile | null = null;
   let bestScore = 0;
   for (const profile of profiles) {
-    const score = scoreProfileMatch(headers, profile.column_mapping);
+    const score = scoreMappingMatch(headers, profile.column_mapping);
     if (score > bestScore) { bestScore = score; bestMatch = profile; }
   }
-  return bestScore >= 3 ? bestMatch : null;
+  if (bestMatch && bestScore >= 3) {
+    return { profile: bestMatch, mapping: bestMatch.column_mapping };
+  }
+  return { profile: null, mapping: guessMapping(headers) };
 }
 
-function scoreProfileMatch(
+function guessMapping(headers: string[]): ColumnMapping {
+  const mapping: ColumnMapping = {};
+  const nh = headers.map((h) => h.toLowerCase().replace(/[\s_]/g, ''));
+  headers.forEach((h, i) => {
+    const n = nh[i];
+    if (n.includes('time') || n === 't' || n.includes('tempo')) mapping[h] = 'time_s';
+    else if (n.includes('hr') || n.includes('heart')) mapping[h] = 'hr_bpm';
+    else if (n.includes('vo2') && n.includes('kg')) mapping[h] = 'vo2_rel_mlkgmin';
+    else if (n.includes('vo2')) mapping[h] = 'vo2_abs_mlmin';
+    else if (n.includes('speed') || n.includes('vel') || n.includes('pace') || n.includes('targetsp')) mapping[h] = 'speed_kmh';
+    else if (n.includes('rf') || n.includes('resp')) mapping[h] = 'rf_bpm';
+    else if (n.includes('tv') || n.includes('tidal')) mapping[h] = 'tv_l';
+    else if (n.includes('ve') || n.includes('vent')) mapping[h] = 've_lmin';
+    else if (n.includes('vco2')) mapping[h] = 'vco2_mlmin';
+    else if (n.includes('rer')) mapping[h] = 'rer';
+    else if (n.includes('eqo2') || n.includes('eqo')) mapping[h] = 'eqo2';
+    else if (n.includes('feo2') || n.includes('feo')) mapping[h] = 'feo2_pct';
+    else if (n.includes('hrv')) mapping[h] = 'hrv_ms';
+    else if (n.includes('rr') && n.includes('ms')) mapping[h] = 'rr_ms';
+  });
+  return mapping;
+}
+
+function scoreMappingMatch(
   headers: string[],
-  mapping: Record<string, keyof BreathSample>
+  mapping: ColumnMapping
 ): number {
   let score = 0;
   const nh = headers.map((h) => h.toLowerCase().replace(/[\s_]/g, ''));
@@ -156,11 +184,6 @@ export function extractHeaders(file: File): Promise<string[]> {
   });
 }
 
-export function hasCO2Data(profile: DeviceProfile): boolean {
-  return Object.values(profile.column_mapping).includes('vco2_mlmin') ||
-    Object.values(profile.column_mapping).includes('rer');
-}
-
 export function getDefaultProfiles(): DeviceProfile[] {
   return [{
     id: 'vo2-master-default',
@@ -177,3 +200,20 @@ export function getRawColumnKeys(samples: TimelineSample[]): string[] {
   }
   return Array.from(keys);
 }
+
+export const CANONICAL_FIELDS: Array<{ key: keyof BreathSample; label: string }> = [
+  { key: 'time_s', label: 'Time (s)' },
+  { key: 'speed_kmh', label: 'Speed (km/h)' },
+  { key: 'hr_bpm', label: 'Heart Rate (bpm)' },
+  { key: 'vo2_rel_mlkgmin', label: 'VO₂ relative (ml/kg/min)' },
+  { key: 'vo2_abs_mlmin', label: 'VO₂ absolute (ml/min)' },
+  { key: 'rf_bpm', label: 'Respiratory Frequency (bpm)' },
+  { key: 'tv_l', label: 'Tidal Volume (L)' },
+  { key: 've_lmin', label: 'Ventilation (L/min)' },
+  { key: 'eqo2', label: 'EqO₂ (VE/VO₂)' },
+  { key: 'feo2_pct', label: 'FeO₂ (%)' },
+  { key: 'vco2_mlmin', label: 'VCO₂ (ml/min)' },
+  { key: 'rer', label: 'RER' },
+  { key: 'hrv_ms', label: 'HRV (ms)' },
+  { key: 'rr_ms', label: 'RR (ms)' },
+];

@@ -163,7 +163,7 @@ export function calculatePhysiology(
   );
 
   // Apply manual threshold overrides if provided
-  if (overrides) {
+  if (overrides && sortedPoints.length > 0) {
     const weightKg = athlete.weight_kg || null;
     if (overrides.lt1_hr) {
       const closest = sortedPoints.reduce((prev, curr) =>
@@ -801,6 +801,16 @@ function calculateFatMax(
   }
 
   // Path 3: Fallback — estimate from 60% HRmax (no lactate, no RER)
+  if (sorted.length === 0) {
+    return {
+      fatmax_hr: null,
+      fatmax_power: null,
+      fatmax_pace: null,
+      fatmax_vo2: null,
+      fatmax_confidence: 'inferred',
+      fatmax_method: 'inferred',
+    };
+  }
   const estimatedFatMaxHR = Math.round(hrmax * 0.60);
   const fatMaxPoint = sorted.reduce((prev, curr) =>
     Math.abs(curr.heart_rate - estimatedFatMaxHR) < Math.abs(prev.heart_rate - estimatedFatMaxHR)
@@ -920,15 +930,17 @@ export function parseSpeedToKmh(speedPace: string, sport: Sport): number | null 
 }
 
 function calculateHRDrift(points: TestDataPoint[]): number | null {
+  if (points.length < 4) return null;
+
   const totalDuration = points.reduce((sum, p) => sum + p.duration_seconds, 0);
 
   if (totalDuration < 1200) return null;
 
-  if (points.length < 4) return null;
-
   const midPoint = Math.floor(points.length / 2);
   const first10min = points.slice(0, Math.max(2, midPoint));
   const last10min = points.slice(-Math.max(2, points.length - midPoint));
+
+  if (first10min.length === 0 || last10min.length === 0) return null;
 
   const avgFirst = first10min.reduce((sum, p) => sum + p.heart_rate, 0) / first10min.length;
   const avgLast = last10min.reduce((sum, p) => sum + p.heart_rate, 0) / last10min.length;
@@ -1110,8 +1122,7 @@ export function calculateAdvancedMetrics(
   let efficiency_percent: number | null = null;
   if (athlete.sport === 'cycling' && lbm && sorted.length > 0) {
     const maxPowerPoint = sorted.reduce((best, p) =>
-      (p.power_watts || 0) > (best.power_watts || 0) ? p : best, sorted[0]);
-    if (maxPowerPoint?.power_watts) {
+      (p.power_watts || 0) > (best.power_watts || 0) ? p : best, sorted[0]);    if (maxPowerPoint?.power_watts) {
       watts_per_kg_lbm = Math.round((maxPowerPoint.power_watts / lbm) * 100) / 100;
       if (maxPowerPoint.vo2_ml_kg_min && weight) {
         const vo2_l_min = convertVO2ToAbsolute(maxPowerPoint.vo2_ml_kg_min, weight);

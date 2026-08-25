@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Square, Plus, Upload, Clock, CircleAlert as AlertCircle, CircleCheck as CheckCircle, Loader as Loader2, ChevronDown, ChevronUp, Trash2, Pencil, X, RotateCcw, FileText } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Play, Pause, Square, Plus, Upload, Clock, CircleAlert as AlertCircle, CircleCheck as CheckCircle, Loader as Loader2, ChevronDown, ChevronUp, Trash2, Pencil, X, RotateCcw, FileText, ArrowRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import {
-  parseTimelineFile, extractHeaders, autoDetectProfile,
-  getDefaultProfiles, getRawColumnKeys,
+  parseTimelineFile, extractHeaders, autoDetectMapping,
+  getDefaultProfiles, getRawColumnKeys, CANONICAL_FIELDS,
+  type ColumnMapping,
 } from '../../lib/timelineParser';
 import type { DeviceProfile } from '../../types/breathData.types';
 import type { TimelineSample, ProtocolStep } from '../../types/timeline.types';
@@ -14,6 +15,8 @@ interface Props {
   onComplete: (samples: TimelineSample[]) => void;
   onCancel: () => void;
 }
+
+const MERGE_WINDOW_S = 20;
 
 export default function TimelineDataInput({ testId, onComplete, onCancel }: Props) {
   const [samples, setSamples] = useState<TimelineSample[]>([]);
@@ -26,8 +29,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const [saving, setSaving] = useState(false);
 
   // Import state
-  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [profiles] = useState<DeviceProfile[]>(getDefaultProfiles());
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState(0);
@@ -35,6 +37,12 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const [showProtocol, setShowProtocol] = useState(false);
   const [protocol, setProtocol] = useState<ProtocolStep[]>(DEFAULT_PROTOCOL);
   const [protocolLoaded, setProtocolLoaded] = useState(false);
+
+  // Column mapping state
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingHeaders, setPendingHeaders] = useState<string[]>([]);
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
+  const [showMapper, setShowMapper] = useState(false);
 
   // Live capture fields
   const [liveSpeed, setLiveSpeed] = useState('');
@@ -47,14 +55,6 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const liveRPERef = useRef<HTMLInputElement>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Load profiles
-  const loadProfiles = useCallback(async () => {
-    const { data } = await supabase.from('device_profiles').select('*').order('name');
-    if (data && data.length > 0) setProfiles(data as DeviceProfile[]);
-    else setProfiles(getDefaultProfiles());
-  }, []);
-  useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
   // Load existing samples
   useEffect(() => {
@@ -80,9 +80,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   // Timer
   useEffect(() => {
     if (running) {
-      timerRef.current = setInterval(() => {
-        setElapsed((e) => e + 1);
-      }, 1000);
+      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -96,46 +94,52 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // --- Live capture ---
+  // --- Live capture with window-based merge ---
   const handleLiveEnter = (field: 'speed' | 'hr' | 'lactate' | 'rpe') => {
     const ts = elapsed;
-    let lactateTs = ts;
+    let sampleTs = ts;
     let lactateVal: number | null = null;
     if (field === 'lactate' && liveLactate.trim()) {
       lactateVal = parseFloat(liveLactate);
-      lactateTs = Math.max(0, ts - LACTATE_OFFSET_S);
+      sampleTs = Math.max(0, ts - LACTATE_OFFSET_S);
     }
 
-    const newSample: TimelineSample = {
-      id: crypto.randomUUID(),
-      timestamp_s: field === 'lactate' ? lactateTs : ts,
-      speed_pace: field === 'speed' ? liveSpeed.trim() || null : null,
-      heart_rate: field === 'hr' && liveHR.trim() ? parseInt(liveHR) : null,
-      lactate: lactateVal,
-      rpe: field === 'rpe' && liveRPE.trim() ? parseInt(liveRPE) : null,
-      vo2_ml_kg_min: null,
-      raw_data: {},
-      source: 'manual',
-      edited_fields: [],
-    };
+    const newFields: Partial<TimelineSample> = {};
+    if (field === 'speed') newFields.speed_pace = liveSpeed.trim() || null;
+    if (field === 'hr') newFields.heart_rate = liveHR.trim() ? parseInt(liveHR) : null;
+    if (field === 'lactate') newFields.lactate = lactateVal;
+    if (field === 'rpe') newFields.rpe = liveRPE.trim() ? parseInt(liveRPE) : null;
 
-    // Merge: if a sample at same timestamp exists, merge fields
     setSamples((prev) => {
-      const existingIdx = prev.findIndex((s) => s.timestamp_s === newSample.timestamp_s && s.source === 'manual');
-      if (existingIdx >= 0) {
-        const merged = { ...prev[existingIdx] };
-        if (newSample.speed_pace) merged.speed_pace = newSample.speed_pace;
-        if (newSample.heart_rate != null) merged.heart_rate = newSample.heart_rate;
-        if (newSample.lactate != null) merged.lactate = newSample.lactate;
-        if (newSample.rpe != null) merged.rpe = newSample.rpe;
+      // Find a manual sample within MERGE_WINDOW_S of the target timestamp
+      const mergeIdx = prev.findIndex(
+        (s) => s.source === 'manual' && Math.abs(s.timestamp_s - sampleTs) <= MERGE_WINDOW_S
+      );
+      if (mergeIdx >= 0) {
+        const merged = { ...prev[mergeIdx] };
+        if (newFields.speed_pace != null) merged.speed_pace = newFields.speed_pace;
+        if (newFields.heart_rate != null) merged.heart_rate = newFields.heart_rate;
+        if (newFields.lactate != null) merged.lactate = newFields.lactate;
+        if (newFields.rpe != null) merged.rpe = newFields.rpe;
         const copy = [...prev];
-        copy[existingIdx] = merged;
+        copy[mergeIdx] = merged;
         return copy;
       }
+      const newSample: TimelineSample = {
+        id: crypto.randomUUID(),
+        timestamp_s: sampleTs,
+        speed_pace: newFields.speed_pace ?? null,
+        heart_rate: newFields.heart_rate ?? null,
+        lactate: newFields.lactate ?? null,
+        rpe: newFields.rpe ?? null,
+        vo2_ml_kg_min: null,
+        raw_data: {},
+        source: 'manual',
+        edited_fields: [],
+      };
       return [...prev, newSample].sort((a, b) => a.timestamp_s - b.timestamp_s);
     });
 
-    // Clear the field that was entered
     if (field === 'speed') { setLiveSpeed(''); liveSpeedRef.current?.focus(); }
     if (field === 'hr') { setLiveHR(''); liveHRRef.current?.focus(); }
     if (field === 'lactate') { setLiveLactate(''); liveLactateRef.current?.focus(); }
@@ -148,38 +152,17 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     let cumTime = 0;
     for (const step of protocol) {
       newSamples.push({
-        id: crypto.randomUUID(),
-        timestamp_s: cumTime,
-        speed_pace: step.speed_pace,
-        heart_rate: null,
-        lactate: null,
-        rpe: null,
-        vo2_ml_kg_min: null,
-        raw_data: {},
-        source: 'manual',
-        edited_fields: [],
+        id: crypto.randomUUID(), timestamp_s: cumTime, speed_pace: step.speed_pace,
+        heart_rate: null, lactate: null, rpe: null, vo2_ml_kg_min: null,
+        raw_data: {}, source: 'manual', edited_fields: [],
       });
-      if (step.lactate_at_s != null) {
-        newSamples.push({
-          id: crypto.randomUUID(),
-          timestamp_s: cumTime + step.lactate_at_s,
-          speed_pace: null,
-          heart_rate: null,
-          lactate: null,
-          rpe: null,
-          vo2_ml_kg_min: null,
-          raw_data: {},
-          source: 'manual',
-          edited_fields: [],
-        });
-      }
       cumTime += step.target_duration_s;
     }
     setSamples(newSamples);
     setProtocolLoaded(true);
   };
 
-  // --- Import ---
+  // --- Import: step 1 - extract headers and show mapper ---
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -187,17 +170,33 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     setImportError(null);
     try {
       const headers = await extractHeaders(file);
-      const auto = autoDetectProfile(headers, profiles);
-      const profile = auto || profiles.find((p) => p.id === selectedProfileId) || profiles[0];
-      if (!profile) throw new Error('No device profiles available');
-      setSelectedProfileId(profile.id);
-      const imported = await parseTimelineFile(file, profile, offset_s);
-      // Merge with existing manual samples
+      const { mapping } = autoDetectMapping(headers, profiles);
+      setPendingFile(file);
+      setPendingHeaders(headers);
+      setColumnMapping(mapping);
+      setShowMapper(true);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to read file');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // --- Import: step 2 - parse with confirmed mapping ---
+  const confirmMappingAndImport = async () => {
+    if (!pendingFile) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const imported = await parseTimelineFile(pendingFile, columnMapping, offset_s);
       setSamples((prev) => {
         const manual = prev.filter((s) => s.source === 'manual');
         return [...manual, ...imported].sort((a, b) => a.timestamp_s - b.timestamp_s);
       });
       setImportedCount(imported.length);
+      setShowMapper(false);
+      setPendingFile(null);
+      setPendingHeaders([]);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to parse file');
     } finally {
@@ -205,15 +204,25 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     }
   };
 
+  const updateColumnMapping = (header: string, canonKey: string) => {
+    setColumnMapping((prev) => {
+      const updated = { ...prev };
+      // Remove any existing mapping to this canonKey
+      for (const [k, v] of Object.entries(updated)) {
+        if (v === canonKey as any) delete updated[k];
+      }
+      if (canonKey) updated[header] = canonKey as any;
+      else delete updated[header];
+      return updated;
+    });
+  };
+
   // --- Edit ---
   const startEdit = (s: TimelineSample) => {
     setEditingId(s.id);
     setEditValues({
-      speed_pace: s.speed_pace,
-      heart_rate: s.heart_rate,
-      lactate: s.lactate,
-      rpe: s.rpe,
-      vo2_ml_kg_min: s.vo2_ml_kg_min,
+      speed_pace: s.speed_pace, heart_rate: s.heart_rate,
+      lactate: s.lactate, rpe: s.rpe, vo2_ml_kg_min: s.vo2_ml_kg_min,
     });
   };
 
@@ -278,7 +287,6 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-white">Test Data Capture</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -304,98 +312,60 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           </div>
           <div className="flex gap-2">
             {!running ? (
-              <button
-                onClick={() => setRunning(true)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-500 transition-colors"
-              >
+              <button onClick={() => setRunning(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-500 transition-colors">
                 <Play className="w-4 h-4" /> Play
               </button>
             ) : (
-              <button
-                onClick={() => setRunning(false)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-400 transition-colors"
-              >
+              <button onClick={() => setRunning(false)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-400 transition-colors">
                 <Pause className="w-4 h-4" /> Pause
               </button>
             )}
-            <button
-              onClick={() => { setRunning(false); setElapsed(0); }}
-              className="flex items-center gap-1.5 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-            >
+            <button onClick={() => { setRunning(false); setElapsed(0); }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
               <Square className="w-4 h-4" /> Stop
             </button>
           </div>
         </div>
 
-        {/* Quick capture form */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Speed / Pace</label>
-            <input
-              ref={liveSpeedRef}
-              type="text"
-              className="input"
-              placeholder="5:00/km"
-              value={liveSpeed}
-              onChange={(e) => setLiveSpeed(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('speed'); }}
-              disabled={saving}
-            />
+            <input ref={liveSpeedRef} type="text" className="input" placeholder="5:00/km"
+              value={liveSpeed} onChange={(e) => setLiveSpeed(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('speed'); }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">HR (bpm)</label>
-            <input
-              ref={liveHRRef}
-              type="number"
-              className="input"
-              placeholder="150"
-              value={liveHR}
-              onChange={(e) => setLiveHR(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('hr'); }}
-              disabled={saving}
-            />
+            <input ref={liveHRRef} type="number" className="input" placeholder="150"
+              value={liveHR} onChange={(e) => setLiveHR(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('hr'); }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
               Lactate (mmol/L) <span className="text-gray-400">−15s offset</span>
             </label>
-            <input
-              ref={liveLactateRef}
-              type="number"
-              step="0.1"
-              className="input"
-              placeholder="2.0"
-              value={liveLactate}
-              onChange={(e) => setLiveLactate(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('lactate'); }}
-              disabled={saving}
-            />
+            <input ref={liveLactateRef} type="number" step="0.1" className="input" placeholder="2.0"
+              value={liveLactate} onChange={(e) => setLiveLactate(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('lactate'); }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">RPE (1-10)</label>
-            <input
-              ref={liveRPERef}
-              type="number"
-              min="1"
-              max="10"
-              className="input"
-              placeholder="5"
-              value={liveRPE}
-              onChange={(e) => setLiveRPE(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('rpe'); }}
-              disabled={saving}
-            />
+            <input ref={liveRPERef} type="number" min="1" max="10" className="input" placeholder="5"
+              value={liveRPE} onChange={(e) => setLiveRPE(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('rpe'); }} disabled={saving} />
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-2">Press Enter in any field to log it at the current timer time.</p>
+        <p className="text-xs text-gray-400 mt-2">
+          Press Enter in any field to log it at the current timer time. Values within {MERGE_WINDOW_S}s merge into the same row.
+        </p>
       </div>
 
       {/* Protocol preload */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow border border-gray-100 dark:border-gray-700 p-4">
-        <button
-          onClick={() => setShowProtocol(!showProtocol)}
-          className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-        >
+        <button onClick={() => setShowProtocol(!showProtocol)}
+          className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
           {showProtocol ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           Preload Protocol (solo mode)
         </button>
@@ -403,50 +373,28 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           <div className="mt-3 space-y-2">
             {protocol.map((step, i) => (
               <div key={i} className="grid grid-cols-4 gap-2 items-center text-sm">
-                <input
-                  type="text"
-                  className="input"
-                  value={step.label}
-                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, label: e.target.value } : p))}
-                />
-                <input
-                  type="text"
-                  className="input"
-                  value={step.speed_pace}
-                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, speed_pace: e.target.value } : p))}
-                />
-                <input
-                  type="number"
-                  className="input"
-                  value={step.target_duration_s}
-                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, target_duration_s: parseInt(e.target.value) || 0 } : p))}
-                />
-                <button
-                  onClick={() => setProtocol(prev => prev.filter((_, idx) => idx !== i))}
-                  className="text-red-500 hover:text-red-700"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <input type="text" className="input" value={step.label}
+                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, label: e.target.value } : p))} />
+                <input type="text" className="input" value={step.speed_pace}
+                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, speed_pace: e.target.value } : p))} />
+                <input type="number" className="input" value={step.target_duration_s}
+                  onChange={(e) => setProtocol(prev => prev.map((p, idx) => idx === i ? { ...p, target_duration_s: parseInt(e.target.value) || 0 } : p))} />
+                <button onClick={() => setProtocol(prev => prev.filter((_, idx) => idx !== i))}
+                  className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
               </div>
             ))}
             <div className="flex gap-2 mt-2">
-              <button
-                onClick={() => setProtocol(prev => [...prev, { step: prev.length + 1, label: `Stage ${prev.length}`, speed_pace: '4:00/km', target_duration_s: 180, lactate_at_s: 170 }])}
-                className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-sm"
-              >
+              <button onClick={() => setProtocol(prev => [...prev, { step: prev.length + 1, label: `Stage ${prev.length}`, speed_pace: '4:00/km', target_duration_s: 180, lactate_at_s: 170 }])}
+                className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-sm">
                 <Plus className="w-3 h-3" /> Add Step
               </button>
-              <button
-                onClick={loadProtocol}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500"
-              >
+              <button onClick={loadProtocol}
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500">
                 <CheckCircle className="w-3 h-3" /> Load Protocol
               </button>
               {protocolLoaded && (
-                <button
-                  onClick={() => { setSamples([]); setProtocolLoaded(false); }}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-sm"
-                >
+                <button onClick={() => { setSamples([]); setProtocolLoaded(false); }}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-sm">
                   <RotateCcw className="w-3 h-3" /> Clear
                 </button>
               )}
@@ -469,47 +417,76 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           </div>
         )}
 
-        {importedCount > 0 && !importError && (
+        {importedCount > 0 && !importError && !showMapper && (
           <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-3">
             <CheckCircle className="w-4 h-4 text-green-500" />
             <p className="text-sm text-green-700 dark:text-green-300">{importedCount} samples imported.</p>
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Device Profile</label>
-            <select
-              value={selectedProfileId}
-              onChange={(e) => setSelectedProfileId(e.target.value)}
-              className="input"
-            >
-              <option value="">Auto-detect</option>
-              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Time Offset (s)</label>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setOffset_s(o => o - 1)} className="px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">−</button>
-              <input
-                type="number"
-                className="input text-center"
-                value={offset_s}
-                onChange={(e) => setOffset_s(parseInt(e.target.value) || 0)}
-              />
-              <button onClick={() => setOffset_s(o => o + 1)} className="px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">+</button>
+        {/* Column Mapper */}
+        {showMapper && pendingHeaders.length > 0 && (
+          <div className="mb-4 border border-blue-200 dark:border-blue-800 rounded-xl p-4 bg-blue-50 dark:bg-blue-900/20">
+            <div className="flex items-center gap-2 mb-3">
+              <ArrowRight className="w-4 h-4 text-blue-600" />
+              <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">Match columns from your file</h4>
+            </div>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mb-3">
+              We auto-detected the mapping. Verify or fix each column, then click Import.
+            </p>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {pendingHeaders.map((header) => (
+                <div key={header} className="grid grid-cols-2 gap-2 items-center text-xs">
+                  <span className="font-mono text-gray-700 dark:text-gray-300 truncate" title={header}>{header}</span>
+                  <select
+                    className="input"
+                    style={{ padding: '2px 6px', fontSize: '11px' }}
+                    value={columnMapping[header] ?? ''}
+                    onChange={(e) => updateColumnMapping(header, e.target.value)}
+                  >
+                    <option value="">— Skip —</option>
+                    {CANONICAL_FIELDS.map((f) => (
+                      <option key={f.key} value={f.key}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={confirmMappingAndImport} disabled={importing}
+                className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50">
+                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                {importing ? 'Importing...' : 'Confirm & Import'}
+              </button>
+              <button onClick={() => { setShowMapper(false); setPendingFile(null); setPendingHeaders([]); }}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg text-sm">
+                Cancel
+              </button>
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">&nbsp;</label>
-            <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-500 transition-colors">
-              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-              {importing ? 'Parsing...' : 'Browse files'}
-              <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={handleFileSelect} className="hidden" disabled={importing} />
-            </label>
+        )}
+
+        {!showMapper && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Time Offset (s)</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setOffset_s(o => o - 1)} className="px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">−</button>
+                <input type="number" className="input text-center" value={offset_s}
+                  onChange={(e) => setOffset_s(parseInt(e.target.value) || 0)} />
+                <button onClick={() => setOffset_s(o => o + 1)} className="px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">+</button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">&nbsp;</label>
+              <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-500 transition-colors">
+                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                {importing ? 'Reading...' : 'Browse files'}
+                <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={handleFileSelect} className="hidden" disabled={importing} />
+              </label>
+            </div>
           </div>
-        </div>
+        )}
         <p className="text-xs text-gray-400 mt-2">
           Supports XLSX, CSV, TXT. FIT files: export to CSV first. Offset adjusts alignment if device started early/late.
         </p>
@@ -524,12 +501,8 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           <div className="flex items-center gap-3">
             {hasImported && (
               <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showAllColumns}
-                  onChange={(e) => setShowAllColumns(e.target.checked)}
-                  className="w-4 h-4"
-                />
+                <input type="checkbox" checked={showAllColumns}
+                  onChange={(e) => setShowAllColumns(e.target.checked)} className="w-4 h-4" />
                 Show every column
               </label>
             )}
@@ -556,9 +529,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
                   </th>
                 ))}
                 {showAllColumns && rawKeys.map((k) => (
-                  <th key={k} className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                    {k}
-                  </th>
+                  <th key={k} className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">{k}</th>
                 ))}
                 <th className="px-2 py-2 text-left font-semibold text-gray-500">Src</th>
                 <th className="px-2 py-2" style={{ width: 60 }}></th>
@@ -609,17 +580,13 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
                   ) : (
                     <>
                       <td className="px-2 py-1 font-mono text-gray-600 dark:text-gray-400">{fmtTime(s.timestamp_s)}</td>
-                      <td className="px-2 py-1 text-gray-700 dark:text-gray-300">{s.speed_pace ?? '—'}</td>
-                      <td className="px-2 py-1 text-gray-700 dark:text-gray-300">{s.heart_rate ?? '—'}</td>
-                      <td className="px-2 py-1 text-gray-700 dark:text-gray-300">{s.lactate ?? '—'}</td>
-                      <td className="px-2 py-1 text-gray-700 dark:text-gray-300">{s.rpe ?? '—'}</td>
-                      <td className={`px-2 py-1 ${s.edited_fields.includes('vo2_ml_kg_min') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>
-                        {s.vo2_ml_kg_min ?? '—'}
-                      </td>
+                      <td className={`px-2 py-1 ${s.edited_fields.includes('speed_pace') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.speed_pace ?? '—'}</td>
+                      <td className={`px-2 py-1 ${s.edited_fields.includes('heart_rate') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.heart_rate ?? '—'}</td>
+                      <td className={`px-2 py-1 ${s.edited_fields.includes('lactate') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.lactate ?? '—'}</td>
+                      <td className={`px-2 py-1 ${s.edited_fields.includes('rpe') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.rpe ?? '—'}</td>
+                      <td className={`px-2 py-1 ${s.edited_fields.includes('vo2_ml_kg_min') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.vo2_ml_kg_min ?? '—'}</td>
                       {showAllColumns && rawKeys.map((k) => (
-                        <td key={k} className={`px-2 py-1 ${s.edited_fields.includes(k) ? 'bg-amber-100 dark:bg-amber-900/30' : ''} text-gray-500 dark:text-gray-400`}>
-                          {s.raw_data[k] ?? '—'}
-                        </td>
+                        <td key={k} className={`px-2 py-1 ${s.edited_fields.includes(k) ? 'bg-amber-100 dark:bg-amber-900/30' : ''} text-gray-500 dark:text-gray-400`}>{s.raw_data[k] ?? '—'}</td>
                       ))}
                       <td className="px-2 py-1">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${s.source === 'imported' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'}`}>
@@ -641,7 +608,6 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
         </div>
       </div>
 
-      {/* Actions */}
       <div className="flex gap-3 justify-end">
         <button className="btn btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>

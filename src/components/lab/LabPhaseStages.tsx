@@ -16,7 +16,6 @@ interface Props {
 }
 
 function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
-  // Group samples by approximate stage (every 180s or by distinct speed change)
   const sorted = [...samples].sort((a, b) => a.timestamp_s - b.timestamp_s);
   const groups: TimelineSample[][] = [];
   let currentGroup: TimelineSample[] = [];
@@ -32,34 +31,40 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
   }
   if (currentGroup.length > 0) groups.push(currentGroup);
 
-  return groups.map((group, idx) => {
-    const heartRates = group.map(g => g.heart_rate).filter((v): v is number => v != null);
-    const vo2s = group.map(g => g.vo2_ml_kg_min).filter((v): v is number => v != null);
-    const lactates = group.map(g => g.lactate).filter((v): v is number => v != null);
-    const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
-    const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
+  const avg = (arr: number[]) =>
+    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
 
-    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
+  return groups
+    .map((group, idx) => {
+      const heartRates = group.map(g => g.heart_rate).filter((v): v is number => v != null);
+      const vo2s = group.map(g => g.vo2_ml_kg_min).filter((v): v is number => v != null);
+      const lactates = group.map(g => g.lactate).filter((v): v is number => v != null);
+      const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
+      const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
 
-    return {
-      id: crypto.randomUUID(),
-      test_id: '',
-      stage_number: idx + 1,
-      duration_seconds: group.length > 1
-        ? Math.round(group[group.length - 1].timestamp_s - group[0].timestamp_s)
-        : 180,
-      heart_rate: avg(heartRates) ?? 0,
-      power_watts: null,
-      speed_pace: speeds[0] ?? null,
-      vo2_ml_kg_min: avg(vo2s),
-      vco2_ml_kg_min: null,
-      lactate: avg(lactates),
-      rpe: avg(rpes),
-      vt1_marker: false,
-      vt2_marker: false,
-      created_at: new Date().toISOString(),
-    };
-  });
+      const hr = avg(heartRates);
+      if (hr == null) return null;
+
+      return {
+        id: crypto.randomUUID(),
+        test_id: '',
+        stage_number: idx + 1,
+        duration_seconds: group.length > 1
+          ? Math.round(group[group.length - 1].timestamp_s - group[0].timestamp_s)
+          : 180,
+        heart_rate: hr,
+        power_watts: null,
+        speed_pace: speeds[0] ?? null,
+        vo2_ml_kg_min: avg(vo2s),
+        vco2_ml_kg_min: null,
+        lactate: avg(lactates),
+        rpe: avg(rpes),
+        vt1_marker: false,
+        vt2_marker: false,
+        created_at: new Date().toISOString(),
+      } as TestDataPoint;
+    })
+    .filter((p): p is TestDataPoint => p !== null);
 }
 
 export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Props) {
