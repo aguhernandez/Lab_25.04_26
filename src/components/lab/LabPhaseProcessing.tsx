@@ -61,13 +61,24 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         .eq('id', testId)
         .maybeSingle();
 
-      const { data: rawPoints } = await supabase
+      const { data: rawPoints, error: pointsError } = await supabase
         .from('test_data_points')
         .select('*')
         .eq('test_id', testId)
         .order('stage_number', { ascending: true });
+      if (pointsError) throw pointsError;
 
-      const dataPoints = rawPoints || [];
+      const dataPoints = (rawPoints || []).filter((point) =>
+        Number.isFinite(Number(point.heart_rate)) && Number(point.heart_rate) > 0
+      ).map((point) => ({
+        ...point,
+        stage_number: Number(point.stage_number),
+        duration_seconds: Number(point.duration_seconds),
+        heart_rate: Number(point.heart_rate),
+      }));
+      if (dataPoints.length === 0) {
+        throw new Error('No valid test stages were saved. Each stage needs a valid heart rate.');
+      }
       markStep(0);
       await delay(400);
 
@@ -126,7 +137,7 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
       markStep(6);
       await delay(350);
 
-      await supabase.from('test_results').upsert({
+      const { error: resultError } = await supabase.from('test_results').upsert({
         test_id: testId,
         vo2max: results.vo2max,
         vo2max_measured: results.vo2max_confidence === 'measured',
@@ -142,7 +153,8 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         thresholds: results.thresholds,
         breath_data: session.breathData,
         device_profile_id: session.deviceProfile?.id ?? null,
-      });
+      }, { onConflict: 'test_id' });
+      if (resultError) throw resultError;
 
       const { success } = await updateAthletePhysiologyProfile(athlete, testData, results);
       const zones: AthleteTrainingZones | null = success ? await fetchAthleteTrainingZones(athlete.id) : null;

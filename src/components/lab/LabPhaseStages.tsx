@@ -134,8 +134,8 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         await supabase.from('test_data_points').delete().eq('test_id', currentTest.id);
         const pointsToInsert = dataPoints.map(p => ({
           test_id: currentTest.id,
-          stage_number: p.stage_number,
-          duration_seconds: p.duration_seconds,
+          stage_number: Math.max(1, Math.round(Number(p.stage_number))),
+          duration_seconds: Math.max(1, Math.round(Number(p.duration_seconds))),
           heart_rate: p.heart_rate,
           power_watts: p.power_watts,
           speed_pace: p.speed_pace,
@@ -146,7 +146,7 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
           vt2_marker: p.vt2_marker,
         }));
         const { error: insertErr } = await supabase.from('test_data_points').insert(pointsToInsert);
-        if (insertErr) console.warn('Could not save test_data_points:', insertErr.message);
+        if (insertErr) throw insertErr;
       }
 
       await supabase

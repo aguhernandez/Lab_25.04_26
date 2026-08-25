@@ -214,8 +214,8 @@ export default function DataInput({
 
         return {
           test_id: test.id,
-          stage_number: row.stage_number,
-          duration_seconds: parseInt(row.duration_seconds),
+          stage_number: Number.parseInt(String(row.stage_number), 10),
+          duration_seconds: parseInt(row.duration_seconds, 10),
           heart_rate: parseInt(row.heart_rate),
           power_watts: row.power_watts.trim() ? parseFloat(row.power_watts) : null,
           speed_pace: row.speed_pace.trim() || null,
@@ -226,6 +226,12 @@ export default function DataInput({
           vt2_marker: row.vt2_marker
         };
       });
+
+      const { error: deleteError } = await supabase
+        .from('test_data_points')
+        .delete()
+        .eq('test_id', test.id);
+      if (deleteError) throw deleteError;
 
       const { data, error: insertError } = await supabase
         .from('test_data_points')
