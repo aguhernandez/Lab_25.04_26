@@ -2,18 +2,64 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { saveTestAnthropometry } from '../../lib/anthropometry';
 import { LabSession } from '../../lib/labSession';
-import { Test, TestDataPoint, UnifiedThresholds } from '../../types';
-import DataInput from '../DataInput';
-import BreathDataImport from './BreathDataImport';
+import { Test, TestDataPoint } from '../../types';
+import TimelineDataInput from './TimelineDataInput';
 import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
-import type { BreathSample, DeviceProfile } from '../../types/breathData.types';
+import type { TimelineSample } from '../../types/timeline.types';
 
 interface Props {
   session: LabSession;
   onUpdate: (updates: Partial<LabSession>) => void;
   onNext: () => void;
   onBack: () => void;
+}
+
+function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
+  // Group samples by approximate stage (every 180s or by distinct speed change)
+  const sorted = [...samples].sort((a, b) => a.timestamp_s - b.timestamp_s);
+  const groups: TimelineSample[][] = [];
+  let currentGroup: TimelineSample[] = [];
+  let lastSpeed: string | null = null;
+
+  for (const s of sorted) {
+    if (s.speed_pace && s.speed_pace !== lastSpeed && currentGroup.length > 0) {
+      groups.push(currentGroup);
+      currentGroup = [];
+    }
+    currentGroup.push(s);
+    if (s.speed_pace) lastSpeed = s.speed_pace;
+  }
+  if (currentGroup.length > 0) groups.push(currentGroup);
+
+  return groups.map((group, idx) => {
+    const heartRates = group.map(g => g.heart_rate).filter((v): v is number => v != null);
+    const vo2s = group.map(g => g.vo2_ml_kg_min).filter((v): v is number => v != null);
+    const lactates = group.map(g => g.lactate).filter((v): v is number => v != null);
+    const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
+    const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
+
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
+
+    return {
+      id: crypto.randomUUID(),
+      test_id: '',
+      stage_number: idx + 1,
+      duration_seconds: group.length > 1
+        ? Math.round(group[group.length - 1].timestamp_s - group[0].timestamp_s)
+        : 180,
+      heart_rate: avg(heartRates) ?? 0,
+      power_watts: null,
+      speed_pace: speeds[0] ?? null,
+      vo2_ml_kg_min: avg(vo2s),
+      vco2_ml_kg_min: null,
+      lactate: avg(lactates),
+      rpe: avg(rpes),
+      vt1_marker: false,
+      vt2_marker: false,
+      created_at: new Date().toISOString(),
+    };
+  });
 }
 
 export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Props) {
@@ -23,9 +69,6 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [breathData, setBreathData] = useState<BreathSample[] | null>(session.breathData);
-  const [deviceProfile, setDeviceProfile] = useState<DeviceProfile | null>(session.deviceProfile);
-  const [breathVT, setBreathVT] = useState<UnifiedThresholds | null>(null);
 
   useEffect(() => {
     if (!currentTest) {
@@ -74,37 +117,43 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
     }
   };
 
-  const handleDataComplete = async (points: TestDataPoint[]) => {
+  const handleTimelineComplete = async (samples: TimelineSample[]) => {
     if (!currentTest) return;
 
     try {
+      // Convert timeline samples to TestDataPoint format for the existing calculation engine
+      const dataPoints = samplesToDataPoints(samples);
+
+      // Also save as test_data_points for backward compatibility
+      if (dataPoints.length > 0) {
+        const pointsToInsert = dataPoints.map(p => ({
+          test_id: currentTest.id,
+          stage_number: p.stage_number,
+          duration_seconds: p.duration_seconds,
+          heart_rate: p.heart_rate,
+          power_watts: p.power_watts,
+          speed_pace: p.speed_pace,
+          vo2_ml_kg_min: p.vo2_ml_kg_min,
+          lactate: p.lactate,
+          rpe: p.rpe,
+          vt1_marker: p.vt1_marker,
+          vt2_marker: p.vt2_marker,
+        }));
+        await supabase.from('test_data_points').insert(pointsToInsert);
+      }
+
       await supabase
         .from('tests')
         .update({ status: 'completed' })
         .eq('id', currentTest.id);
 
-      onUpdate({ dataPoints: points, breathData, deviceProfile, breathVT });
+      onUpdate({ dataPoints });
       onNext();
     } catch (err) {
       console.error('Failed to complete test:', err);
       setToast({ message: 'Failed to save test. Please try again.', type: 'error' });
     }
   };
-
-  const handleBreathDataChange = (
-    samples: BreathSample[] | null,
-    profile: DeviceProfile | null,
-    vt: UnifiedThresholds | null
-  ) => {
-    setBreathData(samples);
-    setDeviceProfile(profile);
-    setBreathVT(vt);
-  };
-
-  const effectiveNumStages = session.numStages + (session.includeCooldown ? 1 : 0);
-  const stageConfig = (session.testType === 'ramp' || session.testType === 'step')
-    ? { numStages: effectiveNumStages, stageDurationSeconds: session.stageDurationSeconds }
-    : undefined;
 
   if (creating) {
     return (
@@ -167,22 +216,10 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         </div>
       )}
 
-      <BreathDataImport
-        breathData={breathData}
-        deviceProfile={deviceProfile}
-        onChange={handleBreathDataChange}
-        hrmax={null}
-        vo2max={null}
-      />
-
-      <DataInput
-        test={currentTest}
-        athlete={athlete}
-        onComplete={handleDataComplete}
+      <TimelineDataInput
+        testId={currentTest.id}
+        onComplete={handleTimelineComplete}
         onCancel={onBack}
-        initialAnthropometry={session.preTestData?.anthropometry || null}
-        anthropometrySource={session.preTestData?.anthropometry ? 'hub' : 'manual'}
-        stageConfig={stageConfig}
       />
     </div>
   );
