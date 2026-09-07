@@ -16,8 +16,6 @@ interface Props {
   onCancel: () => void;
 }
 
-const MERGE_WINDOW_S = 20;
-
 export default function TimelineDataInput({ testId, onComplete, onCancel }: Props) {
   const [samples, setSamples] = useState<TimelineSample[]>([]);
   const [running, setRunning] = useState(false);
@@ -49,9 +47,10 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const [liveHR, setLiveHR] = useState('');
   const [liveLactate, setLiveLactate] = useState('');
   const [liveRPE, setLiveRPE] = useState('');
-  const liveLactateRef = useRef<HTMLInputElement>(null);
-  const liveHRRef = useRef<HTMLInputElement>(null);
+  const [emptyLiveFields, setEmptyLiveFields] = useState<Array<'speed' | 'hr' | 'lactate' | 'rpe'>>([]);
   const liveSpeedRef = useRef<HTMLInputElement>(null);
+  const liveHRRef = useRef<HTMLInputElement>(null);
+  const liveLactateRef = useRef<HTMLInputElement>(null);
   const liveRPERef = useRef<HTMLInputElement>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -94,56 +93,39 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // --- Live capture with window-based merge ---
-  const handleLiveEnter = (field: 'speed' | 'hr' | 'lactate' | 'rpe') => {
-    const ts = elapsed;
-    let sampleTs = ts;
-    let lactateVal: number | null = null;
-    if (field === 'lactate' && liveLactate.trim()) {
-      lactateVal = parseFloat(liveLactate);
-      sampleTs = Math.max(0, ts - LACTATE_OFFSET_S);
-    }
-
-    const newFields: Partial<TimelineSample> = {};
-    if (field === 'speed') newFields.speed_pace = liveSpeed.trim() || null;
-    if (field === 'hr') newFields.heart_rate = liveHR.trim() ? parseInt(liveHR) : null;
-    if (field === 'lactate') newFields.lactate = lactateVal;
-    if (field === 'rpe') newFields.rpe = liveRPE.trim() ? parseInt(liveRPE) : null;
-
-    setSamples((prev) => {
-      // Find a manual sample within MERGE_WINDOW_S of the target timestamp
-      const mergeIdx = prev.findIndex(
-        (s) => s.source === 'manual' && Math.abs(s.timestamp_s - sampleTs) <= MERGE_WINDOW_S
-      );
-      if (mergeIdx >= 0) {
-        const merged = { ...prev[mergeIdx] };
-        if (newFields.speed_pace != null) merged.speed_pace = newFields.speed_pace;
-        if (newFields.heart_rate != null) merged.heart_rate = newFields.heart_rate;
-        if (newFields.lactate != null) merged.lactate = newFields.lactate;
-        if (newFields.rpe != null) merged.rpe = newFields.rpe;
-        const copy = [...prev];
-        copy[mergeIdx] = merged;
-        return copy;
-      }
-      const newSample: TimelineSample = {
-        id: crypto.randomUUID(),
-        timestamp_s: sampleTs,
-        speed_pace: newFields.speed_pace ?? null,
-        heart_rate: newFields.heart_rate ?? null,
-        lactate: newFields.lactate ?? null,
-        rpe: newFields.rpe ?? null,
-        vo2_ml_kg_min: null,
-        raw_data: {},
-        source: 'manual',
-        edited_fields: [],
-      };
-      return [...prev, newSample].sort((a, b) => a.timestamp_s - b.timestamp_s);
+  // --- Live capture: save all fields as one row ---
+  const handleLiveSave = () => {
+    const missingFields = (['speed', 'hr', 'lactate', 'rpe'] as const).filter((field) => {
+      const value = field === 'speed' ? liveSpeed : field === 'hr' ? liveHR : field === 'lactate' ? liveLactate : liveRPE;
+      return !value.trim();
     });
+    setEmptyLiveFields(missingFields);
 
-    if (field === 'speed') { setLiveSpeed(''); liveSpeedRef.current?.focus(); }
-    if (field === 'hr') { setLiveHR(''); liveHRRef.current?.focus(); }
-    if (field === 'lactate') { setLiveLactate(''); liveLactateRef.current?.focus(); }
-    if (field === 'rpe') { setLiveRPE(''); liveRPERef.current?.focus(); }
+    const timestamp = elapsed;
+    const newSample: TimelineSample = {
+      id: crypto.randomUUID(),
+      timestamp_s: liveLactate.trim() ? Math.max(0, timestamp - LACTATE_OFFSET_S) : timestamp,
+      speed_pace: liveSpeed.trim() || null,
+      heart_rate: liveHR.trim() ? parseInt(liveHR, 10) : null,
+      lactate: liveLactate.trim() ? parseFloat(liveLactate) : null,
+      rpe: liveRPE.trim() ? parseInt(liveRPE, 10) : null,
+      vo2_ml_kg_min: null,
+      raw_data: {},
+      source: 'manual',
+      edited_fields: [],
+    };
+
+    setSamples((prev) => [...prev, newSample].sort((a, b) => a.timestamp_s - b.timestamp_s));
+    setLiveSpeed('');
+    setLiveHR('');
+    setLiveLactate('');
+    setLiveRPE('');
+    liveSpeedRef.current?.focus();
+  };
+
+  const focusNextLiveField = (field: 'speed' | 'hr' | 'lactate' | 'rpe') => {
+    const nextRef = field === 'speed' ? liveHRRef : field === 'hr' ? liveLactateRef : field === 'lactate' ? liveRPERef : null;
+    nextRef?.current?.focus();
   };
 
   // --- Protocol preload ---
@@ -329,36 +311,44 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Speed / Pace</label>
-            <input ref={liveSpeedRef} type="text" className="input" placeholder="5:00/km"
-              value={liveSpeed} onChange={(e) => setLiveSpeed(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('speed'); }} disabled={saving} />
+            <input ref={liveSpeedRef} type="text" className={`input ${emptyLiveFields.includes('speed') ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300' : ''}`} placeholder="5:00/km"
+              value={liveSpeed} onChange={(e) => { setLiveSpeed(e.target.value); setEmptyLiveFields([]); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focusNextLiveField('speed'); } }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">HR (bpm)</label>
-            <input ref={liveHRRef} type="number" className="input" placeholder="150"
-              value={liveHR} onChange={(e) => setLiveHR(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('hr'); }} disabled={saving} />
+            <input ref={liveHRRef} type="number" className={`input ${emptyLiveFields.includes('hr') ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300' : ''}`} placeholder="150"
+              value={liveHR} onChange={(e) => { setLiveHR(e.target.value); setEmptyLiveFields([]); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focusNextLiveField('hr'); } }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
               Lactate (mmol/L) <span className="text-gray-400">−15s offset</span>
             </label>
-            <input ref={liveLactateRef} type="number" step="0.1" className="input" placeholder="2.0"
-              value={liveLactate} onChange={(e) => setLiveLactate(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('lactate'); }} disabled={saving} />
+            <input ref={liveLactateRef} type="number" step="0.1" className={`input ${emptyLiveFields.includes('lactate') ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300' : ''}`} placeholder="2.0"
+              value={liveLactate} onChange={(e) => { setLiveLactate(e.target.value); setEmptyLiveFields([]); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focusNextLiveField('lactate'); } }} disabled={saving} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">RPE (1-10)</label>
-            <input ref={liveRPERef} type="number" min="1" max="10" className="input" placeholder="5"
-              value={liveRPE} onChange={(e) => setLiveRPE(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleLiveEnter('rpe'); }} disabled={saving} />
+            <input ref={liveRPERef} type="number" min="1" max="10" className={`input ${emptyLiveFields.includes('rpe') ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300' : ''}`} placeholder="5"
+              value={liveRPE} onChange={(e) => { setLiveRPE(e.target.value); setEmptyLiveFields([]); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleLiveSave(); } }} disabled={saving} />
           </div>
+          <button
+            onClick={handleLiveSave}
+            disabled={saving}
+            className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 min-h-[44px] shadow-sm"
+          >
+            <CheckCircle className="w-5 h-5" />
+            Guardar
+          </button>
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          Press Enter in any field to log it at the current timer time. Values within {MERGE_WINDOW_S}s merge into the same row.
+          Press <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">Enter</kbd> to move to the next field, or press Enter in RPE / tap Guardar to save the full row. Empty fields are highlighted.
         </p>
       </div>
 
