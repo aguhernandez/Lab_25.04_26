@@ -57,7 +57,7 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
         heart_rate: hr,
         power_watts: null,
         speed_pace: speeds[0] ?? null,
-        vo2_ml_kg_min: avgDec(vo2s),
+        vo2_ml_kg_min: vo2s.length ? Math.max(...vo2s) : null,
         vco2_ml_kg_min: null,
         lactate: avgDec(lactates),
         rpe: avgInt(rpes),
