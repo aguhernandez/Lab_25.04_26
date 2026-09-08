@@ -68,7 +68,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
     const lines: string[] = [];
     lines.push(`Athlete: ${athlete.name}`);
     if (test) lines.push(`Date: ${new Date(test.test_date).toLocaleDateString()}`);
-    if (results.vo2max) lines.push(`VO\u2082max: ${Math.round(results.vo2max)} ml/kg/min (${results.vo2max_confidence})`);
+    if (results.vo2max) lines.push(`VO\u2082max: ${(Math.round(results.vo2max * 10) / 10).toFixed(1)} ml/kg/min (${results.vo2max_confidence})`);
     if (results.lt1_hr) lines.push(`LT1: ${results.lt1_hr} bpm${results.lt1_power ? ` / ${results.lt1_power} W` : ''}`);
     if (results.lt2_hr) lines.push(`LT2: ${results.lt2_hr} bpm${results.lt2_power ? ` / ${results.lt2_power} W` : ''}`);
     if (results.fatmax_hr) lines.push(`FatMax: ${results.fatmax_hr} bpm`);

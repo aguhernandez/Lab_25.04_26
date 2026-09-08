@@ -801,7 +801,7 @@ function renderExecutiveSummary(b: PDFBuilder, data: ReportData) {
   const items: Array<{ label: string; value: string; unit?: string; note?: string }> = [];
 
   if (r?.vo2max) {
-    items.push({ label: 'VO\u2082max', value: val(r.vo2max), unit: 'ml/kg/min', note: r.vo2max_confidence !== 'measured' ? `(${r.vo2max_confidence})` : undefined });
+    items.push({ label: 'VO\u2082max', value: val(r.vo2max, 1), unit: 'ml/kg/min', note: r.vo2max_confidence !== 'measured' ? `(${r.vo2max_confidence})` : undefined });
   }
   if (r?.lt1_hr) {
     items.push({ label: 'LT1 Heart Rate', value: val(r.lt1_hr), unit: 'bpm' });
@@ -903,7 +903,7 @@ function renderVO2max(b: PDFBuilder, data: ReportData, style: ReportStyle) {
   }
 
   const row1: VO2Card[] = [];
-  if (r.vo2max) row1.push({ label: 'VO\u2082max (total body)', value: val(r.vo2max), unit: 'ml/kg/min', color: '#10B981' });
+  if (r.vo2max) row1.push({ label: 'VO\u2082max (total body)', value: val(r.vo2max, 1), unit: 'ml/kg/min', color: '#10B981' });
   if (vo2_ml_min) row1.push({ label: 'VO\u2082max (absolute)', value: (vo2_ml_min / 1000).toFixed(2), unit: 'L/min', color: '#3B82F6' });
   if (r.vo2max_ml_kg_lbm_min) row1.push({ label: 'VO\u2082max (LBM)', value: val(r.vo2max_ml_kg_lbm_min, 1), unit: 'ml/kgLBM/min', color: '#F59E0B' });
   if (r.hrmax) row1.push({ label: 'HRmax', value: val(r.hrmax), unit: 'bpm', color: '#EF4444' });

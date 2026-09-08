@@ -269,7 +269,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
             <div className="p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               <Metric
                 label="VO\u2082max"
-                value={activeResults.vo2max ? Math.round(activeResults.vo2max) : null}
+                value={activeResults.vo2max ? Math.round(activeResults.vo2max * 10) / 10 : null}
                 unit="ml/kg/min"
                 badge={activeResults.vo2max_confidence !== 'measured' ? activeResults.vo2max_confidence : undefined}
               />
