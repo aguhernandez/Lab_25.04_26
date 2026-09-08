@@ -341,14 +341,14 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           <button
             onClick={handleLiveSave}
             disabled={saving}
-            className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 min-h-[44px] shadow-sm"
+            className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-yellow-400 hover:bg-yellow-300 active:bg-yellow-500 text-gray-800 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 min-h-[44px] shadow-sm"
           >
             <CheckCircle className="w-5 h-5" />
-            Guardar
+            Save
           </button>
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          Press <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">Enter</kbd> to move to the next field, or press Enter in RPE / tap Guardar to save the full row. Empty fields are highlighted.
+          Press <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">Enter</kbd> to move to the next field, or press Enter in RPE / tap Save to save the full row. Empty fields are highlighted.
         </p>
       </div>
 
@@ -469,7 +469,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">&nbsp;</label>
-              <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-500 transition-colors">
+              <label className="flex items-center gap-2 px-4 py-2 bg-yellow-400 text-gray-800 rounded-lg text-sm font-medium cursor-pointer hover:bg-yellow-300 transition-colors">
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 {importing ? 'Reading...' : 'Browse files'}
                 <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={handleFileSelect} className="hidden" disabled={importing} />
