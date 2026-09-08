@@ -44,7 +44,7 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
       const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
       const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
 
-      const hr = avgInt(heartRates);
+      const hr = heartRates.length ? Math.max(...heartRates) : null;
       if (hr == null) return null;
 
       return {
