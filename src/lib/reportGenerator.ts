@@ -1777,7 +1777,6 @@ function renderRawData(b: PDFBuilder, data: ReportData) {
 }
 
 function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOptions) {
-  const style = opts.style;
   b.sectionHeader(tr('secRec'));
 
   const noteBlocks: Array<{ label: string; text: string }> = [];
@@ -1853,97 +1852,6 @@ function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOpti
     }
   }
 
-  const r = data.physiologyResults;
-
-  const recs: string[] = [];
-
-  if (r) {
-    if (r.lt1_hr && r.lt2_hr) {
-      const lt1Pct = r.lt1_percent_hrmax || 0;
-      const lt2Pct = r.lt2_percent_hrmax || 0;
-      if (lt2Pct - lt1Pct < 10) {
-        recs.push('The gap between LT1 and LT2 is narrow. Focus on polarized training to widen the aerobic base and push LT2 higher.');
-      } else {
-        recs.push('Good LT1–LT2 separation. Maintain aerobic base volume while incorporating threshold intervals near LT2 to continue progression.');
-      }
-    }
-    if (r.vo2max && r.vo2max < 45) {
-      recs.push('VO\u2082max is below the performance threshold for competitive endurance sport. Prioritize high-intensity interval training (3–4 sessions/week) alongside aerobic base building.');
-    } else if (r.vo2max && r.vo2max >= 60) {
-      recs.push('Excellent VO\u2082max. Focus on improving lactate threshold efficiency and neuromuscular power to maximize race performance.');
-    }
-    if (r.fatmax_hr && r.lt1_hr && r.fatmax_hr < r.lt1_hr - 5) {
-      recs.push('FatMax is significantly below LT1. Incorporate Zone 2 training sessions specifically targeting the FatMax intensity to improve metabolic flexibility.');
-    }
-    if (r.hr_drift_percent != null && r.hr_drift_percent > 5) {
-      recs.push('HR drift exceeds 5%, indicating cardiovascular drift or dehydration. Ensure adequate pre-exercise hydration and consider pacing adjustments during prolonged efforts.');
-    }
-    if (r.pam_watts && data.athlete.weight_kg) {
-      const wpkg = r.pam_watts / data.athlete.weight_kg;
-      if (data.athlete.sport === 'cycling' && wpkg < 4) {
-        recs.push('W/kg at VO\u2082max is below 4.0. Strength-endurance training targeting peak power output is recommended.');
-      }
-    }
-  }
-
-  const k = data.kerrResults;
-  if (k) {
-    if (k.adipose_mass_pct > 20 && data.athlete.sex !== 'female') {
-      recs.push('Adipose mass percentage is above optimal for performance. A targeted body composition intervention combining caloric management with resistance training may be beneficial.');
-    }
-    if (k.muscle_mass_pct < 35) {
-      recs.push('Muscle mass is below typical performance norms. Consider incorporating resistance training to improve power-to-weight ratio.');
-    }
-  }
-
-  const hydration = data.hydrationSessions;
-  if (hydration?.length && hydration[0].percent_dehydration != null) {
-    if (hydration[0].percent_dehydration > 2) {
-      recs.push('Dehydration levels exceed 2% body mass loss during exercise. Develop a personalized hydration plan targeting fluid intake of approximately ' +
-        (hydration[0].sweat_rate_l_h ? `${(hydration[0].sweat_rate_l_h * 0.8).toFixed(2)} L/h` : '0.5–1.0 L/h') + ' during training.');
-    }
-  }
-
-  if (recs.length === 0) {
-    const missing: string[] = [];
-    if (!data.physiologyResults) missing.push('VO\u2082max & metabolic lab test (VO\u2082max, lactate thresholds, FatMax)');
-    if (!data.kerrResults) missing.push('Body composition assessment (Kerr 5-component anthropometry)');
-    if (!data.hydrationSessions?.length) missing.push('Hydration & sweat rate analysis');
-    missing.push('Environmental physiology / heat adaptation assessment');
-    if (missing.length > 0) {
-      recs.push('No specific recommendations could be generated. The following assessments are missing data:');
-      missing.forEach(m => recs.push('\u2022 ' + m));
-    } else {
-      recs.push('All available data has been reviewed. No critical findings requiring specific recommendations at this time.');
-    }
-  }
-
-  const recPaddingH = 10;
-  const recPaddingV = 6;
-  const recLineH = 5;
-  recs.forEach((rec, i) => {
-    b.doc.setFontSize(8.5);
-    b.doc.setFont('helvetica', 'normal');
-    const lines = b.doc.splitTextToSize(sanitizeForPDF(rec), b.cw - recPaddingH * 2 - 3);
-    const boxH = lines.length * recLineH + recPaddingV * 2;
-    b.checkPage(boxH + 4);
-    b.fill(i % 2 === 0 ? C.gray100 : C.white);
-    b.doc.rect(b.ml, b.y, b.cw, boxH, 'F');
-    b.fill(C.yellow);
-    b.doc.rect(b.ml, b.y, 3, boxH, 'F');
-    b.textColor(C.gray700);
-    lines.forEach((line: string, j: number) => {
-      b.doc.setFont('helvetica', 'normal');
-      b.doc.setFontSize(8.5);
-      b.doc.text(line, b.ml + recPaddingH, b.y + recPaddingV + 3 + j * recLineH);
-    });
-    b.y += boxH + 3;
-  });
-
-  if (style === 'scientific') {
-    b.spacer(4);
-    b.paragraph('Note: These recommendations are generated based on physiological test results and standard exercise science principles. Individual response to training may vary. All recommendations should be interpreted in the context of the athlete\'s overall training history, health status, and performance goals.');
-  }
   b.spacer(4);
 }
 
@@ -2389,7 +2297,7 @@ function renderCharts(b: PDFBuilder, data: ReportData, options: ReportOptions) {
   const SERIES_COLORS: Record<string, string> = {
     hr: '#ef4444',
     power: '#f97316',
-    lactate: '#dc2626',
+    lactate: '#0d9488',
     vo2: '#3b82f6',
     rpe: '#10b981',
     fat_pct: '#10b981',
