@@ -592,26 +592,38 @@ class PDFBuilder {
   }
 
   tableRow(cols: Array<{ value: string; width: number }>, isEven: boolean, accentColor?: string) {
-    this.checkPage(8);
+    const rowH = 7;
+    // Pre-compute wrapped lines for each column to determine total row height
+    const wrappedCols = cols.map(col => {
+      this.setJostFont(8, 'normal');
+      const lines = this.pdf.splitTextToSize(sanitizeForPDF(col.value), col.width - 4);
+      return { ...col, lines: lines.length > 0 ? lines : [''] };
+    });
+    const maxLines = Math.max(...wrappedCols.map(c => c.lines.length));
+    const totalH = Math.max(rowH, maxLines * 4.5 + 2);
+
+    this.checkPage(totalH + 2);
     let x = this.ml;
     if (accentColor) {
       const [r, g, b] = hexToRgb(accentColor);
       this.pdf.setFillColor(r, g, b);
-      this.pdf.rect(this.ml, this.y, 3, 7, 'F');
+      this.pdf.rect(this.ml, this.y, 3, totalH, 'F');
     }
     this.fill(isEven ? C.white : C.gray100);
-    this.pdf.rect(this.ml + (accentColor ? 3 : 0), this.y, this.cw - (accentColor ? 3 : 0), 7, 'F');
+    this.pdf.rect(this.ml + (accentColor ? 3 : 0), this.y, this.cw - (accentColor ? 3 : 0), totalH, 'F');
     this.textColor(C.gray700);
     this.setJostFont(8, 'normal');
-    cols.forEach((col, i) => {
+    wrappedCols.forEach((col, i) => {
       const tx = i === 0 ? x + (accentColor ? 5 : 2) : x + 2;
-      this.pdf.text(col.value, tx, this.y + 5);
+      col.lines.forEach((line: string, li: number) => {
+        this.pdf.text(line, tx, this.y + 4 + li * 4.5);
+      });
       x += col.width;
     });
     this.stroke(C.gray200);
     this.pdf.setLineWidth(0.2);
-    this.pdf.line(this.ml, this.y + 7, this.ml + this.cw, this.y + 7);
-    this.y += 7;
+    this.pdf.line(this.ml, this.y + totalH, this.ml + this.cw, this.y + totalH);
+    this.y += totalH;
   }
 
   paragraph(text: string, fontSize = 8.5) {
@@ -1069,34 +1081,44 @@ function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, ha
   b.doc.text(title, b.ml, b.y);
   b.y += 5;
 
+  // Total available width is b.cw (~170mm). Distribute columns to fit.
+  const numExtra = (hasPower ? 1 : 0) + (hasPace ? 1 : 0) + (hasRpe ? 1 : 0);
+  const purposeW = numExtra === 0 ? 80 : Math.max(28, 58 - numExtra * 10);
+  const nameW = numExtra === 0 ? 40 : Math.max(22, 34 - numExtra * 3);
+  const hrW = 30;
+  const powerW = 22;
+  const paceW = 20;
+  const rpeW = 14;
+  const zoneW = 10;
+
   const cols = [
-    { label: 'ZONE', width: 12 },
-    { label: 'NAME', width: hasPower || hasPace ? 32 : 38 },
-    { label: 'HR RANGE (bpm)', width: 34 },
-    ...(hasPower ? [{ label: 'POWER (W)', width: 28 }] : []),
-    ...(hasPace ? [{ label: 'PACE', width: 24 }] : []),
-    ...(hasRpe ? [{ label: 'RPE', width: 16 }] : []),
-    { label: 'PURPOSE', width: hasPower || hasPace || hasRpe ? 34 : 70 },
+    { label: 'Z', width: zoneW },
+    { label: 'NAME', width: nameW },
+    { label: 'HR (bpm)', width: hrW },
+    ...(hasPower ? [{ label: 'POWER (W)', width: powerW }] : []),
+    ...(hasPace ? [{ label: 'PACE', width: paceW }] : []),
+    ...(hasRpe ? [{ label: 'RPE', width: rpeW }] : []),
+    { label: 'PURPOSE', width: purposeW },
   ];
   b.tableHeader(cols);
 
   zones.forEach((zone: TrainingZone, i: number) => {
     const color = ZONE_COLORS[zone.zone] || C.gray500;
     const row: Array<{ value: string; width: number }> = [
-      { value: `Z${zone.zone}`, width: 12 },
-      { value: zone.name, width: hasPower || hasPace ? 32 : 38 },
+      { value: `Z${zone.zone}`, width: zoneW },
+      { value: zone.name, width: nameW },
       { value: zone.hr_min != null && zone.hr_max != null
-          ? `${zone.hr_min} - ${zone.hr_max}`
-          : (zone as any).hr_label || '\u2014', width: 34 },
+          ? `${zone.hr_min}-${zone.hr_max}`
+          : (zone as any).hr_label || '\u2014', width: hrW },
     ];
-    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min} - ${zone.power_max}` : '\u2014', width: 28 });
-    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min} - ${zone.pace_max}` : '\u2014', width: 24 });
+    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min}-${zone.power_max}` : '\u2014', width: powerW });
+    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min}-${zone.pace_max}` : '\u2014', width: paceW });
     if (hasRpe) {
       const rpeMin = (zone as any).rpe_min;
       const rpeMax = (zone as any).rpe_max;
-      row.push({ value: rpeMin != null && rpeMax != null ? `${rpeMin} - ${rpeMax}` : '\u2014', width: 16 });
+      row.push({ value: rpeMin != null && rpeMax != null ? `${rpeMin}-${rpeMax}` : '\u2014', width: rpeW });
     }
-    row.push({ value: zone.description || '', width: hasPower || hasPace || hasRpe ? 34 : 70 });
+    row.push({ value: zone.description || '', width: purposeW });
     b.tableRow(row, i % 2 === 0, color);
   });
   b.spacer(3);

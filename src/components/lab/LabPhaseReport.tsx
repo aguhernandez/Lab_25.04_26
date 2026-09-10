@@ -9,6 +9,8 @@ import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { ReportData } from '../../lib/reportGenerator';
 import { supabase } from '../../lib/supabase';
+import { fetchAthleteTrainingZones } from '../../lib/physiologyProfile';
+import type { TrainingZone } from '../../types';
 
 interface Props {
   session: LabSession;
@@ -22,6 +24,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [coachNotes, setCoachNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
+  const [savedManualZones, setSavedManualZones] = useState<TrainingZone[] | null>(null);
 
   useEffect(() => {
     if (session.testId) {
@@ -55,6 +58,14 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
   const handleOpenReport = async () => {
     if (session.testId && coachNotes) {
       await handleSaveNotes(false);
+    }
+    // Fetch manually-saved zones from the DB so the report uses the coach's edits,
+    // not the auto-calculated ones from the session.
+    if (athlete?.id) {
+      const tz = await fetchAthleteTrainingZones(athlete.id);
+      if (tz?.heart_rate_zones?.length) {
+        setSavedManualZones(tz.heart_rate_zones as TrainingZone[]);
+      }
     }
     setShowBuilder(true);
   };
@@ -110,7 +121,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
           defaultType="lab"
           defaultSections={REPORT_TYPE_PRESETS.lab}
           onClose={() => setShowBuilder(false)}
-          manualTrainingZones={session.trainingZones?.heart_rate_zones}
+          manualTrainingZones={savedManualZones ?? session.trainingZones?.heart_rate_zones}
           initialPhysiologyNotes={coachNotes}
         />
       </div>

@@ -59,7 +59,28 @@ export default function TrainingZonesTable({
   const [localZones, setLocalZones] = useState<ZoneDefinition[] | null>(null);
 
   const resolveZones = (): ZoneDefinition[] => {
-    if (localZones) return localZones;
+    if (localZones) {
+      // Use manually-saved zones. Convert between 5/7 if needed, preserving edits.
+      if (mode === '7' && localZones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
+        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts, threshold_source: thresholdSource, language: lang });
+        // Preserve manually-edited HR, RPE, pace from the 5-zone version
+        localZones.forEach((z5, i) => {
+          if (i < z7.length) {
+            z7[i].hr_min = z5.hr_min;
+            z7[i].hr_max = z5.hr_max;
+            z7[i].rpe_min = z5.rpe_min;
+            z7[i].rpe_max = z5.rpe_max;
+            z7[i].pace_min = z5.pace_min;
+            z7[i].pace_max = z5.pace_max;
+          }
+        });
+        return z7;
+      }
+      if (mode === '5' && localZones.length === 7) {
+        return convertTo5Zones(localZones, sport, lang);
+      }
+      return localZones;
+    }
     if (zonesData) {
       return mode === '7' ? zonesData.zones7 : zonesData.zones5;
     }
@@ -196,7 +217,7 @@ export default function TrainingZonesTable({
 
             <div className="flex items-center bg-white/10 rounded-xl p-1 gap-1">
               <button
-                onClick={() => { setMode('5'); setEditing(false); setLocalZones(null); }}
+                onClick={() => { setMode('5'); setEditing(false); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
                   mode === '5'
                     ? 'bg-white text-gray-800 shadow'
@@ -206,7 +227,7 @@ export default function TrainingZonesTable({
                 5 zones
               </button>
               <button
-                onClick={() => { setMode('7'); setEditing(false); setLocalZones(null); }}
+                onClick={() => { setMode('7'); setEditing(false); }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
                   mode === '7'
                     ? 'bg-white text-gray-800 shadow'
