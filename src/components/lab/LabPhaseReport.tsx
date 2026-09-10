@@ -36,8 +36,8 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
     }
   }, [session.testId]);
 
-  const handleSaveNotes = async () => {
-    if (!session.testId) return;
+  const handleSaveNotes = async (showToast = true) => {
+    if (!session.testId) return false;
     setSavingNotes(true);
     const { error } = await supabase
       .from('test_results')
@@ -45,10 +45,18 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
       .eq('test_id', session.testId);
     setSavingNotes(false);
     if (error) {
-      setToast({ message: 'Failed to save notes', type: 'error' });
-    } else {
-      setToast({ message: 'Notes saved', type: 'success' });
+      if (showToast) setToast({ message: 'Failed to save notes', type: 'error' });
+      return false;
     }
+    if (showToast) setToast({ message: 'Notes saved', type: 'success' });
+    return true;
+  };
+
+  const handleOpenReport = async () => {
+    if (session.testId && coachNotes) {
+      await handleSaveNotes(false);
+    }
+    setShowBuilder(true);
   };
 
   const { results, advancedMetrics, dataPoints, test, athlete } = session;
@@ -103,6 +111,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
           defaultSections={REPORT_TYPE_PRESETS.lab}
           onClose={() => setShowBuilder(false)}
           manualTrainingZones={session.trainingZones?.heart_rate_zones}
+          initialPhysiologyNotes={coachNotes}
         />
       </div>
     );
@@ -148,7 +157,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
           />
           <div className="flex justify-end">
             <button
-              onClick={handleSaveNotes}
+              onClick={() => handleSaveNotes()}
               disabled={savingNotes || !session.testId}
               className="px-4 py-2 bg-[#fdda36] text-[#514163] rounded-lg text-sm font-semibold hover:bg-[#fdda36]/90 transition-colors disabled:opacity-50"
             >
@@ -165,7 +174,7 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
         </div>
         <div className="p-6">
           <button
-            onClick={() => setShowBuilder(true)}
+            onClick={handleOpenReport}
             disabled={!reportData}
             className="w-full flex items-center gap-4 p-5 rounded-xl border-2 border-dashed border-[#fdda36]/40 hover:border-[#fdda36] hover:bg-[#fdda36]/5 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
           >

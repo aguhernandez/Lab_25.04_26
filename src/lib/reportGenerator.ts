@@ -1791,130 +1791,93 @@ function renderHTMLToPDF(b: PDFBuilder, html: string) {
   const container = doc.body;
   if (!container || !container.childNodes.length) return;
 
-  const paddingH = 10;
+  const paddingH = 4;
   const lineH = 5;
   const textWidth = b.cw - paddingH * 2;
+  type TextLine = { kind: 'text'; text: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' };
+  type MediaBlock = { kind: 'image'; src: string; width?: number; height?: number } | { kind: 'table'; table: HTMLTableElement };
+  type RenderBlock = TextLine | MediaBlock;
+  const blocks: RenderBlock[] = [];
 
-  type RenderLine = { text: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' };
-  const lines: RenderLine[] = [];
-
-  function pushText(text: string, bold: boolean, italic: boolean, underline: boolean, size: number, align: 'left' | 'center' | 'right' = 'left') {
+  const pushText = (text: string, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) => {
     const clean = sanitizeForPDF(text.replace(/&nbsp;/g, ' ').replace(/\u00a0/g, ' '));
-    if (!clean.trim() && lines.length > 0 && lines[lines.length - 1].text === '') {
-      return;
+    if (!clean.trim()) return;
+    b.doc.setFont('helvetica', styles.italic ? 'italic' : styles.bold ? 'bold' : 'normal');
+    b.doc.setFontSize(styles.size);
+    for (const line of b.doc.splitTextToSize(clean, textWidth)) {
+      blocks.push({ kind: 'text', text: line, ...styles });
     }
-    b.doc.setFont('helvetica', 'normal');
-    b.doc.setFontSize(size);
-    const wrapped = b.doc.splitTextToSize(clean, textWidth);
-    for (const w of wrapped) {
-      lines.push({ text: w, bold, italic, underline, size, align });
-    }
-  }
+  };
 
-  function walkNode(node: Node, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) {
+  const walkNode = (node: Node, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent || '';
-      if (text) pushText(text, styles.bold, styles.italic, styles.underline, styles.size, styles.align);
+      pushText(node.textContent || '', styles);
       return;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
     const tag = el.tagName.toLowerCase();
-    const newStyles = { ...styles };
-
-    if (tag === 'b' || tag === 'strong') newStyles.bold = true;
-    else if (tag === 'i' || tag === 'em') newStyles.italic = true;
-    else if (tag === 'u') newStyles.underline = true;
-    else if (tag === 's' || tag === 'strike' || tag === 'del') newStyles.underline = false;
-    else if (tag === 'h1') { newStyles.size = 12; newStyles.bold = true; }
-    else if (tag === 'h2') { newStyles.size = 10.5; newStyles.bold = true; }
-    else if (tag === 'h3') { newStyles.size = 9.5; newStyles.bold = true; }
-    else if (tag === 'p' || tag === 'div') { /* default paragraph */ }
-    else if (tag === 'a') { /* links: just render text */ }
-    else if (tag === 'br') { lines.push({ text: '', bold: false, italic: false, underline: false, size: styles.size, align: styles.align }); return; }
-    else if (tag === 'ul' || tag === 'ol') { /* handled below */ }
-    else if (tag === 'li') { /* handled below */ }
-    else if (tag === 'table') { /* handled below */ }
-    else if (tag === 'img') { /* handled below */ }
-
-    if (el.style.textAlign === 'center') newStyles.align = 'center';
-    else if (el.style.textAlign === 'right') newStyles.align = 'right';
-
-    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
-      if (lines.length > 0 && lines[lines.length - 1].text !== '') lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
-      for (const child of el.childNodes) walkNode(child, newStyles);
-      lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
-      return;
-    }
-
-    if (tag === 'ul' || tag === 'ol') {
-      let idx = 1;
-      for (const child of el.childNodes) {
-        if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName.toLowerCase() === 'li') {
-          const prefix = tag === 'ol' ? `${idx}. ` : '\u2022 ';
-          pushText(prefix, newStyles.bold, newStyles.italic, newStyles.underline, newStyles.size, newStyles.align);
-          for (const grandchild of child.childNodes) walkNode(grandchild, { ...newStyles, bold: false });
-          lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
-          idx++;
-        }
-      }
-      return;
-    }
-
-    if (tag === 'table') {
-      renderTableToPDF(b, el as HTMLTableElement);
-      return;
-    }
-
+    const next = { ...styles };
+    if (tag === 'b' || tag === 'strong') next.bold = true;
+    if (tag === 'i' || tag === 'em') next.italic = true;
+    if (tag === 'u') next.underline = true;
+    if (tag === 'h1') { next.bold = true; next.size = 12; }
+    if (tag === 'h2') { next.bold = true; next.size = 10.5; }
+    if (tag === 'h3') { next.bold = true; next.size = 9.5; }
+    if (el.style.textAlign === 'center') next.align = 'center';
+    if (el.style.textAlign === 'right') next.align = 'right';
+    if (tag === 'br') return;
     if (tag === 'img') {
       const img = el as HTMLImageElement;
-      if (img.src) renderImageToPDF(b, img.src, img.width, img.height);
+      if (img.src) blocks.push({ kind: 'image', src: img.src, width: img.width || undefined, height: img.height || undefined });
       return;
     }
-
-    if (tag === 'p' || tag === 'div') {
-      for (const child of el.childNodes) walkNode(child, newStyles);
-      if (lines.length > 0 && lines[lines.length - 1].text !== '') lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
+    if (tag === 'table') {
+      blocks.push({ kind: 'table', table: el as HTMLTableElement });
       return;
     }
+    if (tag === 'ul' || tag === 'ol') {
+      Array.from(el.children).forEach((child, index) => {
+        if (child.tagName.toLowerCase() !== 'li') return;
+        pushText(`${tag === 'ol' ? `${index + 1}.` : '•'} `, next);
+        Array.from(child.childNodes).forEach(childNode => walkNode(childNode, next));
+      });
+      return;
+    }
+    Array.from(el.childNodes).forEach(child => walkNode(child, next));
+  };
 
-    for (const child of el.childNodes) walkNode(child, newStyles);
-  }
+  Array.from(container.childNodes).forEach(child => walkNode(child, { bold: false, italic: false, underline: false, size: 9, align: 'left' }));
 
-  for (const child of container.childNodes) {
-    walkNode(child, { bold: false, italic: false, underline: false, size: 9, align: 'left' });
-  }
-
-  const topPad = 8;
-  const botPad = 8;
-  const totalH = lines.length * lineH + topPad + botPad;
-  b.checkPage(totalH + 4);
-
-  b.fill(C.yellow);
-  b.doc.rect(b.ml, b.y, b.cw, totalH, 'F');
-  b.textColor(C.gray900);
-
-  lines.forEach((line, j) => {
-    b.checkPage(lineH + 2);
-    b.doc.setFont('helvetica', 'normal');
-    b.doc.setFontSize(line.size);
-    const font = line.bold ? 'bold' : 'normal';
-    const style = line.italic ? 'italic' : font;
-    b.doc.setFont('helvetica', style);
-    b.doc.setFontSize(line.size);
-    const x = b.ml + paddingH;
-    const y = b.y + topPad + 3 + j * lineH;
-    if (line.text) {
-      b.doc.text(line.text, x, y, line.align === 'center' ? { align: 'center' } : line.align === 'right' ? { align: 'right' } : undefined);
-      if (line.underline) {
-        const tw = b.doc.getTextWidth(line.text);
+  let textY = b.y;
+  for (const block of blocks) {
+    if (block.kind === 'text') {
+      b.checkPage(lineH + 2);
+      b.textColor(C.gray900);
+      b.doc.setFont('helvetica', block.italic ? 'italic' : block.bold ? 'bold' : 'normal');
+      b.doc.setFontSize(block.size);
+      const x = block.align === 'center' ? b.ml + b.cw / 2 : block.align === 'right' ? b.ml + b.cw : b.ml + paddingH;
+      b.doc.text(block.text, x, b.y, block.align === 'left' ? undefined : { align: block.align });
+      if (block.underline) {
+        const width = b.doc.getTextWidth(block.text);
+        const start = block.align === 'center' ? x - width / 2 : block.align === 'right' ? x - width : x;
         b.doc.setLineWidth(0.3);
-        b.doc.line(x, y - 0.5, x + tw, y - 0.5);
+        b.doc.line(start, b.y + 0.6, start + width, b.y + 0.6);
       }
+      b.y += lineH;
+      textY = b.y;
+    } else if (block.kind === 'image') {
+      b.spacer(2);
+      renderImageToPDF(b, block.src, block.width, block.height);
+      b.spacer(2);
+    } else {
+      b.spacer(2);
+      renderTableToPDF(b, block.table);
+      b.spacer(2);
     }
-  });
+  }
 
-  b.y += totalH + 2;
+  b.y = Math.max(b.y, textY) + 3;
 }
 
 function renderTableToPDF(b: PDFBuilder, table: HTMLTableElement) {

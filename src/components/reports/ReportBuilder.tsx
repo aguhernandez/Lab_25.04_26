@@ -25,6 +25,7 @@ interface Props {
   defaultSections?: ReportSection[];
   onClose?: () => void;
   manualTrainingZones?: TrainingZone[];
+  initialPhysiologyNotes?: string;
 }
 
 const SECTION_GROUPS = ['General', 'Anthropometry', 'Physiology', 'Environmental', 'Data', 'Conclusions'];
@@ -39,7 +40,7 @@ function hasData(section: (typeof SECTION_DEFINITIONS)[0], data: ReportData): bo
   return true;
 }
 
-export default function ReportBuilder({ data, defaultType = 'custom', defaultSections, onClose, manualTrainingZones }: Props) {
+export default function ReportBuilder({ data, defaultType = 'custom', defaultSections, onClose, manualTrainingZones, initialPhysiologyNotes }: Props) {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const [reportType, setReportType] = useState<ReportType>(defaultType);
@@ -55,7 +56,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   });
   const [generating, setGenerating] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
-  const [physiologyNotes, setPhysiologyNotes] = useState('');
+  const [physiologyNotes, setPhysiologyNotes] = useState(initialPhysiologyNotes ?? '');
   const [anthropometryNotes, setAnthropometryNotes] = useState('');
   const [includePhysiologyNotes, setIncludePhysiologyNotes] = useState(true);
   const [includeAnthropometryNotes, setIncludeAnthropometryNotes] = useState(true);
@@ -78,7 +79,9 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   }, [profile?.id]);
 
   useEffect(() => {
-    if (data.test?.id) {
+    if (initialPhysiologyNotes !== undefined) {
+      setPhysiologyNotes(initialPhysiologyNotes);
+    } else if (data.test?.id) {
       supabase
         .from('test_results')
         .select('coach_notes')
@@ -91,7 +94,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
     if (data.anthropometryMeasurement?.coach_notes) {
       setAnthropometryNotes(data.anthropometryMeasurement.coach_notes);
     }
-  }, [data.test?.id, data.anthropometryMeasurement?.id]);
+  }, [data.test?.id, data.anthropometryMeasurement?.id, initialPhysiologyNotes]);
 
   const loadConfig = async () => {
     if (!profile?.id) { setConfigLoaded(true); return; }
