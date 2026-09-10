@@ -24,33 +24,6 @@ function sanitizeForPDF(text: string): string {
     });
 }
 
-function htmlToPlainText(html: string): string {
-  if (!html) return '';
-  return sanitizeForPDF(
-    html
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n')
-      .replace(/<\/div>/gi, '\n')
-      .replace(/<\/li>/gi, '\n')
-      .replace(/<li[^>]*>/gi, '- ')
-      .replace(/<\/ul>/gi, '\n')
-      .replace(/<\/ol>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\u00a0/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-  );
-}
-
 const PDF_STRINGS: Record<string, { en: string; es: string }> = {
   coverSubtitle: { en: 'PERFORMANCE ASSESSMENT REPORT', es: 'INFORME DE EVALUACIÓN DE RENDIMIENTO' },
   coverDisclaimer: { en: 'For clinical decisions, consult a licensed sports medicine professional.', es: 'Para decisiones clínicas, consulte a un profesional habilitado en medicina del deporte.' },
@@ -1779,26 +1752,22 @@ function renderRawData(b: PDFBuilder, data: ReportData) {
 function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOptions) {
   b.sectionHeader(tr('secRec'));
 
-  const noteBlocks: Array<{ label: string; text: string }> = [];
+  const noteBlocks: Array<{ label: string; html: string }> = [];
 
   const physiologyText = opts.physiologyNotes || opts.reportNotes || '';
   const anthropometryText = opts.anthropometryNotes || data.anthropometryMeasurement?.coach_notes || '';
 
   if (physiologyText.trim()) {
-    noteBlocks.push({ label: 'Physiology Test Notes', text: htmlToPlainText(physiologyText) });
+    noteBlocks.push({ label: 'Physiology Test Notes', html: physiologyText });
   }
   if (anthropometryText.trim() && anthropometryText.trim() !== physiologyText.trim()) {
-    noteBlocks.push({ label: 'Anthropometry Notes', text: htmlToPlainText(anthropometryText) });
+    noteBlocks.push({ label: 'Anthropometry Notes', html: anthropometryText });
   }
 
   if (noteBlocks.length > 0) {
     b.checkPage(30);
     b.label('Professional Notes & Conclusions');
     b.spacer(2);
-
-    const paddingH = 10;
-    const lineH = 5.5;
-    const textWidth = b.cw - paddingH * 2;
 
     for (const block of noteBlocks) {
       b.checkPage(20);
@@ -1808,51 +1777,215 @@ function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOpti
       b.doc.text(block.label.toUpperCase(), b.ml, b.y);
       b.y += 5;
 
-      const paragraphs = block.text.split('\n');
-      const allLines: string[] = [];
-      for (const para of paragraphs) {
-        if (para.trim() === '') {
-          allLines.push('');
-        } else {
-          b.doc.setFont('helvetica', 'normal');
-          b.doc.setFontSize(9);
-          const wrapped = b.doc.splitTextToSize(para, textWidth);
-          allLines.push(...wrapped);
-        }
-      }
-
-      const topPad = 8;
-      const botPad = 8;
-      const availableOnPage = () => b.pageBottom - b.y - topPad - botPad;
-      let lineIndex = 0;
-      let isFirstChunk = true;
-      while (lineIndex < allLines.length) {
-        const linesPerPage = Math.max(1, Math.floor(availableOnPage() / lineH));
-        const chunk = allLines.slice(lineIndex, lineIndex + linesPerPage);
-        const chunkH = chunk.length * lineH + topPad + botPad;
-        b.fill(C.yellow);
-        b.doc.rect(b.ml, b.y, b.cw, chunkH, 'F');
-        b.textColor(C.gray900);
-        chunk.forEach((line: string, j: number) => {
-          b.doc.setFont('helvetica', 'normal');
-          b.doc.setFontSize(9);
-          b.doc.text(line, b.ml + paddingH, b.y + topPad + 3 + j * lineH);
-        });
-        b.y += chunkH + (isFirstChunk ? 2 : 0);
-        lineIndex += chunk.length;
-        isFirstChunk = false;
-        if (lineIndex < allLines.length) {
-          b.doc.addPage();
-          b.pageNum++;
-          b.y = 20;
-          b.addPageFooter();
-        }
-      }
+      renderHTMLToPDF(b, block.html);
       b.spacer(6);
     }
   }
 
   b.spacer(4);
+}
+
+function renderHTMLToPDF(b: PDFBuilder, html: string) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const container = doc.body;
+  if (!container || !container.childNodes.length) return;
+
+  const paddingH = 10;
+  const lineH = 5;
+  const textWidth = b.cw - paddingH * 2;
+
+  type RenderLine = { text: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' };
+  const lines: RenderLine[] = [];
+
+  function pushText(text: string, bold: boolean, italic: boolean, underline: boolean, size: number, align: 'left' | 'center' | 'right' = 'left') {
+    const clean = sanitizeForPDF(text.replace(/&nbsp;/g, ' ').replace(/\u00a0/g, ' '));
+    if (!clean.trim() && lines.length > 0 && lines[lines.length - 1].text === '') {
+      return;
+    }
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(size);
+    const wrapped = b.doc.splitTextToSize(clean, textWidth);
+    for (const w of wrapped) {
+      lines.push({ text: w, bold, italic, underline, size, align });
+    }
+  }
+
+  function walkNode(node: Node, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      if (text) pushText(text, styles.bold, styles.italic, styles.underline, styles.size, styles.align);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+    const newStyles = { ...styles };
+
+    if (tag === 'b' || tag === 'strong') newStyles.bold = true;
+    else if (tag === 'i' || tag === 'em') newStyles.italic = true;
+    else if (tag === 'u') newStyles.underline = true;
+    else if (tag === 's' || tag === 'strike' || tag === 'del') newStyles.underline = false;
+    else if (tag === 'h1') { newStyles.size = 12; newStyles.bold = true; }
+    else if (tag === 'h2') { newStyles.size = 10.5; newStyles.bold = true; }
+    else if (tag === 'h3') { newStyles.size = 9.5; newStyles.bold = true; }
+    else if (tag === 'p' || tag === 'div') { /* default paragraph */ }
+    else if (tag === 'a') { /* links: just render text */ }
+    else if (tag === 'br') { lines.push({ text: '', bold: false, italic: false, underline: false, size: styles.size, align: styles.align }); return; }
+    else if (tag === 'ul' || tag === 'ol') { /* handled below */ }
+    else if (tag === 'li') { /* handled below */ }
+    else if (tag === 'table') { /* handled below */ }
+    else if (tag === 'img') { /* handled below */ }
+
+    if (el.style.textAlign === 'center') newStyles.align = 'center';
+    else if (el.style.textAlign === 'right') newStyles.align = 'right';
+
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+      if (lines.length > 0 && lines[lines.length - 1].text !== '') lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
+      for (const child of el.childNodes) walkNode(child, newStyles);
+      lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
+      return;
+    }
+
+    if (tag === 'ul' || tag === 'ol') {
+      let idx = 1;
+      for (const child of el.childNodes) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName.toLowerCase() === 'li') {
+          const prefix = tag === 'ol' ? `${idx}. ` : '\u2022 ';
+          pushText(prefix, newStyles.bold, newStyles.italic, newStyles.underline, newStyles.size, newStyles.align);
+          for (const grandchild of child.childNodes) walkNode(grandchild, { ...newStyles, bold: false });
+          lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
+          idx++;
+        }
+      }
+      return;
+    }
+
+    if (tag === 'table') {
+      renderTableToPDF(b, el as HTMLTableElement);
+      return;
+    }
+
+    if (tag === 'img') {
+      const img = el as HTMLImageElement;
+      if (img.src) renderImageToPDF(b, img.src, img.width, img.height);
+      return;
+    }
+
+    if (tag === 'p' || tag === 'div') {
+      for (const child of el.childNodes) walkNode(child, newStyles);
+      if (lines.length > 0 && lines[lines.length - 1].text !== '') lines.push({ text: '', bold: false, italic: false, underline: false, size: 8, align: 'left' });
+      return;
+    }
+
+    for (const child of el.childNodes) walkNode(child, newStyles);
+  }
+
+  for (const child of container.childNodes) {
+    walkNode(child, { bold: false, italic: false, underline: false, size: 9, align: 'left' });
+  }
+
+  const topPad = 8;
+  const botPad = 8;
+  const totalH = lines.length * lineH + topPad + botPad;
+  b.checkPage(totalH + 4);
+
+  b.fill(C.yellow);
+  b.doc.rect(b.ml, b.y, b.cw, totalH, 'F');
+  b.textColor(C.gray900);
+
+  lines.forEach((line, j) => {
+    b.checkPage(lineH + 2);
+    b.doc.setFont('helvetica', 'normal');
+    b.doc.setFontSize(line.size);
+    const font = line.bold ? 'bold' : 'normal';
+    const style = line.italic ? 'italic' : font;
+    b.doc.setFont('helvetica', style);
+    b.doc.setFontSize(line.size);
+    const x = b.ml + paddingH;
+    const y = b.y + topPad + 3 + j * lineH;
+    if (line.text) {
+      b.doc.text(line.text, x, y, line.align === 'center' ? { align: 'center' } : line.align === 'right' ? { align: 'right' } : undefined);
+      if (line.underline) {
+        const tw = b.doc.getTextWidth(line.text);
+        b.doc.setLineWidth(0.3);
+        b.doc.line(x, y - 0.5, x + tw, y - 0.5);
+      }
+    }
+  });
+
+  b.y += totalH + 2;
+}
+
+function renderTableToPDF(b: PDFBuilder, table: HTMLTableElement) {
+  const rows = Array.from(table.querySelectorAll('tr'));
+  if (!rows.length) return;
+
+  const cols = rows[0].querySelectorAll('td,th').length || 1;
+  const colW = b.cw / cols;
+  const cellPadH = 4;
+  const cellH = 7;
+  const tableH = rows.length * cellH;
+
+  b.checkPage(tableH + 4);
+
+  for (let r = 0; r < rows.length; r++) {
+    const cells = Array.from(rows[r].querySelectorAll('td,th'));
+    const isHeader = cells.some(c => c.tagName.toLowerCase() === 'th');
+
+    for (let c = 0; c < cells.length && c < cols; c++) {
+      const x = b.ml + c * colW;
+      const y = b.y + r * cellH;
+
+      if (isHeader) {
+        b.fill(C.gray200);
+      } else {
+        b.fill(r % 2 === 0 ? C.white : C.gray100);
+      }
+      b.doc.rect(x, y, colW, cellH, 'F');
+
+      b.stroke(C.gray200);
+      b.doc.setLineWidth(0.2);
+      b.doc.rect(x, y, colW, cellH, 'S');
+
+      b.textColor(C.gray900);
+      b.doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+      b.doc.setFontSize(8);
+      const cellText = sanitizeForPDF(cells[c].textContent || '').trim();
+      const wrapped = b.doc.splitTextToSize(cellText, colW - cellPadH * 2);
+      if (wrapped.length > 0) {
+        b.doc.text(wrapped[0], x + cellPadH, y + 5);
+      }
+    }
+  }
+
+  b.y += tableH + 3;
+}
+
+function renderImageToPDF(b: PDFBuilder, src: string, displayWidth?: number, displayHeight?: number) {
+  try {
+    const isPng = src.startsWith('data:image/png');
+    const isJpeg = src.startsWith('data:image/jpeg') || src.startsWith('data:image/jpg');
+    if (!isPng && !isJpeg) return;
+
+    const format = isPng ? 'PNG' : 'JPEG';
+    const maxW = b.cw - 4;
+    const maxH = 80;
+
+    let w = displayWidth ? Math.min(displayWidth, maxW) : maxW;
+    let h = displayHeight ? (displayHeight / (displayWidth || 1)) * w : w * 0.6;
+
+    if (h > maxH) {
+      h = maxH;
+      w = (displayWidth || 1) / (displayHeight || 1) * h;
+    }
+
+    b.checkPage(h + 4);
+    b.doc.addImage(src, format, b.ml + 2, b.y, w, h, undefined, 'FAST');
+    b.y += h + 4;
+  } catch {
+    // skip image if it fails
+  }
 }
 
 function renderAnthropometryComparison(b: PDFBuilder, data: ReportData) {

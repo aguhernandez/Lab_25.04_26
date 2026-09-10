@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import Toast from './Toast';
+import RichTextEditor from './RichTextEditor';
 
 interface CoachNotesProps {
   testId: string;
@@ -93,19 +94,14 @@ export default function CoachNotes({ testId }: CoachNotesProps) {
         Add your interpretation, context, and recommendations. These notes will be included in the athlete's report.
       </p>
 
-      <textarea
-        className="input"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Example: Test shows excellent aerobic capacity with well-defined thresholds. Recommend focusing on Z2 base building for the next 4 weeks..."
-        disabled={saving}
-        style={{
-          minHeight: '150px',
-          resize: 'vertical',
-          fontFamily: 'inherit',
-          marginBottom: '1rem'
-        }}
-      />
+      <div style={{ marginBottom: '1rem' }}>
+        <RichTextEditor
+          value={notes}
+          onChange={setNotes}
+          placeholder="Example: Test shows excellent aerobic capacity with well-defined thresholds. Recommend focusing on Z2 base building for the next 4 weeks..."
+          disabled={saving}
+        />
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>

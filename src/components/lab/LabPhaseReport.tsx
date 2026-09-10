@@ -4,6 +4,7 @@ import { exportJSONToFile } from '../../lib/jsonGenerator';
 import { generateCompleteJSON } from '../../lib/jsonGenerator';
 import { REPORT_TYPE_PRESETS } from '../../lib/reportGenerator';
 import ReportBuilder from '../reports/ReportBuilder';
+import RichTextEditor from '../RichTextEditor';
 import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { ReportData } from '../../lib/reportGenerator';
@@ -140,13 +141,10 @@ export default function LabPhaseReport({ session, onBack, onStartNew }: Props) {
           <p className="text-xs text-gray-400 mt-0.5">Add your conclusions and recommendations — these will be included in the generated report</p>
         </div>
         <div className="p-6 space-y-3">
-          <textarea
+          <RichTextEditor
             value={coachNotes}
-            onChange={e => setCoachNotes(e.target.value)}
-            rows={5}
+            onChange={setCoachNotes}
             placeholder="Write your professional conclusions, training recommendations, and observations here..."
-            className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#fdda36]/50 transition-colors resize-y"
-            style={{ fontFamily: 'inherit' }}
           />
           <div className="flex justify-end">
             <button
