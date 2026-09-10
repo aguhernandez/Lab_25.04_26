@@ -1127,9 +1127,11 @@ function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, ha
 function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOptions) {
   b.sectionHeader(tr('secZones'));
 
-  const zones = options.useManualZones && options.manualTrainingZones?.length
+  const manualZones = options.useManualZones && options.manualTrainingZones?.length
     ? options.manualTrainingZones
-    : data.physiologyResults?.training_zones;
+    : null;
+
+  const zones = manualZones ?? data.physiologyResults?.training_zones;
 
   if (!zones?.length) { b.paragraph('No training zones available.'); return; }
 
@@ -1142,7 +1144,15 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
     hasRpe: zs.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null),
   });
 
-  if (mode === 'both' && zonesData) {
+  if (manualZones) {
+    // Always use the manually-saved zones for the PDF, regardless of display mode.
+    // The manual zones are the source of truth — no recalculation.
+    const f = computeFlags(manualZones);
+    const title = manualZones.length === 7
+      ? (tr('zones7Title') || '7-Zone Model')
+      : (tr('zones5Title') || '5-Zone Model');
+    renderZoneTable(b, manualZones, title, f.hasPower, f.hasPace, f.hasRpe);
+  } else if (mode === 'both' && zonesData) {
     const z5 = zonesData.zones5 as unknown as TrainingZone[];
     const z7 = zonesData.zones7 as unknown as TrainingZone[];
     const f5 = computeFlags(z5);
@@ -1159,7 +1169,7 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
     renderZoneTable(b, zones, tr('zones5Title') || '5-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
   }
 
-  if (options.useManualZones && options.manualTrainingZones?.length) {
+  if (manualZones) {
     b.spacer(2);
     b.textColor(C.gray500);
     b.setJostFont(7, 'normal');

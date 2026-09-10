@@ -310,6 +310,8 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
             vam_kmh={activeResults.vam_kmh}
             pam_watts={activeResults.pam_watts}
             thresholdSource={activeResults.threshold_source}
+            athleteId={athlete.id}
+            onSaved={(updatedZones) => onUpdate({ trainingZones: { ...session.trainingZones, heart_rate_zones: updatedZones } as any })}
           />
 
           {(dataPoints.length > 0 || advancedMetrics) && (
