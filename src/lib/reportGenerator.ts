@@ -5,6 +5,8 @@ import type { AdvancedMetrics } from '../types';
 import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import type { PreTestData } from './labSession';
+import { convertTo5Zones, calculateZones7 } from './trainingZones';
+import type { ZoneDefinition } from './trainingZones';
 
 async function loadHtml2Canvas(): Promise<typeof import('html2canvas')['default']> {
   const mod = await import('html2canvas');
@@ -1145,13 +1147,85 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
   });
 
   if (manualZones) {
-    // Always use the manually-saved zones for the PDF, regardless of display mode.
-    // The manual zones are the source of truth — no recalculation.
+    const lang = getCurrentLanguage();
     const f = computeFlags(manualZones);
-    const title = manualZones.length === 7
-      ? (tr('zones7Title') || '7-Zone Model')
-      : (tr('zones5Title') || '5-Zone Model');
-    renderZoneTable(b, manualZones, title, f.hasPower, f.hasPace, f.hasRpe);
+
+    if (mode === 'both') {
+      // Render both 5-zone and 7-zone tables, preserving manual edits in each.
+      if (manualZones.length === 7) {
+        const z7 = manualZones as ZoneDefinition[];
+        const z5 = convertTo5Zones(z7, 'cycling', lang);
+        const f5 = computeFlags(z5 as unknown as TrainingZone[]);
+        const f7 = f;
+        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
+        b.spacer(3);
+        renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
+      } else {
+        // Manual zones are 5-zone; derive 7-zone from thresholds and overlay manual edits.
+        const z5 = manualZones as ZoneDefinition[];
+        const r = data.physiologyResults;
+        let z7: ZoneDefinition[] = [];
+        if (r?.lt1_hr != null && r?.lt2_hr != null && r?.hrmax != null) {
+          z7 = calculateZones7(r.lt1_hr, r.lt2_hr, r.hrmax, 'cycling', undefined, {
+            vam_kmh: r.vam_kmh, pam_watts: r.pam_watts, threshold_source: r.threshold_source, language: lang,
+          });
+          // Overlay manual HR, RPE, pace from 5-zone onto 7-zone by index
+          z5.forEach((z5z, i) => {
+            if (i < z7.length) {
+              z7[i].hr_min = z5z.hr_min;
+              z7[i].hr_max = z5z.hr_max;
+              z7[i].rpe_min = z5z.rpe_min;
+              z7[i].rpe_max = z5z.rpe_max;
+              z7[i].pace_min = z5z.pace_min;
+              z7[i].pace_max = z5z.pace_max;
+            }
+          });
+        }
+        const f5 = f;
+        const f7 = computeFlags(z7 as unknown as TrainingZone[]);
+        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
+        b.spacer(3);
+ if (z7.length > 0) {
+          renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
+        }
+      }
+    } else if (mode === '7') {
+      if (manualZones.length === 7) {
+        renderZoneTable(b, manualZones, tr('zones7Title') || '7-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
+      } else {
+        // Convert 5-zone manual to 7-zone
+        const r = data.physiologyResults;
+        if (r?.lt1_hr != null && r?.lt2_hr != null && r?.hrmax != null) {
+          const z7 = calculateZones7(r.lt1_hr, r.lt2_hr, r.hrmax, 'cycling', undefined, {
+            vam_kmh: r.vam_kmh, pam_watts: r.pam_watts, threshold_source: r.threshold_source, language: getCurrentLanguage(),
+          });
+          manualZones.forEach((z5z, i) => {
+            if (i < z7.length) {
+              z7[i].hr_min = z5z.hr_min;
+              z7[i].hr_max = z5z.hr_max;
+              z7[i].rpe_min = (z5z as any).rpe_min;
+              z7[i].rpe_max = (z5z as any).rpe_max;
+              z7[i].pace_min = z5z.pace_min;
+              z7[i].pace_max = z5z.pace_max;
+            }
+          });
+          const f7 = computeFlags(z7 as unknown as TrainingZone[]);
+          renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
+        } else {
+          renderZoneTable(b, manualZones, tr('zones7Title') || '7-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
+        }
+      }
+    } else {
+      // mode === '5'
+      if (manualZones.length === 5) {
+        renderZoneTable(b, manualZones, tr('zones5Title') || '5-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
+      } else {
+        // Convert 7-zone manual to 5-zone
+        const z5 = convertTo5Zones(manualZones as ZoneDefinition[], 'cycling', getCurrentLanguage());
+        const f5 = computeFlags(z5 as unknown as TrainingZone[]);
+        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
+      }
+    }
   } else if (mode === 'both' && zonesData) {
     const z5 = zonesData.zones5 as unknown as TrainingZone[];
     const z7 = zonesData.zones7 as unknown as TrainingZone[];
