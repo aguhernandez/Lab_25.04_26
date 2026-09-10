@@ -6,6 +6,11 @@ import type { AnthropometryMeasurement, KerrResults } from '../types/anthropomet
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import type { PreTestData } from './labSession';
 
+async function loadHtml2Canvas(): Promise<typeof import('html2canvas')['default']> {
+  const mod = await import('html2canvas');
+  return (mod as any).default || mod;
+}
+
 function sanitizeForPDF(text: string): string {
   return text
     .replace(/\u2013|\u2014/g, '-')
@@ -1749,7 +1754,7 @@ function renderRawData(b: PDFBuilder, data: ReportData) {
   b.spacer(4);
 }
 
-function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOptions) {
+async function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOptions) {
   b.sectionHeader(tr('secRec'));
 
   const noteBlocks: Array<{ label: string; html: string }> = [];
@@ -1777,7 +1782,7 @@ function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOpti
       b.doc.text(block.label.toUpperCase(), b.ml, b.y);
       b.y += 5;
 
-      renderHTMLToPDF(b, block.html);
+      await renderHTMLToPDF(b, block.html);
       b.spacer(6);
     }
   }
@@ -1785,169 +1790,149 @@ function renderRecommendations(b: PDFBuilder, data: ReportData, opts: ReportOpti
   b.spacer(4);
 }
 
-function renderHTMLToPDF(b: PDFBuilder, html: string) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  const container = doc.body;
-  if (!container || !container.childNodes.length) return;
+async function renderHTMLToPDF(b: PDFBuilder, html: string) {
+  // Build an off-screen container styled identically to the on-screen RichTextRenderer.
+  // html2canvas will render it as a pixel-accurate image, preserving bold, italic,
+  // underline, colors, alignment, lists, tables, images, and links exactly as seen.
+  const container = document.createElement('div');
+  container.className = 'rich-text-renderer';
+  container.style.cssText = `
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: ${Math.round((b.cw / 25.4) * 96)}px;
+    background: #ffffff;
+    color: #1f2937;
+    font-family: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 0;
+    box-sizing: border-box;
+  `;
+  container.innerHTML = html;
+  document.body.appendChild(container);
 
-  const paddingH = 4;
-  const lineH = 5;
-  const textWidth = b.cw - paddingH * 2;
-  type TextLine = { kind: 'text'; text: string; bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' };
-  type MediaBlock = { kind: 'image'; src: string; width?: number; height?: number } | { kind: 'table'; table: HTMLTableElement };
-  type RenderBlock = TextLine | MediaBlock;
-  const blocks: RenderBlock[] = [];
+  // Collect hyperlink positions relative to the container so we can overlay
+  // clickable annotations on the PDF after embedding the canvas image.
+  const linkRects: Array<{ x: number; y: number; w: number; h: number; href: string }> = [];
+  const containerRect = container.getBoundingClientRect();
+  container.querySelectorAll('a').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href) return;
+    const rect = a.getBoundingClientRect();
+    linkRects.push({
+      x: rect.left - containerRect.left,
+      y: rect.top - containerRect.top,
+      w: rect.width,
+      h: rect.height,
+      href,
+    });
+  });
 
-  const pushText = (text: string, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) => {
-    const clean = sanitizeForPDF(text.replace(/&nbsp;/g, ' ').replace(/\u00a0/g, ' '));
-    if (!clean.trim()) return;
-    b.doc.setFont('helvetica', styles.italic ? 'italic' : styles.bold ? 'bold' : 'normal');
-    b.doc.setFontSize(styles.size);
-    for (const line of b.doc.splitTextToSize(clean, textWidth)) {
-      blocks.push({ kind: 'text', text: line, ...styles });
-    }
-  };
-
-  const walkNode = (node: Node, styles: { bold: boolean; italic: boolean; underline: boolean; size: number; align: 'left' | 'center' | 'right' }) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      pushText(node.textContent || '', styles);
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const el = node as HTMLElement;
-    const tag = el.tagName.toLowerCase();
-    const next = { ...styles };
-    if (tag === 'b' || tag === 'strong') next.bold = true;
-    if (tag === 'i' || tag === 'em') next.italic = true;
-    if (tag === 'u') next.underline = true;
-    if (tag === 'h1') { next.bold = true; next.size = 12; }
-    if (tag === 'h2') { next.bold = true; next.size = 10.5; }
-    if (tag === 'h3') { next.bold = true; next.size = 9.5; }
-    if (el.style.textAlign === 'center') next.align = 'center';
-    if (el.style.textAlign === 'right') next.align = 'right';
-    if (tag === 'br') return;
-    if (tag === 'img') {
-      const img = el as HTMLImageElement;
-      if (img.src) blocks.push({ kind: 'image', src: img.src, width: img.width || undefined, height: img.height || undefined });
-      return;
-    }
-    if (tag === 'table') {
-      blocks.push({ kind: 'table', table: el as HTMLTableElement });
-      return;
-    }
-    if (tag === 'ul' || tag === 'ol') {
-      Array.from(el.children).forEach((child, index) => {
-        if (child.tagName.toLowerCase() !== 'li') return;
-        pushText(`${tag === 'ol' ? `${index + 1}.` : '•'} `, next);
-        Array.from(child.childNodes).forEach(childNode => walkNode(childNode, next));
-      });
-      return;
-    }
-    Array.from(el.childNodes).forEach(child => walkNode(child, next));
-  };
-
-  Array.from(container.childNodes).forEach(child => walkNode(child, { bold: false, italic: false, underline: false, size: 9, align: 'left' }));
-
-  let textY = b.y;
-  for (const block of blocks) {
-    if (block.kind === 'text') {
-      b.checkPage(lineH + 2);
-      b.textColor(C.gray900);
-      b.doc.setFont('helvetica', block.italic ? 'italic' : block.bold ? 'bold' : 'normal');
-      b.doc.setFontSize(block.size);
-      const x = block.align === 'center' ? b.ml + b.cw / 2 : block.align === 'right' ? b.ml + b.cw : b.ml + paddingH;
-      b.doc.text(block.text, x, b.y, block.align === 'left' ? undefined : { align: block.align });
-      if (block.underline) {
-        const width = b.doc.getTextWidth(block.text);
-        const start = block.align === 'center' ? x - width / 2 : block.align === 'right' ? x - width : x;
-        b.doc.setLineWidth(0.3);
-        b.doc.line(start, b.y + 0.6, start + width, b.y + 0.6);
-      }
-      b.y += lineH;
-      textY = b.y;
-    } else if (block.kind === 'image') {
-      b.spacer(2);
-      renderImageToPDF(b, block.src, block.width, block.height);
-      b.spacer(2);
-    } else {
-      b.spacer(2);
-      renderTableToPDF(b, block.table);
-      b.spacer(2);
-    }
-  }
-
-  b.y = Math.max(b.y, textY) + 3;
-}
-
-function renderTableToPDF(b: PDFBuilder, table: HTMLTableElement) {
-  const rows = Array.from(table.querySelectorAll('tr'));
-  if (!rows.length) return;
-
-  const cols = rows[0].querySelectorAll('td,th').length || 1;
-  const colW = b.cw / cols;
-  const cellPadH = 4;
-  const cellH = 7;
-  const tableH = rows.length * cellH;
-
-  b.checkPage(tableH + 4);
-
-  for (let r = 0; r < rows.length; r++) {
-    const cells = Array.from(rows[r].querySelectorAll('td,th'));
-    const isHeader = cells.some(c => c.tagName.toLowerCase() === 'th');
-
-    for (let c = 0; c < cells.length && c < cols; c++) {
-      const x = b.ml + c * colW;
-      const y = b.y + r * cellH;
-
-      if (isHeader) {
-        b.fill(C.gray200);
-      } else {
-        b.fill(r % 2 === 0 ? C.white : C.gray100);
-      }
-      b.doc.rect(x, y, colW, cellH, 'F');
-
-      b.stroke(C.gray200);
-      b.doc.setLineWidth(0.2);
-      b.doc.rect(x, y, colW, cellH, 'S');
-
-      b.textColor(C.gray900);
-      b.doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
-      b.doc.setFontSize(8);
-      const cellText = sanitizeForPDF(cells[c].textContent || '').trim();
-      const wrapped = b.doc.splitTextToSize(cellText, colW - cellPadH * 2);
-      if (wrapped.length > 0) {
-        b.doc.text(wrapped[0], x + cellPadH, y + 5);
-      }
-    }
-  }
-
-  b.y += tableH + 3;
-}
-
-function renderImageToPDF(b: PDFBuilder, src: string, displayWidth?: number, displayHeight?: number) {
   try {
-    const isPng = src.startsWith('data:image/png');
-    const isJpeg = src.startsWith('data:image/jpeg') || src.startsWith('data:image/jpg');
-    if (!isPng && !isJpeg) return;
+    const html2canvas = await loadHtml2Canvas();
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+    });
 
-    const format = isPng ? 'PNG' : 'JPEG';
-    const maxW = b.cw - 4;
-    const maxH = 80;
+    const imgData = canvas.toDataURL('image/png');
+    const pxToMm = 25.4 / 96;
+    const imgWmm = canvas.width * pxToMm / 2;
+    const imgHmm = canvas.height * pxToMm / 2;
+    const maxW = b.cw;
+    const maxH = b.pageBottom - b.y - 4;
 
-    let w = displayWidth ? Math.min(displayWidth, maxW) : maxW;
-    let h = displayHeight ? (displayHeight / (displayWidth || 1)) * w : w * 0.6;
-
-    if (h > maxH) {
-      h = maxH;
-      w = (displayWidth || 1) / (displayHeight || 1) * h;
+    let w = imgWmm;
+    let h = imgHmm;
+    if (w > maxW) {
+      h = (h * maxW) / w;
+      w = maxW;
     }
 
-    b.checkPage(h + 4);
-    b.doc.addImage(src, format, b.ml + 2, b.y, w, h, undefined, 'FAST');
-    b.y += h + 4;
+    // If the content is taller than the remaining page space, split across pages.
+    if (h <= maxH) {
+      b.checkPage(h + 4);
+      b.doc.addImage(imgData, 'PNG', b.ml, b.y, w, h, undefined, 'FAST');
+      addLinkAnnotations(b, linkRects, imgWmm, imgHmm, w, h, 0);
+      b.y += h + 4;
+    } else {
+      // Multi-page: slice the canvas vertically and place each slice on its own page.
+      const sliceHmm = maxH;
+      const slicePx = Math.floor((sliceHmm / h) * canvas.height);
+      const numSlices = Math.ceil(canvas.height / slicePx);
+      for (let i = 0; i < numSlices; i++) {
+        const sliceCanvas = document.createElement('canvas');
+        const startY = i * slicePx;
+        const endY = Math.min(startY + slicePx, canvas.height);
+        const sliceHpx = endY - startY;
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHpx;
+        const ctx = sliceCanvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(canvas, 0, startY, canvas.width, sliceHpx, 0, 0, canvas.width, sliceHpx);
+        }
+        const sliceData = sliceCanvas.toDataURL('image/png');
+        const sliceHmm = (sliceHpx * pxToMm / 2) * (w / imgWmm);
+        if (i > 0) {
+          b.doc.addPage();
+          b.pageNum++;
+          b.y = 20;
+          b.addPageFooter();
+        }
+        b.doc.addImage(sliceData, 'PNG', b.ml, b.y, w, sliceHmm, undefined, 'FAST');
+        addLinkAnnotations(b, linkRects, imgWmm, imgHmm, w, h, i * sliceHmm);
+        b.y += sliceHmm + 4;
+      }
+    }
   } catch {
-    // skip image if it fails
+    // Fallback: render as plain text if html2canvas fails
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const text = doc.body?.textContent || '';
+    if (text.trim()) {
+      b.textColor(C.gray900);
+      b.doc.setFont('helvetica', 'normal');
+      b.doc.setFontSize(9);
+      const lines = b.doc.splitTextToSize(sanitizeForPDF(text), b.cw - 4);
+      for (const line of lines) {
+        b.checkPage(6);
+        b.doc.text(line, b.ml + 2, b.y);
+        b.y += 5;
+      }
+    }
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+// Overlay clickable link annotations on the PDF at the positions where <a> tags
+// were rendered in the canvas image.
+function addLinkAnnotations(
+  b: PDFBuilder,
+  linkRects: Array<{ x: number; y: number; w: number; h: number; href: string }>,
+  sourceWmm: number,
+  sourceHmm: number,
+  renderedWmm: number,
+  renderedHmm: number,
+  offsetHmm: number,
+) {
+  const scaleX = renderedWmm / sourceWmm;
+  const scaleY = renderedHmm / sourceHmm;
+  const pxToMm = 25.4 / 96;
+  for (const lr of linkRects) {
+    const xMm = b.ml + lr.x * pxToMm * scaleX;
+    const yMm = b.y + (lr.y * pxToMm * scaleY) - offsetHmm;
+    const wMm = lr.w * pxToMm * scaleX;
+    const hMm = lr.h * pxToMm * scaleY;
+    if (yMm + hMm < b.y || yMm > b.y + renderedHmm) continue;
+    try {
+      b.doc.link(xMm, yMm, wMm, hMm, { url: lr.href });
+    } catch {
+      // skip invalid links
+    }
   }
 }
 
@@ -2521,7 +2506,7 @@ function renderCharts(b: PDFBuilder, data: ReportData, options: ReportOptions) {
   }
 }
 
-type SectionRenderer = (b: PDFBuilder, data: ReportData, options: ReportOptions, logo: LogoInfo | null) => void;
+type SectionRenderer = (b: PDFBuilder, data: ReportData, options: ReportOptions, logo: LogoInfo | null) => void | Promise<void>;
 
 const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
   cover: (b, data, opts, logo) => renderCover(b, data, opts, logo),
@@ -2559,14 +2544,14 @@ export async function generateReport(data: ReportData, options: ReportOptions): 
   for (const section of options.sections) {
     const renderer = SECTION_RENDERERS[section];
     if (renderer) {
-      renderer(b, data, options, logo);
+      await renderer(b, data, options, logo);
     }
   }
 
   renderCharts(b, data, options);
 
   if (!hasRecommendations && (options.reportNotes?.trim() || options.physiologyNotes?.trim() || options.anthropometryNotes?.trim() || data.anthropometryMeasurement?.coach_notes)) {
-    renderRecommendations(b, data, options);
+    await renderRecommendations(b, data, options);
   }
 
   const date = data.test?.test_date
