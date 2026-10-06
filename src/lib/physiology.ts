@@ -1223,6 +1223,10 @@ export const STAGE_HR_WINDOW_S = 30;
 export interface TimelineHRSample {
   timestamp_s: number;
   heart_rate: number | null;
+  speed_pace?: string | null;
+  lactate?: number | null;
+  rpe?: number | null;
+  vo2_ml_kg_min?: number | null;
 }
 
 export interface StageHRResult {

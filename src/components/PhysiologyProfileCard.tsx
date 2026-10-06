@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import {
   AthletePhysiologyProfile,
   AthleteTrainingZones,
@@ -7,8 +8,10 @@ import {
   lockZonesToLab,
   updateTrainingZonesManual
 } from '../lib/physiologyProfile';
-import { TrainingZone } from '../types';
+import { TrainingZone, TestDataPoint, AdvancedMetrics } from '../types';
+import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults, type TimelineHRSample } from '../lib/physiology';
 import ManualPhysiologyForm from './ManualPhysiologyForm';
+import AdvancedData from './AdvancedData';
 import { calculateZones7, convertTo5Zones } from '../lib/trainingZones';
 import { Sport } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -19,7 +22,7 @@ interface PhysiologyProfileCardProps {
   onToast?: (message: string, type: 'success' | 'error') => void;
 }
 
-type TabKey = 'physiology' | 'zones' | 'history';
+type TabKey = 'physiology' | 'zones' | 'advanced' | 'history';
 
 export default function PhysiologyProfileCard({ athleteId, sport, onToast }: PhysiologyProfileCardProps) {
   const { language } = useLanguage();
@@ -33,6 +36,12 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   const [editZoneValues, setEditZoneValues] = useState<TrainingZone[]>([]);
   const [savingZones, setSavingZones] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [advancedTest, setAdvancedTest] = useState<{
+    results: PhysiologyResults;
+    advancedMetrics: AdvancedMetrics | null;
+    dataPoints: TestDataPoint[];
+    timelineSamples: TimelineHRSample[];
+  } | null>(null);
 
   useEffect(() => {
     loadProfile();
@@ -46,6 +55,35 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     ]);
     setProfile(profileData);
     setZones(zonesData);
+
+    if (profileData?.last_test_id) {
+      const [{ data: pointRows }, { data: timelineRows }, { data: resultRow }, { data: athleteRow }] = await Promise.all([
+        supabase.from('test_data_points').select('*').eq('test_id', profileData.last_test_id).order('stage_number', { ascending: true }),
+        supabase.from('test_timeline_samples').select('timestamp_s, heart_rate, speed_pace, lactate, rpe, vo2_ml_kg_min').eq('test_id', profileData.last_test_id).order('timestamp_s', { ascending: true }),
+        supabase.from('test_results').select('results_snapshot, advanced_metrics').eq('test_id', profileData.last_test_id).maybeSingle(),
+        supabase.from('athletes').select('*').eq('id', athleteId).maybeSingle(),
+      ]);
+      const snapshot = (resultRow as { results_snapshot?: { results?: PhysiologyResults; advancedMetrics?: AdvancedMetrics | null } } | null)?.results_snapshot;
+      if (pointRows && pointRows.length > 0) {
+        const dataPoints = pointRows as TestDataPoint[];
+        const calculatedResults = snapshot?.results ?? (athleteRow ? calculatePhysiology(athleteRow as import('../types').Athlete, dataPoints) : null);
+        if (calculatedResults) {
+          setAdvancedTest({
+            results: calculatedResults,
+            advancedMetrics: snapshot?.advancedMetrics ?? ((resultRow as { advanced_metrics?: AdvancedMetrics | null } | null)?.advanced_metrics ?? (athleteRow ? calculateAdvancedMetrics(athleteRow as import('../types').Athlete, dataPoints, calculatedResults) : null)),
+            dataPoints,
+            timelineSamples: (timelineRows as TimelineHRSample[]) ?? [],
+          });
+        } else {
+          setAdvancedTest(null);
+        }
+      } else {
+        setAdvancedTest(null);
+      }
+    } else {
+      setAdvancedTest(null);
+    }
+
     setLoading(false);
   };
 
@@ -251,7 +289,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
 
       <div className="border-b border-gray-100 dark:border-gray-700">
         <div className="flex">
-          {(['physiology', 'zones', 'history'] as TabKey[]).map(tab => (
+          {(['physiology', 'zones', 'advanced', 'history'] as TabKey[]).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -261,7 +299,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
-              {tab === 'physiology' ? 'Physiological Capacity' : tab === 'zones' ? 'Training Zones' : 'History'}
+              {tab === 'physiology' ? 'Physiological Capacity' : tab === 'zones' ? 'Training Zones' : tab === 'advanced' ? 'Advanced Analysis' : 'History'}
             </button>
           ))}
         </div>
@@ -354,6 +392,23 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
             <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-700/40 rounded-lg px-4 py-3">
               Physiological Capacity — data from lab or manual entry. Use "Edit / Manual Entry" to update. Training zone adjustments are available in the Zones tab.
             </div>
+          </div>
+        )}
+
+        {activeTab === 'advanced' && (
+          <div className="space-y-4">
+            {advancedTest ? (
+              <AdvancedData
+                dataPoints={advancedTest.dataPoints}
+                results={advancedTest.results}
+                advancedMetrics={advancedTest.advancedMetrics}
+                timelineSamples={advancedTest.timelineSamples}
+              />
+            ) : (
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-200">
+                No saved Advanced Analysis is available for the latest test. Open the test results and save the calculated results first.
+              </div>
+            )}
           </div>
         )}
 

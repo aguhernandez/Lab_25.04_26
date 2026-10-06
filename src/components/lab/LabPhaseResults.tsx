@@ -136,7 +136,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
     if (session.testId) {
       supabase
         .from('test_timeline_samples')
-        .select('timestamp_s, heart_rate')
+        .select('timestamp_s, heart_rate, speed_pace, lactate, rpe, vo2_ml_kg_min')
         .eq('test_id', session.testId)
         .order('timestamp_s', { ascending: true })
         .then(({ data }) => setTimelineSamples((data as TimelineHRSample[]) ?? null));

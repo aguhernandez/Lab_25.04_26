@@ -631,8 +631,21 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
           <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] px-6 py-4">
             <h4 className="text-lg font-semibold text-white">Raw Data Table</h4>
           </div>
-          <div className="p-6 overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="p-6 space-y-6">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h5 className="text-sm font-semibold text-gray-900 dark:text-white">Stage summary</h5>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Calculated values for each completed stage.</p>
+                </div>
+                {timelineSamples && timelineSamples.length > 0 && (
+                  <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium">
+                    {timelineSamples.length} timeline samples
+                  </span>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">Stage</th>
@@ -694,7 +707,48 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
                   </tr>
                 ))}
               </tbody>
-            </table>
+                </table>
+              </div>
+            </div>
+
+            {timelineSamples && timelineSamples.length > 0 ? (
+              <div>
+                <div className="mb-3">
+                  <h5 className="text-sm font-semibold text-gray-900 dark:text-white">Timeline raw data</h5>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Timestamped samples saved for this test. These are the values used for the last-30-second HR analysis.</p>
+                </div>
+                <div className="max-h-[28rem] overflow-auto border border-gray-100 dark:border-gray-700 rounded-xl">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700">
+                      <tr>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">Time (s)</th>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">HR (bpm)</th>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">Speed / pace</th>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">Lactate</th>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">RPE</th>
+                        <th className="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300">VO₂</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {timelineSamples.map((sample, index) => (
+                        <tr key={`${sample.timestamp_s}-${index}`} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.timestamp_s}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.heart_rate ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.speed_pace ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.lactate ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.rpe ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{sample.vo2_ml_kg_min ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-200">
+                No timestamped timeline samples are saved for this test. Stage-level data is shown above, but last-30-second HR analysis cannot be calculated without timestamps.
+              </div>
+            )}
           </div>
         </div>
       )}

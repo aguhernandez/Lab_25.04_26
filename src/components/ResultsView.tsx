@@ -137,7 +137,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       const { data: timelineData } = await supabase
         .from('test_timeline_samples')
-        .select('timestamp_s, heart_rate')
+        .select('timestamp_s, heart_rate, speed_pace, lactate, rpe, vo2_ml_kg_min')
         .eq('test_id', testId)
         .order('timestamp_s', { ascending: true });
       setTimelineSamples((timelineData as TimelineHRSample[]) ?? null);
