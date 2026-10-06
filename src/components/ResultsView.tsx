@@ -5,7 +5,7 @@ import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults } from
 import ReportBuilder from './reports/ReportBuilder';
 import type { ReportData } from '../lib/reportGenerator';
 import { generateCompleteJSON, exportJSONToFile, getJSONSummary, MetabolicLabJSON } from '../lib/jsonGenerator';
-import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones, lockZonesToLab, AthleteTrainingZones } from '../lib/physiologyProfile';
+import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones, AthleteTrainingZones } from '../lib/physiologyProfile';
 import type { ZoneDefinition } from '../lib/trainingZones';
 import type { PreTestData } from '../lib/labSession';
 import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
@@ -50,7 +50,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [profileSynced, setProfileSynced] = useState(false);
   const [syncingProfile, setSyncingProfile] = useState(false);
   const [trainingZones, setTrainingZones] = useState<AthleteTrainingZones | null>(null);
-  const [lockingZones, setLockingZones] = useState(false);
   const [showReportBuilder, setShowReportBuilder] = useState(false);
   const [showEditData, setShowEditData] = useState(false);
   const [preTestData, setPreTestData] = useState<PreTestData | null>(null);
@@ -315,7 +314,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           thresholds: results.thresholds ?? null,
           results_snapshot: snapshot as unknown as Record<string, unknown>,
           saved_at: now,
-        });
+        }, { onConflict: 'test_id' });
 
       if (error) throw error;
 
@@ -357,26 +356,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       }
     } finally {
       setSyncingProfile(false);
-    }
-  };
-
-  const handleToggleLock = async () => {
-    if (!athlete || !trainingZones) return;
-    setLockingZones(true);
-    try {
-      const newLocked = !trainingZones.locked_to_lab;
-      const ok = await lockZonesToLab(athlete.id, newLocked);
-      if (ok) {
-        setTrainingZones({ ...trainingZones, locked_to_lab: newLocked });
-        setToast({
-          message: newLocked
-            ? 'Zones locked to physiology. Manual editing disabled.'
-            : 'Zones unlocked. Coach can now edit zones manually.',
-          type: 'success'
-        });
-      }
-    } finally {
-      setLockingZones(false);
     }
   };
 
@@ -603,26 +582,12 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
                   {trainingZones && (
                     <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                       Zones: {trainingZones.mode === 'manual_override' ? 'Manual override by coach' : 'Based on lab physiology'}
-                      {trainingZones.locked_to_lab && ' · Locked'}
+
                     </p>
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {trainingZones && (
-                  <button
-                    onClick={handleToggleLock}
-                    disabled={lockingZones}
-                    className={`px-4 py-2 text-sm rounded-lg font-semibold transition-colors shadow-sm ${
-                      trainingZones.locked_to_lab
-                        ? 'bg-amber-500 text-white hover:bg-amber-600'
-                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-500'
-                    }`}
-                  >
-                    {trainingZones.locked_to_lab ? 'Zones Locked to Physiology' : 'Lock Zones to Physiology'}
-                  </button>
-                )}
-              </div>
+
             </div>
             {trainingZones && (
               <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
