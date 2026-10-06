@@ -369,6 +369,13 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         last_modified_at: new Date().toISOString(),
       });
     }
+    // Also update the results state so Save persists the edited zones in the snapshot
+    if (results) {
+      setResults({
+        ...results,
+        training_zones: updatedZones as any,
+      });
+    }
     setIsDirty(true);
     setIsSaved(false);
   };

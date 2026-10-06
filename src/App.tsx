@@ -358,6 +358,7 @@ function AppContent() {
 
           {currentView === 'results' && selectedTestId && (
             <ResultsView
+              key={selectedTestId}
               testId={selectedTestId}
               onTestDeleted={handleBackToAthleteDetail}
             />
