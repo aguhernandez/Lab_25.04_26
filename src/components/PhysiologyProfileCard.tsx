@@ -30,7 +30,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   const [zones, setZones] = useState<AthleteTrainingZones | null>(null);
   const [loading, setLoading] = useState(true);
   const [lockingZones, setLockingZones] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>('advanced');
+  const [activeTab, setActiveTab] = useState<TabKey>('physiology');
   const [showManualForm, setShowManualForm] = useState(false);
   const [editingZones, setEditingZones] = useState(false);
   const [editZoneValues, setEditZoneValues] = useState<TrainingZone[]>([]);
@@ -44,7 +44,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   } | null>(null);
 
   useEffect(() => {
-    setActiveTab('advanced');
+    setActiveTab('physiology');
     loadProfile();
   }, [athleteId]);
 
@@ -257,7 +257,8 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     : null;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+    <>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
       <div className="bg-gradient-to-r from-slate-700 to-slate-800 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -290,7 +291,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
 
       <div className="border-b border-gray-100 dark:border-gray-700">
         <div className="flex">
-          {(['physiology', 'zones', 'advanced', 'history'] as TabKey[]).map(tab => (
+          {(['physiology', 'zones', 'history'] as TabKey[]).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -300,7 +301,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
-              {tab === 'physiology' ? 'Physiological Capacity' : tab === 'zones' ? 'Training Zones' : tab === 'advanced' ? 'Advanced Analysis' : 'History'}
+              {tab === 'physiology' ? 'Physiological Capacity' : tab === 'zones' ? 'Training Zones' : 'History'}
             </button>
           ))}
         </div>
@@ -393,23 +394,6 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
             <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-700/40 rounded-lg px-4 py-3">
               Physiological Capacity — data from lab or manual entry. Use "Edit / Manual Entry" to update. Training zone adjustments are available in the Zones tab.
             </div>
-          </div>
-        )}
-
-        {activeTab === 'advanced' && (
-          <div className="space-y-4">
-            {advancedTest ? (
-              <AdvancedData
-                dataPoints={advancedTest.dataPoints}
-                results={advancedTest.results}
-                advancedMetrics={advancedTest.advancedMetrics}
-                timelineSamples={advancedTest.timelineSamples}
-              />
-            ) : (
-              <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-200">
-                No saved Advanced Analysis is available for the latest test. Open the test results and save the calculated results first.
-              </div>
-            )}
           </div>
         )}
 
@@ -582,6 +566,20 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
         )}
       </div>
     </div>
+
+    {advancedTest ? (
+      <AdvancedData
+        dataPoints={advancedTest.dataPoints}
+        results={advancedTest.results}
+        advancedMetrics={advancedTest.advancedMetrics}
+        timelineSamples={advancedTest.timelineSamples}
+      />
+    ) : (
+      <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-200">
+        No saved Advanced Analysis is available for the latest test.
+      </div>
+    )}
+  </>
   );
 }
 
