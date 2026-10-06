@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LabSession, ManualResults } from '../../lib/labSession';
-import { PhysiologyResults } from '../../lib/physiology';
+import { PhysiologyResults, type TimelineHRSample } from '../../lib/physiology';
+import { supabase } from '../../lib/supabase';
 import { TrainingZone } from '../../types';
 import { buildTrainingZonesData } from '../../lib/trainingZones';
 import MetabolicProfile from '../MetabolicProfile';
@@ -128,7 +129,19 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
   const { t } = useLanguage();
   const { results, advancedMetrics, dataPoints, test, athlete } = session;
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [timelineSamples, setTimelineSamples] = useState<TimelineHRSample[] | null>(null);
   const [manualMode, setManualMode] = useState(session.manualResultsMode || !results);
+
+  useEffect(() => {
+    if (session.testId) {
+      supabase
+        .from('test_timeline_samples')
+        .select('timestamp_s, heart_rate')
+        .eq('test_id', session.testId)
+        .order('timestamp_s', { ascending: true })
+        .then(({ data }) => setTimelineSamples((data as TimelineHRSample[]) ?? null));
+    }
+  }, [session.testId]);
 
   const [form, setForm] = useState<Record<string, string>>(() => {
     const mr = session.manualResults;
@@ -330,7 +343,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
               </button>
               {showAdvanced && (
                 <div className="border-t border-gray-100 dark:border-gray-700 p-6">
-                  <AdvancedData dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} />
+                  <AdvancedData dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
                 </div>
               )}
             </div>

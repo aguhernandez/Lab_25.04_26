@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { TestDataPoint, AdvancedMetrics } from '../types';
-import { PhysiologyResults } from '../lib/physiology';
+import { PhysiologyResults, computeStageHRFromTimeline, interpolateHRAtLoad, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ScatterChart, Scatter, ReferenceLine, BarChart, Bar
+  ResponsiveContainer, ScatterChart, Scatter, ReferenceLine, BarChart, Bar, ReferenceDot
 } from 'recharts';
 
 interface AdvancedDataProps {
   dataPoints: TestDataPoint[];
   results: PhysiologyResults;
   advancedMetrics?: AdvancedMetrics | null;
+  timelineSamples?: TimelineHRSample[] | null;
 }
 
 type Tab = 'charts' | 'energy' | 'economy' | 'recovery' | 'anaerobic' | 'rawdata';
@@ -34,7 +35,7 @@ const tooltipStyle = {
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-      <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
+      <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] px-6 py-4">
         <h4 className="text-lg font-semibold text-white">{title}</h4>
       </div>
       <div className="p-6">{children}</div>
@@ -65,13 +66,63 @@ function MetricTile({
   );
 }
 
-export default function AdvancedData({ dataPoints, results, advancedMetrics }: AdvancedDataProps) {
+export default function AdvancedData({ dataPoints, results, advancedMetrics, timelineSamples }: AdvancedDataProps) {
   const [activeTab, setActiveTab] = useState<Tab>('charts');
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
 
+  // Compute per-stage HR from timeline samples (last 30s window)
+  const stageHR: StageHRResult[] = useMemo(() => {
+    if (!timelineSamples || timelineSamples.length === 0) return [];
+    return computeStageHRFromTimeline(sorted, timelineSamples, STAGE_HR_WINDOW_S);
+  }, [sorted, timelineSamples]);
+
+  // Determine which HR values to use: prefer timeline-derived last-30s HR, fall back to dataPoints HR
+  const effectiveHR: number[] = useMemo(() => {
+    if (stageHR.length === sorted.length && stageHR.some(s => s.hr_last_window != null)) {
+      return sorted.map((_, i) => stageHR[i]?.hr_last_window ?? sorted[i].heart_rate);
+    }
+    return sorted.map(p => p.heart_rate);
+  }, [sorted, stageHR]);
+
+  // HR max for reference line
+  const hrMax = useMemo(() => {
+    const fromTimeline = stageHR.find(s => s.hr_max != null);
+    if (fromTimeline?.hr_max) return fromTimeline.hr_max;
+    return Math.max(...sorted.map(p => p.heart_rate));
+  }, [sorted, stageHR]);
+
+  // HR–load regression
+  const loadUnit = results.has_power ? 'W' : 'km/h';
+  const hrRegression = useMemo(() => {
+    const loadValues = sorted.map(p => results.has_power ? (p.power_watts ?? 0) : 0);
+    if (!results.has_power) return null;
+    const validPairs = loadValues.map((load, i) => ({ load, hr: effectiveHR[i] })).filter(p => p.load > 0 && p.hr > 0);
+    if (validPairs.length < 3) return null;
+    return computeHRLoadRegression(validPairs.map(p => p.load), validPairs.map(p => p.hr), loadUnit);
+  }, [sorted, effectiveHR, results.has_power]);
+
+  // Interpolated HR at thresholds
+  const hrAtLT1 = useMemo(() => {
+    if (!results.has_power || !results.lt1_power) return null;
+    const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
+    if (loads.length < 2) return null;
+    return interpolateHRAtLoad(loads, effectiveHR, results.lt1_power);
+  }, [sorted, effectiveHR, results]);
+
+  const hrAtLT2 = useMemo(() => {
+    if (!results.has_power || !results.lt2_power) return null;
+    const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
+    if (loads.length < 2) return null;
+    return interpolateHRAtLoad(loads, effectiveHR, results.lt2_power);
+  }, [sorted, effectiveHR, results]);
+
+  const hasTimelineHR = stageHR.length > 0 && stageHR.some(s => s.hr_last_window != null);
+  const hasShortStages = stageHR.some(s => s.short_stage && s.hr_last_window != null);
+
   const chartData = sorted.map((p, i) => ({
     stage: p.stage_number,
-    hr: p.heart_rate,
+    hr: effectiveHR[i] ?? p.heart_rate,
+    hr_timeline: stageHR[i]?.hr_last_window ?? null,
     power: p.power_watts ?? null,
     lactate: p.lactate ?? null,
     vo2: p.vo2_ml_kg_min ?? null,
@@ -90,7 +141,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] rounded-lg p-2">
+        <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] rounded-lg p-2">
           <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
@@ -135,6 +186,18 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
 
           {hasPower && (
             <SectionCard title="HR vs Power">
+              {hasTimelineHR && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  HR per stage uses the mean of the last {STAGE_HR_WINDOW_S}s of each stage (from timeline data).
+                  {hasShortStages && ' Some stages were shorter than the window — full stage used.'}
+                </p>
+              )}
+              {hrRegression && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  HR–Load slope: <strong className="text-gray-700 dark:text-gray-300">{hrRegression.slope} bpm/{hrRegression.unit}</strong>
+                  {' · R² = '}<strong className="text-gray-700 dark:text-gray-300">{hrRegression.r_squared}</strong>
+                </p>
+              )}
               <ResponsiveContainer width="100%" height={320}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -144,8 +207,35 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
                   <Legend />
                   <Line type="monotone" dataKey="power" stroke="#f97316" strokeWidth={2} name="Power (W)" dot={{ r: 4, fill: '#f97316' }} />
                   <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)" dot={{ r: 4, fill: '#ef4444' }} />
+                  {hrAtLT1 != null && results.lt1_power != null && (
+                    <ReferenceDot
+                      x={sorted.findIndex(p => p.power_watts === results.lt1_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt1_power)].stage_number : sorted[0].stage_number}
+                      y={hrAtLT1}
+                      r={6}
+                      fill="#f59e0b"
+                      stroke="#fff"
+                      strokeWidth={1.5}
+                      label={{ value: 'LT1', fill: '#f59e0b', fontSize: 11, position: 'top' }}
+                    />
+                  )}
+                  {hrAtLT2 != null && results.lt2_power != null && (
+                    <ReferenceDot
+                      x={sorted.findIndex(p => p.power_watts === results.lt2_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt2_power)].stage_number : sorted[sorted.length - 1].stage_number}
+                      y={hrAtLT2}
+                      r={6}
+                      fill="#dc2626"
+                      stroke="#fff"
+                      strokeWidth={1.5}
+                      label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }}
+                    />
+                  )}
+                  <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
+                    label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
                 </LineChart>
               </ResponsiveContainer>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                HR lags behind load in short stages — the last-30s window helps capture steady-state HR.
+              </p>
             </SectionCard>
           )}
 
@@ -419,14 +509,27 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
                   ? 'Good cardiovascular durability'
                   : 'Significant drift — possible dehydration or thermal fatigue'}
               </p>
+              {hasTimelineHR && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  HR per stage from last {STAGE_HR_WINDOW_S}s of timeline data.
+                </p>
+              )}
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="stage" stroke="#9ca3af" />
                   <YAxis stroke="#9ca3af" />
                   <Tooltip contentStyle={tooltipStyle} />
+                  <Legend />
                   <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)"
                     dot={{ r: 4, fill: '#ef4444' }} />
+                  {hasTimelineHR && (
+                    <Line type="monotone" dataKey="hr_timeline" stroke="#f59e0b" strokeWidth={2}
+                      name="HR last-30s (bpm)" dot={{ r: 3, fill: '#f59e0b' }}
+                      strokeDasharray="5 3" connectNulls />
+                  )}
+                  <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
+                    label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
                 </LineChart>
               </ResponsiveContainer>
             </SectionCard>
@@ -525,7 +628,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
 
       {activeTab === 'rawdata' && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-          <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
+          <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] px-6 py-4">
             <h4 className="text-lg font-semibold text-white">Raw Data Table</h4>
           </div>
           <div className="p-6 overflow-x-auto">
@@ -535,6 +638,8 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
                   <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">Stage</th>
                   <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">Dur (s)</th>
                   <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">HR (bpm)</th>
+                  {hasTimelineHR && <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">HR last-{STAGE_HR_WINDOW_S}s</th>}
+                  {hasTimelineHR && <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">HR max</th>}
                   {hasPower && <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">Power (W)</th>}
                   {hasVO2 && <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">VO₂ (ml/kg/min)</th>}
                   {hasLactate && <th className="text-left py-3 px-3 font-semibold text-gray-700 dark:text-gray-300">Lactate (mmol/L)</th>}
@@ -550,6 +655,17 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics }: A
                     <td className="py-3 px-3 font-semibold text-gray-900 dark:text-white">{point.stage_number}</td>
                     <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{point.duration_seconds}</td>
                     <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{point.heart_rate}</td>
+                    {hasTimelineHR && (
+                      <td className="py-3 px-3 text-gray-700 dark:text-gray-300">
+                        {stageHR[i]?.hr_last_window ?? '—'}
+                        {stageHR[i]?.short_stage && stageHR[i]?.hr_last_window != null && (
+                          <span className="ml-1 text-xs text-amber-500" title="Stage shorter than 30s window">⏱</span>
+                        )}
+                      </td>
+                    )}
+                    {hasTimelineHR && (
+                      <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{stageHR[i]?.hr_max ?? '—'}</td>
+                    )}
                     {hasPower && <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{point.power_watts ? Math.round(point.power_watts) : '—'}</td>}
                     {hasVO2 && <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{point.vo2_ml_kg_min?.toFixed(1) ?? '—'}</td>}
                     {hasLactate && <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{point.lactate?.toFixed(1) ?? '—'}</td>}

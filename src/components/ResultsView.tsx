@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { Athlete, Test, TestDataPoint, TrainingZone, AdvancedMetrics } from '../types';
-import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults } from '../lib/physiology';
+import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults, type TimelineHRSample } from '../lib/physiology';
 import ReportBuilder from './reports/ReportBuilder';
 import type { ReportData } from '../lib/reportGenerator';
 import { generateCompleteJSON, exportJSONToFile, getJSONSummary, MetabolicLabJSON } from '../lib/jsonGenerator';
@@ -55,6 +55,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [preTestData, setPreTestData] = useState<PreTestData | null>(null);
   const [anthropometryMeasurement, setAnthropometryMeasurement] = useState<AnthropometryMeasurement | null>(null);
   const [kerrResults, setKerrResults] = useState<KerrResults | null>(null);
+  const [timelineSamples, setTimelineSamples] = useState<TimelineHRSample[] | null>(null);
 
   // Persisted state tracking
   const [hasSavedResults, setHasSavedResults] = useState(false);
@@ -133,6 +134,13 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       if (dataPointsError) throw dataPointsError;
 
       setDataPoints(dataPointsData || []);
+
+      const { data: timelineData } = await supabase
+        .from('test_timeline_samples')
+        .select('timestamp_s, heart_rate')
+        .eq('test_id', testId)
+        .order('timestamp_s', { ascending: true });
+      setTimelineSamples((timelineData as TimelineHRSample[]) ?? null);
 
       // Load anthropometry for report
       const [{ data: anthroRow }, { data: kerrRow }] = await Promise.all([
@@ -846,7 +854,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             athleteId={athlete?.id}
             onSaved={handleZonesSaved}
           />
-          <AdvancedData dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} />
+          <AdvancedData dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
         </>
       )}
 

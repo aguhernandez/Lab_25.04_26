@@ -1214,3 +1214,155 @@ export function calculateAdvancedMetrics(
     anaerobicTest
   };
 }
+
+// ─── Timeline-based HR analysis functions ──────────────────────────────
+
+/** Default window for "last N seconds" of a stage (in seconds). */
+export const STAGE_HR_WINDOW_S = 30;
+
+export interface TimelineHRSample {
+  timestamp_s: number;
+  heart_rate: number | null;
+}
+
+export interface StageHRResult {
+  stage_number: number;
+  hr_last_window: number | null;
+  hr_max: number | null;
+  hr_mean: number | null;
+  short_stage: boolean;
+}
+
+/**
+ * For each stage (defined by cumulative start/end from durations), compute:
+ *   - hr_last_window: mean HR over the last `window_s` seconds of the stage
+ *   - hr_max: max HR within the stage
+ *   - hr_mean: mean HR over the entire stage
+ *   - short_stage: true if stage duration < window_s
+ *
+ * Returns null for hr_last_window if no samples fall in the window.
+ * If fewer than 1 sample exists for a stage, all HR fields are null.
+ * Pure, no side effects.
+ */
+export function computeStageHRFromTimeline(
+  stages: Array<{ stage_number: number; duration_seconds: number }>,
+  timeline: TimelineHRSample[],
+  window_s: number = STAGE_HR_WINDOW_S,
+): StageHRResult[] {
+  let cumulative = 0;
+  return stages.map((s) => {
+    const start = cumulative;
+    const end = cumulative + s.duration_seconds;
+    cumulative = end;
+
+    const stageSamples = timeline
+      .filter((t) => t.heart_rate != null && t.heart_rate > 0 && t.timestamp_s >= start && t.timestamp_s < end)
+      .map((t) => t.heart_rate as number);
+
+    if (stageSamples.length === 0) {
+      return { stage_number: s.stage_number, hr_last_window: null, hr_max: null, hr_mean: null, short_stage: s.duration_seconds < window_s };
+    }
+
+    const hr_mean = Math.round(stageSamples.reduce((a, b) => a + b, 0) / stageSamples.length);
+    const hr_max = Math.max(...stageSamples);
+
+    const isShort = s.duration_seconds < window_s;
+    const windowStart = isShort ? start : end - window_s;
+    const windowSamples = timeline
+      .filter((t) => t.heart_rate != null && t.heart_rate > 0 && t.timestamp_s >= windowStart && t.timestamp_s < end)
+      .map((t) => t.heart_rate as number);
+
+    const hr_last_window = windowSamples.length > 0
+      ? Math.round(windowSamples.reduce((a, b) => a + b, 0) / windowSamples.length)
+      : null;
+
+    return { stage_number: s.stage_number, hr_last_window, hr_max, hr_mean, short_stage: isShort };
+  });
+}
+
+/**
+ * Linearly interpolate HR at a given threshold load value (power in watts or speed in km/h).
+ * Uses the per-stage (load, HR) pairs sorted by load.
+ * Returns null if fewer than 2 points or if target is outside the data range.
+ * Pure.
+ */
+export function interpolateHRAtLoad(
+  loadValues: number[],
+  hrValues: number[],
+  targetLoad: number,
+): number | null {
+  if (loadValues.length < 2 || hrValues.length < 2) return null;
+  if (loadValues.length !== hrValues.length) return null;
+
+  const pairs = loadValues
+    .map((load, i) => ({ load, hr: hrValues[i] }))
+    .filter((p) => p.load != null && p.hr != null && p.load > 0 && p.hr > 0)
+    .sort((a, b) => a.load - b.load);
+
+  if (pairs.length < 2) return null;
+
+  if (targetLoad <= pairs[0].load) return pairs[0].hr;
+  if (targetLoad >= pairs[pairs.length - 1].load) return pairs[pairs.length - 1].hr;
+
+  for (let i = 0; i < pairs.length - 1; i++) {
+    if (targetLoad >= pairs[i].load && targetLoad <= pairs[i + 1].load) {
+      const slope = (pairs[i + 1].hr - pairs[i].hr) / (pairs[i + 1].load - pairs[i].load);
+      return Math.round(pairs[i].hr + slope * (targetLoad - pairs[i].load));
+    }
+  }
+
+  return null;
+}
+
+export interface HRLoadRegression {
+  slope: number;
+  intercept: number;
+  r_squared: number;
+  unit: string;
+}
+
+/**
+ * Linear regression of HR vs load (power or speed).
+ * Returns null if fewer than 3 points (insufficient for meaningful R²).
+ * Pure.
+ */
+export function computeHRLoadRegression(
+  loadValues: number[],
+  hrValues: number[],
+  unit: string,
+): HRLoadRegression | null {
+  if (loadValues.length < 3 || hrValues.length < 3) return null;
+  if (loadValues.length !== hrValues.length) return null;
+
+  const pairs = loadValues
+    .map((load, i) => ({ load, hr: hrValues[i] }))
+    .filter((p) => p.load != null && p.hr != null && p.load > 0 && p.hr > 0);
+
+  if (pairs.length < 3) return null;
+
+  const n = pairs.length;
+  const sumX = pairs.reduce((s, p) => s + p.load, 0);
+  const sumY = pairs.reduce((s, p) => s + p.hr, 0);
+  const sumXY = pairs.reduce((s, p) => s + p.load * p.hr, 0);
+  const sumXX = pairs.reduce((s, p) => s + p.load * p.load, 0);
+
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null;
+
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+
+  const ssRes = pairs.reduce((s, p) => {
+    const predicted = slope * p.load + intercept;
+    return s + Math.pow(p.hr - predicted, 2);
+  }, 0);
+  const ssTot = pairs.reduce((s, p) => s + Math.pow(p.hr - sumY / n, 2), 0);
+  const r_squared = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+
+  return {
+    slope: Math.round(slope * 1000) / 1000,
+    intercept: Math.round(intercept * 10) / 10,
+    r_squared: Math.round(r_squared * 1000) / 1000,
+    unit,
+  };
+}
