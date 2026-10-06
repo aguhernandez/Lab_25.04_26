@@ -43,7 +43,13 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function MetricTile({
+function parseSpeedKmh(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = value.match(/-?\d+(?:[.,]\d+)?/);
+  return match ? Number(match[0].replace(',', '.')) : null;
+}
+
+function MetricTile({ 
   label, value, unit, note
 }: {
   label: string;
@@ -92,29 +98,32 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
   }, [sorted, stageHR]);
 
   // HR–load regression
-  const loadUnit = results.has_power ? 'W' : 'km/h';
+  const hasPower = results.has_power || sorted.some(p => p.power_watts != null);
+  const hasSpeed = sorted.some(p => parseSpeedKmh(p.speed_pace) != null);
+  const hasLoad = hasPower || hasSpeed;
+  const loadUnit = hasPower ? 'W' : 'km/h';
   const hrRegression = useMemo(() => {
-    const loadValues = sorted.map(p => results.has_power ? (p.power_watts ?? 0) : 0);
-    if (!results.has_power) return null;
+    if (!hasLoad) return null;
+    const loadValues = sorted.map(p => hasPower ? (p.power_watts ?? 0) : (parseSpeedKmh(p.speed_pace) ?? 0));
     const validPairs = loadValues.map((load, i) => ({ load, hr: effectiveHR[i] })).filter(p => p.load > 0 && p.hr > 0);
     if (validPairs.length < 3) return null;
     return computeHRLoadRegression(validPairs.map(p => p.load), validPairs.map(p => p.hr), loadUnit);
-  }, [sorted, effectiveHR, results.has_power]);
+  }, [sorted, effectiveHR, hasLoad, hasPower, loadUnit]);
 
   // Interpolated HR at thresholds
   const hrAtLT1 = useMemo(() => {
-    if (!results.has_power || !results.lt1_power) return null;
+    if (!hasPower || !results.lt1_power) return null;
     const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
     if (loads.length < 2) return null;
     return interpolateHRAtLoad(loads, effectiveHR, results.lt1_power);
-  }, [sorted, effectiveHR, results]);
+  }, [sorted, effectiveHR, hasPower, results.lt1_power]);
 
   const hrAtLT2 = useMemo(() => {
-    if (!results.has_power || !results.lt2_power) return null;
+    if (!hasPower || !results.lt2_power) return null;
     const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
     if (loads.length < 2) return null;
     return interpolateHRAtLoad(loads, effectiveHR, results.lt2_power);
-  }, [sorted, effectiveHR, results]);
+  }, [sorted, effectiveHR, hasPower, results.lt2_power]);
 
   const hasTimelineHR = stageHR.length > 0 && stageHR.some(s => s.hr_last_window != null);
   const hasShortStages = stageHR.some(s => s.short_stage && s.hr_last_window != null);
@@ -124,6 +133,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
     hr: effectiveHR[i] ?? p.heart_rate,
     hr_timeline: stageHR[i]?.hr_last_window ?? null,
     power: p.power_watts ?? null,
+    load: hasPower ? (p.power_watts ?? null) : parseSpeedKmh(p.speed_pace),
     lactate: p.lactate ?? null,
     vo2: p.vo2_ml_kg_min ?? null,
     rpe: p.rpe ?? null,
@@ -132,14 +142,13 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
 
-  const hasPower = results.has_power || sorted.some(p => p.power_watts != null);
   const hasVO2 = results.has_vo2;
   const hasLactate = results.has_lactate;
   const hasRpe = sorted.some(p => p.rpe != null);
   const hasEnergyData = advancedMetrics?.energyProfile.rer_vs_stage.some(v => v !== null) ?? false;
 
-  const hrLoadSection = hasPower ? (
-    <SectionCard title="HR vs Power">
+  const hrLoadSection = hasLoad ? (
+    <SectionCard title={`HR vs ${hasPower ? 'Power' : 'Speed'}`}>
       {hasTimelineHR && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
           HR per stage uses the mean of the last {STAGE_HR_WINDOW_S}s of each stage (from timeline data).
@@ -164,7 +173,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
           <YAxis stroke="#9ca3af" />
           <Tooltip contentStyle={tooltipStyle} />
           <Legend />
-          <Line type="monotone" dataKey="power" stroke="#f97316" strokeWidth={2} name="Power (W)" dot={{ r: 4, fill: '#f97316' }} />
+          <Line type="monotone" dataKey="load" stroke="#f97316" strokeWidth={2} name={hasPower ? 'Power (W)' : 'Speed (km/h)'} dot={{ r: 4, fill: '#f97316' }} />
           <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)" dot={{ r: 4, fill: '#ef4444' }} />
           {hrAtLT1 != null && results.lt1_power != null && (
             <ReferenceDot
