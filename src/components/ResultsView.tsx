@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { Athlete, Test, TestDataPoint, AdvancedMetrics } from '../types';
 import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults } from '../lib/physiology';
@@ -17,6 +17,7 @@ import ConfirmDialog from './ConfirmDialog';
 import Toast from './Toast';
 import VO2ReferenceComparison from './VO2ReferenceComparison';
 import EditDataModal from './EditDataModal';
+import { RefreshCw, Save, FileDown, Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface ResultsViewProps {
   testId: string;
@@ -26,6 +27,12 @@ interface ResultsViewProps {
 interface ToastMessage {
   message: string;
   type: 'success' | 'error';
+}
+
+interface SavedSnapshot {
+  results: PhysiologyResults;
+  advancedMetrics: AdvancedMetrics | null;
+  savedAt: string;
 }
 
 export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps) {
@@ -50,9 +57,30 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [anthropometryMeasurement, setAnthropometryMeasurement] = useState<AnthropometryMeasurement | null>(null);
   const [kerrResults, setKerrResults] = useState<KerrResults | null>(null);
 
+  // Persisted state tracking
+  const [hasSavedResults, setHasSavedResults] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [showRecalculateConfirm, setShowRecalculateConfirm] = useState(false);
+  const [pendingResults, setPendingResults] = useState<PhysiologyResults | null>(null);
+  const [pendingAdvanced, setPendingAdvanced] = useState<AdvancedMetrics | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+
+  // Keep a reference to the saved snapshot so we can revert on cancel
+  const [savedSnapshot, setSavedSnapshot] = useState<SavedSnapshot | null>(null);
+
   useEffect(() => {
     loadTestData();
   }, [testId]);
+
+  const regenerateJSON = useCallback(
+    (athleteData: Athlete, testData: Test, points: TestDataPoint[], calcResults: PhysiologyResults, advanced: AdvancedMetrics | null) => {
+      const json = generateCompleteJSON(athleteData, testData, points, calcResults, advanced ?? undefined);
+      setCompleteJSON(json);
+    },
+    []
+  );
 
   const loadTestData = async () => {
     try {
@@ -69,7 +97,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       setTest(testData);
 
-      // Extract pre-test environmental data from the tests row
       const td = testData as Record<string, unknown>;
       setPreTestData({
         anthropometry: {} as any,
@@ -96,19 +123,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       if (athleteError) throw athleteError;
       if (!athleteData) throw new Error('Athlete not found');
 
-      const athleteForCalculations = { ...athleteData };
-
-      if (testData.anthropometry_snapshot) {
-        athleteForCalculations.weight_kg = testData.anthropometry_snapshot.weight_kg;
-        athleteForCalculations.height_cm = testData.anthropometry_snapshot.height_cm;
-        athleteForCalculations.sex = testData.anthropometry_snapshot.sex;
-        athleteForCalculations.body_fat_percent = testData.anthropometry_snapshot.bodyFatPercent;
-        athleteForCalculations.lean_body_mass_kg = testData.anthropometry_snapshot.leanBodyMassKg;
-
-        const birthYear = new Date().getFullYear() - testData.anthropometry_snapshot.age;
-        athleteForCalculations.date_of_birth = `${birthYear}-01-01`;
-      }
-
       setAthlete(athleteData);
 
       const { data: dataPointsData, error: dataPointsError } = await supabase
@@ -120,30 +134,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       if (dataPointsError) throw dataPointsError;
 
       setDataPoints(dataPointsData || []);
-
-      const thresholdOverrides = testData.anthropometry_snapshot?.threshold_overrides;
-      const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides);
-      setResults(calculated);
-
-      const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated);
-      setAdvancedMetrics(advanced);
-
-      const json = generateCompleteJSON(
-        athleteData,
-        testData,
-        dataPointsData || [],
-        calculated,
-        advanced
-      );
-      setCompleteJSON(json);
-
-      await saveResults(testData.id, calculated, advanced);
-
-      const { success } = await updateAthletePhysiologyProfile(athleteData, testData, calculated);
-      setProfileSynced(success);
-
-      const zones = await fetchAthleteTrainingZones(athleteData.id);
-      setTrainingZones(zones);
 
       // Load anthropometry for report
       const [{ data: anthroRow }, { data: kerrRow }] = await Promise.all([
@@ -162,6 +152,65 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       ]);
       setAnthropometryMeasurement((anthroRow?.[0] as AnthropometryMeasurement) ?? null);
       setKerrResults((kerrRow?.[0] as KerrResults) ?? null);
+
+      // Fetch saved test_results row
+      const { data: testResultsRow, error: trError } = await supabase
+        .from('test_results')
+        .select('*')
+        .eq('test_id', testId)
+        .maybeSingle();
+
+      if (trError) {
+        console.error('Failed to fetch test_results:', trError);
+      }
+
+      const snapshot = (testResultsRow as Record<string, unknown>)?.results_snapshot as SavedSnapshot | undefined;
+      const savedAt = (testResultsRow as Record<string, unknown>)?.saved_at as string | undefined;
+
+      if (snapshot && snapshot.results) {
+        // Load saved results — do NOT recalculate
+        setResults(snapshot.results);
+        setAdvancedMetrics(snapshot.advancedMetrics ?? null);
+        setSavedSnapshot({ results: snapshot.results, advancedMetrics: snapshot.advancedMetrics ?? null, savedAt: savedAt ?? '' });
+        setHasSavedResults(true);
+        setIsSaved(true);
+        setIsDirty(false);
+        regenerateJSON(athleteData, testData, dataPointsData || [], snapshot.results, snapshot.advancedMetrics ?? null);
+      } else {
+        // No saved snapshot — calculate from raw data (first load of a new test)
+        const athleteForCalculations = { ...athleteData };
+
+        if (testData.anthropometry_snapshot) {
+          athleteForCalculations.weight_kg = testData.anthropometry_snapshot.weight_kg;
+          athleteForCalculations.height_cm = testData.anthropometry_snapshot.height_cm;
+          athleteForCalculations.sex = testData.anthropometry_snapshot.sex;
+          athleteForCalculations.body_fat_percent = testData.anthropometry_snapshot.bodyFatPercent;
+          athleteForCalculations.lean_body_mass_kg = testData.anthropometry_snapshot.leanBodyMassKg;
+
+          const birthYear = new Date().getFullYear() - testData.anthropometry_snapshot.age;
+          athleteForCalculations.date_of_birth = `${birthYear}-01-01`;
+        }
+
+        const thresholdOverrides = testData.anthropometry_snapshot?.threshold_overrides;
+        const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides);
+        const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated);
+
+        setResults(calculated);
+        setAdvancedMetrics(advanced);
+        setHasSavedResults(false);
+        setIsSaved(false);
+        setIsDirty(true);
+        regenerateJSON(athleteData, testData, dataPointsData || [], calculated, advanced);
+      }
+
+      // Load training zones
+      const zones = await fetchAthleteTrainingZones(athleteData.id);
+      setTrainingZones(zones);
+
+      // Check if profile was previously synced
+      if (testResultsRow) {
+        setProfileSynced(true);
+      }
     } catch (err) {
       console.error('Failed to load test data:', err);
     } finally {
@@ -169,29 +218,117 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
     }
   };
 
-  const saveResults = async (testId: string, calculated: PhysiologyResults, advanced?: AdvancedMetrics | null) => {
+  const doCalculation = useCallback((): { results: PhysiologyResults; advanced: AdvancedMetrics } | null => {
+    if (!test || !athlete || dataPoints.length === 0) return null;
+
+    const athleteForCalculations = { ...athlete };
+
+    if (test.anthropometry_snapshot) {
+      athleteForCalculations.weight_kg = test.anthropometry_snapshot.weight_kg;
+      athleteForCalculations.height_cm = test.anthropometry_snapshot.height_cm;
+      athleteForCalculations.sex = test.anthropometry_snapshot.sex;
+      athleteForCalculations.body_fat_percent = test.anthropometry_snapshot.bodyFatPercent;
+      athleteForCalculations.lean_body_mass_kg = test.anthropometry_snapshot.leanBodyMassKg;
+
+      const birthYear = new Date().getFullYear() - test.anthropometry_snapshot.age;
+      athleteForCalculations.date_of_birth = `${birthYear}-01-01`;
+    }
+
+    const thresholdOverrides = test.anthropometry_snapshot?.threshold_overrides;
+    const calculated = calculatePhysiology(athleteForCalculations, dataPoints, thresholdOverrides);
+    const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPoints, calculated);
+
+    return { results: calculated, advanced };
+  }, [test, athlete, dataPoints]);
+
+  const handleRecalculate = () => {
+    if (!test || !athlete) return;
+    setRecalculating(true);
     try {
+      const calc = doCalculation();
+      if (!calc) return;
+      // Store pending results without overwriting current display
+      setPendingResults(calc.results);
+      setPendingAdvanced(calc.advanced);
+      setShowRecalculateConfirm(true);
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
+  const confirmRecalculate = () => {
+    if (pendingResults) {
+      setResults(pendingResults);
+      setAdvancedMetrics(pendingAdvanced);
+      setIsDirty(true);
+      setIsSaved(false);
+      if (athlete && test) {
+        regenerateJSON(athlete, test, dataPoints, pendingResults, pendingAdvanced);
+      }
+      setToast({ message: 'Results recalculated. Click "Save" to persist the new values.', type: 'success' });
+    }
+    setShowRecalculateConfirm(false);
+    setPendingResults(null);
+    setPendingAdvanced(null);
+  };
+
+  const cancelRecalculate = () => {
+    // Revert to saved state
+    if (savedSnapshot) {
+      setResults(savedSnapshot.results);
+      setAdvancedMetrics(savedSnapshot.advancedMetrics);
+      if (athlete && test) {
+        regenerateJSON(athlete, test, dataPoints, savedSnapshot.results, savedSnapshot.advancedMetrics);
+      }
+    }
+    setShowRecalculateConfirm(false);
+    setPendingResults(null);
+    setPendingAdvanced(null);
+  };
+
+  const handleSave = async () => {
+    if (!test || !results) return;
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const snapshot: SavedSnapshot = {
+        results,
+        advancedMetrics: advancedMetrics ?? null,
+        savedAt: now,
+      };
+
       const { error } = await supabase
         .from('test_results')
         .upsert({
-          test_id: testId,
-          vo2max: calculated.vo2max,
-          vo2max_measured: calculated.vo2max_confidence === 'measured',
-          lt1_hr: calculated.lt1_hr,
-          lt1_power: calculated.lt1_power,
-          lt2_hr: calculated.lt2_hr,
-          lt2_power: calculated.lt2_power,
-          fatmax_hr: calculated.fatmax_hr,
-          hr_drift_percent: calculated.hr_drift_percent,
-          training_zones: calculated.training_zones,
-          data_quality: calculated.data_quality,
-          advanced_metrics: advanced ?? null,
-          thresholds: calculated.thresholds ?? null
+          test_id: test.id,
+          vo2max: results.vo2max,
+          vo2max_measured: results.vo2max_confidence === 'measured',
+          lt1_hr: results.lt1_hr,
+          lt1_power: results.lt1_power,
+          lt2_hr: results.lt2_hr,
+          lt2_power: results.lt2_power,
+          fatmax_hr: results.fatmax_hr,
+          hr_drift_percent: results.hr_drift_percent,
+          training_zones: results.training_zones,
+          data_quality: results.data_quality,
+          advanced_metrics: advancedMetrics ?? null,
+          thresholds: results.thresholds ?? null,
+          results_snapshot: snapshot as unknown as Record<string, unknown>,
+          saved_at: now,
         });
 
       if (error) throw error;
+
+      setSavedSnapshot(snapshot);
+      setHasSavedResults(true);
+      setIsSaved(true);
+      setIsDirty(false);
+      setToast({ message: 'Results saved successfully.', type: 'success' });
     } catch (err) {
       console.error('Failed to save results:', err);
+      setToast({ message: 'Failed to save results. Please try again.', type: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -253,6 +390,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         last_modified_at: new Date().toISOString(),
       });
     }
+    setIsDirty(true);
+    setIsSaved(false);
   };
 
   const handleDeleteTest = () => {
@@ -296,7 +435,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   if (loading || !results || !test || !athlete) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-600 dark:text-gray-400">Calculating results...</p>
+        <p className="text-gray-600 dark:text-gray-400">Loading results...</p>
       </div>
     );
   }
@@ -335,6 +474,25 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           onClose={() => setToast(null)}
         />
       )}
+
+      {/* Unsaved changes indicator */}
+      {isDirty && !isSaved && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+          <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">
+            {hasSavedResults ? 'You have unsaved changes. Click "Save" to persist them.' : 'New test — results calculated but not yet saved. Click "Save" to persist.'}
+          </span>
+        </div>
+      )}
+      {isSaved && !isDirty && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+          <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+          <span className="text-sm text-green-700 dark:text-green-300 font-medium">
+            Results saved{savedSnapshot?.savedAt ? ` · ${new Date(savedSnapshot.savedAt).toLocaleString()}` : ''}
+          </span>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden border border-gray-100 dark:border-gray-700">
         <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
           <div className="flex items-center gap-3">
@@ -354,6 +512,46 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
         <div className="p-6 space-y-4">
           <div className="flex flex-wrap gap-3">
+            {/* Recalculate */}
+            <button
+              onClick={handleRecalculate}
+              disabled={recalculating}
+              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${recalculating ? 'animate-spin' : ''}`} />
+              Recalculate
+            </button>
+
+            {/* Save */}
+            <button
+              onClick={handleSave}
+              disabled={saving || (!isDirty && isSaved)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+
+            {/* Export PDF */}
+            <button
+              onClick={() => setShowReportBuilder(true)}
+              className="px-4 py-2 bg-[#fdda36] text-[#514163] rounded-lg font-semibold hover:bg-[#fdda36]/90 transition-colors shadow-md flex items-center gap-1.5"
+            >
+              <FileDown className="w-4 h-4" />
+              Export PDF
+            </button>
+
+            {/* Apply Zones */}
+            <button
+              onClick={handleApplyPhysiologyToProfile}
+              disabled={syncingProfile}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <Upload className="w-4 h-4" />
+              {syncingProfile ? 'Applying...' : 'Apply Zones to Profile'}
+            </button>
+
+            {/* Secondary actions */}
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm"
@@ -377,18 +575,9 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             </button>
             <button
               onClick={handleExportJSON}
-              className="px-4 py-2 bg-[#fdda36] text-[#514163] rounded-lg font-semibold hover:bg-[#fdda36]/90 transition-colors shadow-md"
+              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm"
             >
               Export JSON
-            </button>
-            <button
-              onClick={() => setShowReportBuilder(true)}
-              className="px-4 py-2 bg-[#fdda36] text-[#514163] rounded-lg font-semibold hover:bg-[#fdda36]/90 transition-colors shadow-md flex items-center gap-1.5"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export PDF
             </button>
             <button
               onClick={handleDeleteTest}
@@ -420,13 +609,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleApplyPhysiologyToProfile}
-                  disabled={syncingProfile}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors shadow-sm"
-                >
-                  {syncingProfile ? 'Applying...' : 'Apply Physiology Zones to Athlete Profile'}
-                </button>
                 {trainingZones && (
                   <button
                     onClick={handleToggleLock}
@@ -677,6 +859,19 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       <CoachNotes testId={test.id} />
 
+      {/* Recalculate confirmation */}
+      <ConfirmDialog
+        isOpen={showRecalculateConfirm}
+        title="Confirm Recalculation"
+        message="This will replace the currently saved values with newly calculated values from the raw test data. Are you sure you want to continue? You can still cancel and revert to the saved version."
+        confirmLabel="Recalculate"
+        cancelLabel="Cancel"
+        onConfirm={confirmRecalculate}
+        onCancel={cancelRecalculate}
+        isDanger={false}
+      />
+
+      {/* Delete confirmation */}
       <ConfirmDialog
         isOpen={showDeleteConfirm}
         title="Delete Test"
@@ -697,7 +892,13 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           onClose={() => setShowEditData(false)}
           onRecalculate={() => {
             setShowEditData(false);
-            loadTestData();
+            // After editing raw data, trigger a recalculation flow
+            const calc = doCalculation();
+            if (calc) {
+              setPendingResults(calc.results);
+              setPendingAdvanced(calc.advanced);
+              setShowRecalculateConfirm(true);
+            }
           }}
         />
       )}
