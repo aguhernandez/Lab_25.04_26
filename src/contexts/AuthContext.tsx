@@ -254,7 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('local_profile_id');
       setUserState(null);
       setProfileState(null);
-      window.location.reload();
+      window.location.replace('/');
       return;
     }
     hubLogout();

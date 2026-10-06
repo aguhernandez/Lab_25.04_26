@@ -207,8 +207,7 @@ export function useSatelliteAuth() {
     localStorage.removeItem(SESSION_TOKEN_KEY);
     localStorage.removeItem(SESSION_USER_KEY);
     setUser(null);
-    const currentUrl = window.location.href.split('?')[0];
-    window.location.href = `${HUB_URL}/logout?redirect=${encodeURIComponent(currentUrl)}`;
+    window.location.replace('/');
   };
 
   const hasToken = user !== null;

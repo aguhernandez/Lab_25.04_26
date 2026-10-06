@@ -9,13 +9,13 @@ interface ProtectedRouteProps {
 const USE_LOCAL_AUTH = import.meta.env.VITE_USE_LOCAL_AUTH === 'true';
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, profile, loading, login, selectProfile } = useAuth();
+  const { user, profile, loading, selectProfile } = useAuth();
 
   useEffect(() => {
     if (!loading && !user && !USE_LOCAL_AUTH) {
-      login();
+      window.location.replace('/');
     }
-  }, [user, loading, login]);
+  }, [user, loading]);
 
   if (loading) {
     return (
