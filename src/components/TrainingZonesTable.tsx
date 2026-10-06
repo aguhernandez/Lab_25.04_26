@@ -81,9 +81,6 @@ export default function TrainingZonesTable({
       }
       return localZones;
     }
-    if (zonesData) {
-      return mode === '7' ? zonesData.zones7 : zonesData.zones5;
-    }
     if (zones && zones.length > 0) {
       if (mode === '7' && zones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
         const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts, threshold_source: thresholdSource, language: lang });
@@ -100,6 +97,9 @@ export default function TrainingZonesTable({
         return convertTo5Zones(zones as ZoneDefinition[], sport, lang);
       }
       return zones as ZoneDefinition[];
+    }
+    if (zonesData) {
+      return mode === '7' ? zonesData.zones7 : zonesData.zones5;
     }
     return [];
   };

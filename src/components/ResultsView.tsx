@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Athlete, Test, TestDataPoint, AdvancedMetrics } from '../types';
+import { Athlete, Test, TestDataPoint, TrainingZone, AdvancedMetrics } from '../types';
 import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults } from '../lib/physiology';
 import ReportBuilder from './reports/ReportBuilder';
 import type { ReportData } from '../lib/reportGenerator';
@@ -202,9 +202,32 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         regenerateJSON(athleteData, testData, dataPointsData || [], calculated, advanced);
       }
 
-      // Load training zones
+      // Load training zones. Manual profile zones are authoritative for the test display.
       const zones = await fetchAthleteTrainingZones(athleteData.id);
       setTrainingZones(zones);
+
+      if (zones?.mode === 'manual_override' && zones.heart_rate_zones.length > 0) {
+        const currentResults = snapshot?.results;
+        if (currentResults) {
+          const profileZones = zones.heart_rate_zones as TrainingZone[];
+          const mergedResults: PhysiologyResults = {
+            ...currentResults,
+            training_zones: profileZones,
+            zones_data: {
+              ...currentResults.zones_data,
+              zones5: profileZones,
+              defaultDisplay: '5',
+            },
+          };
+          setResults(mergedResults);
+          setSavedSnapshot({
+            results: mergedResults,
+            advancedMetrics: snapshot.advancedMetrics ?? null,
+            savedAt: savedAt ?? '',
+          });
+          regenerateJSON(athleteData, testData, dataPointsData || [], mergedResults, snapshot.advancedMetrics ?? null);
+        }
+      }
 
       // Check if profile was previously synced
       if (testResultsRow) {
@@ -374,6 +397,11 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       setResults({
         ...results,
         training_zones: updatedZones as any,
+        zones_data: {
+          ...results.zones_data,
+          zones5: updatedZones,
+          defaultDisplay: '5',
+        },
       });
     }
     setIsDirty(true);
