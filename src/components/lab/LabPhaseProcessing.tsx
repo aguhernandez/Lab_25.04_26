@@ -68,6 +68,12 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         .order('stage_number', { ascending: true });
       if (pointsError) throw pointsError;
 
+      const { data: timelineRows } = await supabase
+        .from('test_timeline_samples')
+        .select('*')
+        .eq('test_id', testId)
+        .order('timestamp_s', { ascending: true });
+
       const dataPoints = (rawPoints || []).filter((point) =>
         Number.isFinite(Number(point.heart_rate)) && Number(point.heart_rate) > 0
       ).map((point) => ({
@@ -81,6 +87,33 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
       }
       markStep(0);
       await delay(400);
+
+      // If we have timeline samples with per-30s HR data, use them to compute
+      // more accurate per-stage HR values (average of last 30s of each stage).
+      if (timelineRows && timelineRows.length > dataPoints.length) {
+        const timelineHR = timelineRows
+          .map((r: any) => ({ ts: Number(r.timestamp_s), hr: r.heart_rate != null ? Number(r.heart_rate) : null }))
+          .filter((s: any) => s.hr != null && s.hr > 0);
+
+        if (timelineHR.length > dataPoints.length) {
+          let stageStart = 0;
+          dataPoints.forEach((dp) => {
+            const stageEnd = stageStart + dp.duration_seconds;
+            const last30sStart = stageEnd - 30;
+            const stageSamples = timelineHR.filter((s: any) => s.ts >= last30sStart && s.ts < stageEnd);
+            if (stageSamples.length > 0) {
+              const avgHR = stageSamples.reduce((sum: number, s: any) => sum + s.hr, 0) / stageSamples.length;
+              dp.heart_rate = Math.round(avgHR);
+            }
+            const allStageSamples = timelineHR.filter((s: any) => s.ts >= stageStart && s.ts < stageEnd);
+            if (allStageSamples.length > 0) {
+              const maxHR = Math.max(...allStageSamples.map((s: any) => s.hr));
+              (dp as any).hr_max = Math.round(maxHR);
+            }
+            stageStart = stageEnd;
+          });
+        }
+      }
 
       const athleteForCalc = { ...athlete };
       if (testData?.anthropometry_snapshot) {

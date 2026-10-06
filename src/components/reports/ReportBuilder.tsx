@@ -64,6 +64,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
     !!(manualTrainingZones && manualTrainingZones.length > 0)
   );
   const [zoneDisplayMode, setZoneDisplayMode] = useState<ZoneDisplayMode>('5');
+  const [includeHRDrift, setIncludeHRDrift] = useState(true);
   const [chartSelections, setChartSelections] = useState<ChartSelection[]>(
     CHART_DEFINITIONS.map(def => ({
       type: def.type,
@@ -162,6 +163,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
         manualTrainingZones: useManualZones && hasManualZones ? manualTrainingZones : undefined,
         zoneDisplayMode,
         charts: chartSelections.some(c => c.enabled) ? chartSelections : undefined,
+        includeHRDrift,
       });
     } finally {
       setGenerating(false);
@@ -582,6 +584,29 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
                     <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {data.physiologyResults?.hr_drift_percent != null && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">HR Drift</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Include or exclude HR Drift from this report</p>
+              </div>
+              <div className="p-5">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setIncludeHRDrift(v => !v)}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${includeHRDrift ? 'bg-[#fdda36]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${includeHRDrift ? 'translate-x-5' : ''}`} />
+                  </button>
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                    {includeHRDrift ? 'Included in report' : 'Excluded from report'}
+                  </span>
+                </label>
               </div>
             </div>
           )}

@@ -197,6 +197,7 @@ export interface ReportOptions {
   manualTrainingZones?: TrainingZone[];
   zoneDisplayMode?: ZoneDisplayMode;
   charts?: ChartSelection[];
+  includeHRDrift?: boolean;
 }
 
 export interface ReportData {
@@ -1254,7 +1255,7 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
   b.spacer(4);
 }
 
-function renderEconomy(b: PDFBuilder, data: ReportData) {
+function renderEconomy(b: PDFBuilder, data: ReportData, options?: ReportOptions) {
   b.sectionHeader(tr('secEconomy'));
   const r = data.physiologyResults;
   if (!r) { b.paragraph('No data available.'); return; }
@@ -1262,7 +1263,7 @@ function renderEconomy(b: PDFBuilder, data: ReportData) {
   const items: Array<{ label: string; value: string; unit?: string; note?: string }> = [];
   if (r.pam_watts) items.push({ label: 'PAM (Peak Aerobic Power)', value: val(r.pam_watts), unit: 'W' });
   if (r.vam_kmh) items.push({ label: 'VAM (Velocity at VO\u2082max)', value: r.vam_kmh.toFixed(1), unit: 'km/h' });
-  if (r.hr_drift_percent != null) items.push({ label: 'HR Drift', value: r.hr_drift_percent.toFixed(1), unit: '%' });
+  if (r.hr_drift_percent != null && options?.includeHRDrift !== false) items.push({ label: 'HR Drift', value: r.hr_drift_percent.toFixed(1), unit: '%' });
 
   const adv = data.advancedMetrics;
   if (adv?.movementEconomy?.cycling?.watts_per_kg_lbm && r.lt2_power && data.athlete.weight_kg) {
@@ -2623,7 +2624,7 @@ const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
   fat_oxidation: (b, data) => renderFatOxidation(b, data),
   energy_substrate: (b, data) => renderEnergySubstrate(b, data),
   training_zones: (b, data, opts) => renderTrainingZones(b, data, opts),
-  economy_metrics: (b, data) => renderEconomy(b, data),
+  economy_metrics: (b, data, opts) => renderEconomy(b, data, opts),
   vo2_comparison: (b, data) => renderVO2Comparison(b, data),
   anthropometry: (b, data, opts) => renderAnthropometry(b, data, opts.style),
   anthropometry_results: (b, data) => renderAnthropometryResults(b, data),
