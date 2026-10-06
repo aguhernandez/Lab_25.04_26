@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Athlete } from '../types';
-import { searchHubProfilesByEmail, isHubLinkingEnabled, HubProfile, fetchHubCoachAthletes } from '../lib/hubLink';
+import { searchHubProfilesByEmail, isHubLinkingEnabled, HubProfile, fetchHubCoachAthletes, syncHubAthletesToLocal } from '../lib/hubLink';
 import { Users, RefreshCw, ChevronRight, Search } from 'lucide-react';
 import { getDefaultCoachId } from '../lib/auth';
 
@@ -90,28 +90,8 @@ export default function AthleteSelector({ onSelectAthlete }: AthleteSelectorProp
           const hubAthletes = await fetchHubCoachAthletes(coachHubId);
 
           if (hubAthletes.length > 0) {
-            const localHubIds = new Set(merged.map(a => a.hub_user_id).filter(Boolean));
-            const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
-
-            if (missing.length > 0) {
-              const assignedCoachId = profile?.id || await getDefaultCoachId();
-              const toInsert = missing.map(ha => ({
-                name: ha.full_name || ha.email || 'Hub Athlete',
-                email: ha.email || null,
-                sport: (ha.sport as Athlete['sport']) || 'other',
-                date_of_birth: ha.date_of_birth || null,
-                sex: (ha.sex as Athlete['sex']) || null,
-                hub_user_id: ha.id,
-                coach_id: assignedCoachId,
-              }));
-
-              const { data: inserted } = await supabase
-                .from('athletes')
-                .insert(toInsert)
-                .select();
-
-              if (inserted) merged = [...merged, ...inserted];
-            }
+            const assignedCoachId = profile?.id || await getDefaultCoachId();
+            await syncHubAthletesToLocal(hubAthletes, assignedCoachId);
 
             // Refresh to get the complete list
             const coachHubId2 = user?.id || profile?.hub_user_id;

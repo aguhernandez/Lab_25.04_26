@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { supabase } from './supabase';
 
 let hubClient: SupabaseClient | null = null;
 
@@ -430,7 +431,7 @@ async function fetchCoachAthletesViaProxy(coachHubUserId: string): Promise<HubAt
       id: a.id || a.user_id || '',
       email: a.email || undefined,
       full_name: a.full_name || a.name || undefined,
-      sport: a.sport || undefined,
+      sport: a.sport || a.sport_primary || undefined,
       date_of_birth: a.date_of_birth || undefined,
       sex: a.sex || undefined,
       coach_id: a.coach_id || undefined,
@@ -439,6 +440,84 @@ async function fetchCoachAthletesViaProxy(coachHubUserId: string): Promise<HubAt
     console.warn('[HUB] fetchCoachAthletesViaProxy error:', err);
     return [];
   }
+}
+
+/**
+ * Syncs Hub athletes into the local athletes table.
+ * For each Hub athlete not yet in the local DB:
+ * 1. If an athlete with the same email exists, link it by setting hub_user_id.
+ * 2. Otherwise, insert a new athlete record.
+ * This avoids unique-constraint violations on both hub_user_id and email.
+ */
+export async function syncHubAthletesToLocal(
+  hubAthletes: HubAthleteProfile[],
+  coachProfileId: string | null
+): Promise<number> {
+  if (!hubAthletes.length || !coachProfileId) return 0;
+
+  // Fetch all local athletes' hub_user_id and email in one query
+  const { data: localAthletes, error: fetchErr } = await supabase
+    .from('athletes')
+    .select('id, hub_user_id, email');
+
+  if (fetchErr) {
+    console.error('[HUB sync] Failed to fetch local athletes:', fetchErr);
+    return 0;
+  }
+
+  const localHubIds = new Set((localAthletes || []).map(a => a.hub_user_id).filter(Boolean));
+  const localEmailMap = new Map((localAthletes || []).filter(a => a.email && !a.hub_user_id).map(a => [a.email!, a.id]));
+
+  const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
+  if (!missing.length) return 0;
+
+  let synced = 0;
+
+  // Phase 1: link existing athletes by email
+  const toLink = missing.filter(ha => ha.email && localEmailMap.has(ha.email));
+  for (const ha of toLink) {
+    const localId = localEmailMap.get(ha.email!)!;
+    const { error: updateErr } = await supabase
+      .from('athletes')
+      .update({
+        hub_user_id: ha.id,
+        name: ha.full_name || undefined,
+        sport: ha.sport || undefined,
+      })
+      .eq('id', localId);
+    if (updateErr) {
+      console.error(`[HUB sync] Failed to link ${ha.email}:`, updateErr);
+    } else {
+      synced++;
+    }
+  }
+
+  // Phase 2: insert truly new athletes
+  const linkedEmails = new Set(toLink.map(ha => ha.email!));
+  const toInsert = missing
+    .filter(ha => !linkedEmails.has(ha.email || ''))
+    .map(ha => ({
+      name: ha.full_name || ha.email || 'Hub Athlete',
+      email: ha.email || null,
+      sport: ha.sport || 'other',
+      date_of_birth: ha.date_of_birth || null,
+      sex: ha.sex || null,
+      hub_user_id: ha.id,
+      coach_id: coachProfileId,
+    }));
+
+  if (toInsert.length) {
+    const { error: insertErr } = await supabase
+      .from('athletes')
+      .upsert(toInsert, { onConflict: 'hub_user_id' });
+    if (insertErr) {
+      console.error('[HUB sync] Insert error:', insertErr);
+    } else {
+      synced += toInsert.length;
+    }
+  }
+
+  return synced;
 }
 
 

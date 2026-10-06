@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Athlete } from '../../types';
-import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../../lib/hubLink';
+import { fetchHubCoachAthletes, isHubLinkingEnabled, syncHubAthletesToLocal } from '../../lib/hubLink';
 import { getDefaultCoachId } from '../../lib/auth';
 
 interface AthleteSummary {
@@ -107,14 +107,7 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
           const hubAthletes = await fetchHubCoachAthletes(coachHubId);
           if (hubAthletes.length > 0) {
             const assignedCoachId = profile?.id || await getDefaultCoachId();
-            const toInsert = hubAthletes.map(ha => ({
-              name: ha.full_name || ha.email || 'Hub Athlete',
-              email: ha.email || null,
-              sport: ha.sport || 'other',
-              hub_user_id: ha.id,
-              coach_id: assignedCoachId,
-            }));
-            await supabase.from('athletes').insert(toInsert).select();
+            await syncHubAthletesToLocal(hubAthletes, assignedCoachId);
             const { data: refreshed } = await supabase
               .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
             athleteList = refreshed || [];
@@ -130,23 +123,11 @@ export default function CoachDashboard({ onViewAthlete }: CoachDashboardProps) {
       if (isHubLinkingEnabled() && coachHubId) {
         const hubAthletes = await fetchHubCoachAthletes(coachHubId);
         if (hubAthletes.length > 0) {
-          const localHubIds = new Set(athleteList.map(a => a.hub_user_id).filter(Boolean));
-          const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
-          if (missing.length > 0) {
-            const assignedCoachId = profile?.id || await getDefaultCoachId();
-            await supabase.from('athletes').insert(
-              missing.map(ha => ({
-                name: ha.full_name || ha.email || 'Hub Athlete',
-                email: ha.email || null,
-                sport: ha.sport || 'other',
-                hub_user_id: ha.id,
-                coach_id: assignedCoachId,
-              }))
-            );
-            const { data: refreshed } = await supabase
-              .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
-            if (refreshed) athleteList = refreshed;
-          }
+          const assignedCoachId = profile?.id || await getDefaultCoachId();
+          await syncHubAthletesToLocal(hubAthletes, assignedCoachId);
+          const { data: refreshed } = await supabase
+            .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });
+          if (refreshed) athleteList = refreshed;
         }
       }
 

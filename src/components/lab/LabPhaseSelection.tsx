@@ -4,7 +4,7 @@ import { Athlete, Sport, TestType } from '../../types';
 import { LabSession, LAB_TEST_TYPES } from '../../lib/labSession';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchHubCoachAthletes } from '../../lib/hubLink';
+import { fetchHubCoachAthletes, syncHubAthletesToLocal } from '../../lib/hubLink';
 import { getDefaultCoachId } from '../../lib/auth';
 
 interface Props {
@@ -68,15 +68,7 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
           const missing = hubAthletes.filter((ha) => !localHubIds.has(ha.id));
           if (missing.length > 0) {
             const assignedCoachId = profile?.id || await getDefaultCoachId();
-            await supabase.from('athletes').insert(
-              missing.map((ha) => ({
-                name: ha.full_name || ha.email || 'Athlete',
-                email: ha.email,
-                hub_user_id: ha.id,
-                coach_id: assignedCoachId,
-                sport: ha.sport || null,
-              }))
-            );
+            await syncHubAthletesToLocal(hubAthletes, assignedCoachId);
             // Re-fetch after provisioning
             const { data: refreshed } = await supabase
               .rpc('get_athletes_by_coach_hub_id', { coach_hub_id: coachHubId });

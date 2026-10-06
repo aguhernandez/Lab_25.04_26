@@ -5,7 +5,7 @@ import { Athlete } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Users, RefreshCw, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
-import { fetchHubCoachAthletes, isHubLinkingEnabled } from '../lib/hubLink';
+import { fetchHubCoachAthletes, isHubLinkingEnabled, syncHubAthletesToLocal } from '../lib/hubLink';
 import { getDefaultCoachId } from '../lib/auth';
 
 interface AthleteListProps {
@@ -69,34 +69,10 @@ export default function AthleteList({ onViewAthlete }: AthleteListProps) {
           const hubAthletes = await fetchHubCoachAthletes(coachHubId);
 
           if (hubAthletes.length > 0) {
-            const localHubIds = new Set(merged.map(a => a.hub_user_id).filter(Boolean));
-            const missing = hubAthletes.filter(ha => !localHubIds.has(ha.id));
+            const assignedCoachId = profile?.id || await getDefaultCoachId();
+            await syncHubAthletesToLocal(hubAthletes, assignedCoachId);
 
-            if (missing.length > 0) {
-              // Determine coach_id: use current coach profile, or fall back to default coach
-              const assignedCoachId = profile?.id || await getDefaultCoachId();
-
-              const toInsert = missing.map(ha => ({
-                name: ha.full_name || ha.email || 'Hub Athlete',
-                email: ha.email || null,
-                sport: (ha.sport as Athlete['sport']) || 'other',
-                date_of_birth: ha.date_of_birth || null,
-                sex: (ha.sex as Athlete['sex']) || null,
-                hub_user_id: ha.id,
-                coach_id: assignedCoachId,
-              }));
-
-              const { data: inserted } = await supabase
-                .from('athletes')
-                .insert(toInsert)
-                .select();
-
-              if (inserted) {
-                merged = [...merged, ...inserted];
-              }
-            }
-
-            // Re-query to get the full, up-to-date list after inserts
+            // Re-query to get the full, up-to-date list after sync
             const coachHubId2 = user?.id || profile?.hub_user_id;
             if (coachHubId2) {
               const { data: refreshed } = await supabase
