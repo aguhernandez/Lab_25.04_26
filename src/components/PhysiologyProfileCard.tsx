@@ -30,7 +30,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   const [zones, setZones] = useState<AthleteTrainingZones | null>(null);
   const [loading, setLoading] = useState(true);
   const [lockingZones, setLockingZones] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>('physiology');
+  const [activeTab, setActiveTab] = useState<TabKey>('advanced');
   const [showManualForm, setShowManualForm] = useState(false);
   const [editingZones, setEditingZones] = useState(false);
   const [editZoneValues, setEditZoneValues] = useState<TrainingZone[]>([]);
@@ -44,6 +44,7 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
   } | null>(null);
 
   useEffect(() => {
+    setActiveTab('advanced');
     loadProfile();
   }, [athleteId]);
 
