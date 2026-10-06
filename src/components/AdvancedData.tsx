@@ -132,11 +132,71 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
 
-  const hasPower = results.has_power;
+  const hasPower = results.has_power || sorted.some(p => p.power_watts != null);
   const hasVO2 = results.has_vo2;
   const hasLactate = results.has_lactate;
   const hasRpe = sorted.some(p => p.rpe != null);
   const hasEnergyData = advancedMetrics?.energyProfile.rer_vs_stage.some(v => v !== null) ?? false;
+
+  const hrLoadSection = hasPower ? (
+    <SectionCard title="HR vs Power">
+      {hasTimelineHR && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+          HR per stage uses the mean of the last {STAGE_HR_WINDOW_S}s of each stage (from timeline data).
+          {hasShortStages && ' Some stages were shorter than the window — full stage used.'}
+        </p>
+      )}
+      {!hasTimelineHR && (
+        <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+          Timeline samples are not available for this test, so HR uses the recorded value for each complete stage.
+        </p>
+      )}
+      {hrRegression && (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+          HR–Load slope: <strong className="text-gray-700 dark:text-gray-300">{hrRegression.slope} bpm/{hrRegression.unit}</strong>
+          {' · R² = '}<strong className="text-gray-700 dark:text-gray-300">{hrRegression.r_squared}</strong>
+        </p>
+      )}
+      <ResponsiveContainer width="100%" height={320}>
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+          <XAxis dataKey="stage" stroke="#9ca3af" />
+          <YAxis stroke="#9ca3af" />
+          <Tooltip contentStyle={tooltipStyle} />
+          <Legend />
+          <Line type="monotone" dataKey="power" stroke="#f97316" strokeWidth={2} name="Power (W)" dot={{ r: 4, fill: '#f97316' }} />
+          <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)" dot={{ r: 4, fill: '#ef4444' }} />
+          {hrAtLT1 != null && results.lt1_power != null && (
+            <ReferenceDot
+              x={sorted.findIndex(p => p.power_watts === results.lt1_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt1_power)].stage_number : sorted[0].stage_number}
+              y={hrAtLT1}
+              r={6}
+              fill="#f59e0b"
+              stroke="#fff"
+              strokeWidth={1.5}
+              label={{ value: 'LT1', fill: '#f59e0b', fontSize: 11, position: 'top' }}
+            />
+          )}
+          {hrAtLT2 != null && results.lt2_power != null && (
+            <ReferenceDot
+              x={sorted.findIndex(p => p.power_watts === results.lt2_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt2_power)].stage_number : sorted[sorted.length - 1].stage_number}
+              y={hrAtLT2}
+              r={6}
+              fill="#dc2626"
+              stroke="#fff"
+              strokeWidth={1.5}
+              label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }}
+            />
+          )}
+          <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
+            label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
+        </LineChart>
+      </ResponsiveContainer>
+      <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+        HR lags behind load in short stages — the last-30s window helps capture steady-state HR.
+      </p>
+    </SectionCard>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -148,6 +208,8 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
         </div>
         <h3 className="text-2xl font-bold text-gray-800 dark:text-white">Advanced Analysis</h3>
       </div>
+
+      {hrLoadSection}
 
       <div className="flex gap-1 flex-wrap border-b border-gray-200 dark:border-gray-700">
         {TABS.map(tab => (
@@ -181,61 +243,6 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
                     line={{ stroke: '#3b82f6', strokeWidth: 2 }} />
                 </ScatterChart>
               </ResponsiveContainer>
-            </SectionCard>
-          )}
-
-          {hasPower && (
-            <SectionCard title="HR vs Power">
-              {hasTimelineHR && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  HR per stage uses the mean of the last {STAGE_HR_WINDOW_S}s of each stage (from timeline data).
-                  {hasShortStages && ' Some stages were shorter than the window — full stage used.'}
-                </p>
-              )}
-              {hrRegression && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                  HR–Load slope: <strong className="text-gray-700 dark:text-gray-300">{hrRegression.slope} bpm/{hrRegression.unit}</strong>
-                  {' · R² = '}<strong className="text-gray-700 dark:text-gray-300">{hrRegression.r_squared}</strong>
-                </p>
-              )}
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="stage" stroke="#9ca3af" />
-                  <YAxis stroke="#9ca3af" />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Legend />
-                  <Line type="monotone" dataKey="power" stroke="#f97316" strokeWidth={2} name="Power (W)" dot={{ r: 4, fill: '#f97316' }} />
-                  <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)" dot={{ r: 4, fill: '#ef4444' }} />
-                  {hrAtLT1 != null && results.lt1_power != null && (
-                    <ReferenceDot
-                      x={sorted.findIndex(p => p.power_watts === results.lt1_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt1_power)].stage_number : sorted[0].stage_number}
-                      y={hrAtLT1}
-                      r={6}
-                      fill="#f59e0b"
-                      stroke="#fff"
-                      strokeWidth={1.5}
-                      label={{ value: 'LT1', fill: '#f59e0b', fontSize: 11, position: 'top' }}
-                    />
-                  )}
-                  {hrAtLT2 != null && results.lt2_power != null && (
-                    <ReferenceDot
-                      x={sorted.findIndex(p => p.power_watts === results.lt2_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt2_power)].stage_number : sorted[sorted.length - 1].stage_number}
-                      y={hrAtLT2}
-                      r={6}
-                      fill="#dc2626"
-                      stroke="#fff"
-                      strokeWidth={1.5}
-                      label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }}
-                    />
-                  )}
-                  <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
-                    label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
-                </LineChart>
-              </ResponsiveContainer>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                HR lags behind load in short stages — the last-30s window helps capture steady-state HR.
-              </p>
             </SectionCard>
           )}
 
