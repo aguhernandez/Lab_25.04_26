@@ -89,15 +89,6 @@ export const NAVIGATION_MENU: MenuItem[] = [
     section: 'Monitoring',
   },
   {
-    labelKey: 'nav.evaluations',
-    path: '/evaluations',
-    icon: 'Activity',
-    description: 'Metabolic tests and evaluations',
-    allowedRoles: ['admin', 'coach'],
-    scope: 'admin: all tests | coach: tests for assigned athletes',
-    section: 'Management',
-  },
-  {
     labelKey: 'nav.reports',
     path: '/reports',
     icon: 'FileDown',
