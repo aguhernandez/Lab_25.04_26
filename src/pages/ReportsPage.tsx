@@ -4,12 +4,13 @@ import { supabase } from '../lib/supabase';
 import { useLanguage } from '../contexts/LanguageContext';
 import AthleteSelector from '../components/AthleteSelector';
 import ReportBuilder from '../components/reports/ReportBuilder';
-import type { Athlete, Test, TestDataPoint } from '../types';
+import type { Athlete, Test, TestDataPoint, TrainingZone } from '../types';
 import type { PhysiologyResults } from '../lib/physiology';
 import type { AdvancedMetrics } from '../types';
 import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
 import type { ReportData, ReportSection, ReportType } from '../lib/reportGenerator';
 import { buildTrainingZonesData } from '../lib/trainingZones';
+import { fetchAthleteTrainingZones } from '../lib/physiologyProfile';
 import type { AthletePhysiologyProfile } from '../lib/physiologyProfile';
 import type { PreTestData } from '../lib/labSession';
 
@@ -45,6 +46,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
   const [tests, setTests] = useState<TestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [manualZones, setManualZones] = useState<TrainingZone[] | null>(null);
   const defaultType: ReportType = 'custom';
   const defaultSections: ReportSection[] | undefined = undefined;
 
@@ -301,6 +303,23 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
       physiologyResults = buildPhysiologyFromProfile(physiologyProfileRow as AthletePhysiologyProfile);
     }
 
+    // Fetch athlete training zones. If manually overridden, those zones are
+    // authoritative and must override the test-calculated zones everywhere.
+    const trainingZones = await fetchAthleteTrainingZones(athlete.id);
+    if (trainingZones?.mode === 'manual_override' && trainingZones.heart_rate_zones?.length > 0) {
+      const overrideZones = trainingZones.heart_rate_zones as TrainingZone[];
+      setManualZones(overrideZones);
+      if (physiologyResults) {
+        physiologyResults.training_zones = overrideZones;
+        if (physiologyResults.zones_data) {
+          physiologyResults.zones_data.zones5 = overrideZones as any;
+          physiologyResults.zones_data.defaultDisplay = '5';
+        }
+      }
+    } else {
+      setManualZones(null);
+    }
+
     const anthropometryMeasurement = (anthroRows?.[0] as AnthropometryMeasurement) ?? null;
     const kerrResults = (kerrRow?.[0] as KerrResults) ?? null;
 
@@ -462,6 +481,7 @@ export default function ReportsPage({ initialAthlete }: ReportsPageProps) {
           data={reportData}
           defaultType={defaultType}
           defaultSections={defaultSections}
+          manualTrainingZones={manualZones ?? undefined}
         />
       </div>
     );
