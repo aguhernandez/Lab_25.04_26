@@ -60,6 +60,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
   const [anthropometryNotes, setAnthropometryNotes] = useState('');
   const [includePhysiologyNotes, setIncludePhysiologyNotes] = useState(true);
   const [includeAnthropometryNotes, setIncludeAnthropometryNotes] = useState(true);
+  const [includePhantomZScores, setIncludePhantomZScores] = useState(true);
   const [useManualZones, setUseManualZones] = useState(
     !!(manualTrainingZones && manualTrainingZones.length > 0)
   );
@@ -164,6 +165,7 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
         zoneDisplayMode,
         charts: chartSelections.some(c => c.enabled) ? chartSelections : undefined,
         includeHRDrift,
+        includePhantomZScores,
       });
     } finally {
       setGenerating(false);
@@ -519,6 +521,33 @@ export default function ReportBuilder({ data, defaultType = 'custom', defaultSec
               </div>
             </div>
           </div>
+
+          {data.kerrResults && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Phantom Z-scores</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Include or exclude the Phantom reference analysis</p>
+              </div>
+              <div className="p-5">
+                <button
+                  type="button"
+                  onClick={() => setIncludePhantomZScores(value => !value)}
+                  className="flex items-center gap-3 cursor-pointer"
+                >
+                  <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border-2 transition-colors ${includePhantomZScores ? 'bg-[#fdda36] border-[#fdda36]' : 'border-gray-300 dark:border-gray-500'}`}>
+                    {includePhantomZScores && (
+                      <svg className="w-2.5 h-2.5 text-[#514163]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                    {includePhantomZScores ? 'Included in report' : 'Excluded from report'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {hasManualZones && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">

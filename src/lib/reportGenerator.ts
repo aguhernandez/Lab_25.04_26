@@ -198,6 +198,7 @@ export interface ReportOptions {
   zoneDisplayMode?: ZoneDisplayMode;
   charts?: ChartSelection[];
   includeHRDrift?: boolean;
+  includePhantomZScores?: boolean;
 }
 
 export interface ReportData {
@@ -1379,6 +1380,46 @@ function renderAnthropometry(b: PDFBuilder, data: ReportData, _style: ReportStyl
 
   drawPieChart(b, components, totalMass);
 
+  const sum6 = computeSum6Skinfolds(data);
+  b.spacer(4);
+  b.checkPage(52);
+
+  const keyMetrics = [
+    { label: 'Muscle/Bone Ratio', value: k.muscle_bone_ratio.toFixed(2), bg: '#ECFDF5', border: '#6EE7B7', textC: '#065F46' },
+    { label: 'Ballast Index', value: `${k.ballast_index.toFixed(1)}%`, bg: '#EFF6FF', border: '#BFDBFE', textC: '#1E40AF' },
+  ];
+  const keyMetricW = (b.cw - 3) / 2;
+  keyMetrics.forEach((metric, i) => {
+    const x = b.ml + i * (keyMetricW + 3);
+    const [bgR, bgG, bgB] = hexToRgb(metric.bg);
+    const [borderR, borderG, borderB] = hexToRgb(metric.border);
+    b.doc.setFillColor(bgR, bgG, bgB);
+    b.doc.setDrawColor(borderR, borderG, borderB);
+    b.doc.setLineWidth(0.4);
+    b.doc.roundedRect(x, b.y, keyMetricW, 22, 2, 2, 'FD');
+    b.doc.setFontSize(7);
+    b.doc.setFont('helvetica', 'normal');
+    b.textColor(metric.textC);
+    b.doc.text(metric.label, x + 3, b.y + 6);
+    b.doc.setFontSize(11);
+    b.doc.setFont('helvetica', 'bold');
+    b.doc.text(metric.value, x + 3, b.y + 16);
+  });
+  b.y += 26;
+
+  b.checkPage(16);
+  const [sumBgR, sumBgG, sumBgB] = hexToRgb('#FFFBEB');
+  const [sumBorderR, sumBorderG, sumBorderB] = hexToRgb('#FCD34D');
+  b.doc.setFillColor(sumBgR, sumBgG, sumBgB);
+  b.doc.setDrawColor(sumBorderR, sumBorderG, sumBorderB);
+  b.doc.setLineWidth(0.4);
+  b.doc.roundedRect(b.ml, b.y, b.cw, 14, 2, 2, 'FD');
+  b.doc.setFontSize(8);
+  b.doc.setFont('helvetica', 'bold');
+  b.textColor('#92400E');
+  b.doc.text(`Sum 6 Skinfolds: ${sum6 !== null ? `${sum6.toFixed(1)} mm` : '—'}`, b.ml + 4, b.y + 9);
+  b.y += 18;
+
   b.spacer(6);
 
   const cardItems: Array<{ label: string; value: string; unit?: string }> = [
@@ -1407,7 +1448,8 @@ function computeSum6Skinfolds(data: ReportData): number | null {
   return null;
 }
 
-function renderAnthropometryResults(b: PDFBuilder, data: ReportData) {
+function renderAnthropometryResults(b: PDFBuilder, data: ReportData, options: ReportOptions) {
+  if (options.includePhantomZScores === false) return;
   b.sectionHeader(tr('secAnthroResults'));
   const k = data.kerrResults;
   if (!k) { b.paragraph(tr('noKerrData')); return; }
@@ -2627,7 +2669,7 @@ const SECTION_RENDERERS: Partial<Record<ReportSection, SectionRenderer>> = {
   economy_metrics: (b, data, opts) => renderEconomy(b, data, opts),
   vo2_comparison: (b, data) => renderVO2Comparison(b, data),
   anthropometry: (b, data, opts) => renderAnthropometry(b, data, opts.style),
-  anthropometry_results: (b, data) => renderAnthropometryResults(b, data),
+  anthropometry_results: (b, data, opts) => renderAnthropometryResults(b, data, opts),
   anthropometry_targets: (b, data) => renderAnthropometryTargets(b, data),
   isak_details: (b, data) => renderISAKDetails(b, data),
   anthropometry_comparison: (b, data) => renderAnthropometryComparison(b, data),
