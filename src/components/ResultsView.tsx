@@ -898,14 +898,48 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           athlete={athlete}
           test={test}
           onClose={() => setShowEditData(false)}
-          onRecalculate={() => {
+          onRecalculate={async () => {
             setShowEditData(false);
-            // After editing raw data, trigger a recalculation flow
-            const calc = doCalculation();
-            if (calc) {
-              setPendingResults(calc.results);
-              setPendingAdvanced(calc.advanced);
-              setShowRecalculateConfirm(true);
+            // Reload test + data points from DB so manual threshold overrides
+            // and edited raw data are included in the recalculation.
+            try {
+              const { data: freshTest } = await supabase
+                .from('tests')
+                .select('*')
+                .eq('id', testId)
+                .maybeSingle();
+              const { data: freshPoints } = await supabase
+                .from('test_data_points')
+                .select('*')
+                .eq('test_id', testId)
+                .order('stage_number', { ascending: true });
+
+              if (freshTest) setTest(freshTest as Test);
+              if (freshPoints) setDataPoints(freshPoints as TestDataPoint[]);
+
+              // Calculate inline with fresh data instead of stale doCalculation
+              if (freshTest && athlete && (freshPoints?.length ?? 0) > 0) {
+                const ft = freshTest as Test;
+                const athleteForCalc = { ...athlete };
+                if (ft.anthropometry_snapshot) {
+                  athleteForCalc.weight_kg = ft.anthropometry_snapshot.weight_kg;
+                  athleteForCalc.height_cm = ft.anthropometry_snapshot.height_cm;
+                  athleteForCalc.sex = ft.anthropometry_snapshot.sex;
+                  athleteForCalc.body_fat_percent = ft.anthropometry_snapshot.bodyFatPercent;
+                  athleteForCalc.lean_body_mass_kg = ft.anthropometry_snapshot.leanBodyMassKg;
+                  const birthYear = new Date().getFullYear() - ft.anthropometry_snapshot.age;
+                  athleteForCalc.date_of_birth = `${birthYear}-01-01`;
+                }
+                const overrides = ft.anthropometry_snapshot?.threshold_overrides;
+                const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], overrides);
+                const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults);
+                setPendingResults(calcResults);
+                setPendingAdvanced(calcAdvanced);
+                setShowRecalculateConfirm(true);
+              }
+            } catch (err) {
+              console.error('Failed to reload test data after edit:', err);
+              setToast({ message: 'Failed to reload edited data. Please try again.', type: 'error' });
             }
           }}
         />
