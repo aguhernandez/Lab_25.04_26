@@ -171,16 +171,6 @@ Deno.serve(async (req: Request) => {
       supabase.from("biochemical_tests").select("*").eq("athlete_id", athlete_id).order("test_date", { ascending: false }),
     ]);
 
-    let anthropometryMeasurement: Record<string, unknown> | null = null;
-    if (anthroProfile?.measurement_id) {
-      const { data: measurement } = await supabase
-        .from("anthropometry_measurements")
-        .select("*")
-        .eq("id", anthroProfile.measurement_id)
-        .maybeSingle();
-      anthropometryMeasurement = measurement;
-    }
-
     let fvReps: Array<Record<string, unknown>> = [];
     if (fvSession?.id) {
       const { data: reps } = await supabase
@@ -450,7 +440,6 @@ Deno.serve(async (req: Request) => {
 
       anthropometry: {
         raw_kerr_results: kerrData,
-        measurement: anthropometryMeasurement,
         profile: anthroProfile,
         composition_chart: kerrData ? {
           type: "pie",
