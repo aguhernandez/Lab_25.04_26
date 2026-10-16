@@ -1,0 +1,2 @@
+[functions.push-to-hub]
+verify_jwt = false

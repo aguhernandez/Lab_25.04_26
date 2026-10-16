@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: athlete, error: athleteError } = await supabase
       .from("athletes")
-      .select("id, name, sport, email, hub_user_id, weight_kg, height_cm, body_fat_percent, lean_body_mass_kg")
+      .select("*")
       .eq("id", athlete_id)
       .maybeSingle();
 
@@ -79,54 +79,36 @@ Deno.serve(async (req: Request) => {
       heatProfileResult,
       heatSessionResult,
       fvSessionResult,
+      biochemicalResult,
+      readinessResult,
     ] = await Promise.all([
       supabase
         .from("athlete_physiology_profiles")
-        .select(`
-          id, last_test_date, last_test_id,
-          vo2max_relative_ml_kg_min,
-          lt1_hr, lt1_power, lt1_pace,
-          lt2_hr, lt2_power, lt2_pace,
-          fatmax_hr, fatmax_power,
-          vam_kmh, pam_watts, hrmax,
-          physiology_zones
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .maybeSingle(),
 
       supabase
         .from("athlete_anthropometry_profiles")
-        .select("weight_kg, height_cm, body_fat_percent, muscle_mass_kg, bone_mass_kg, adipose_mass_kg, measurement_id")
+        .select("*")
         .eq("athlete_id", athlete_id)
         .maybeSingle(),
 
       supabase
         .from("athlete_training_zones")
-        .select("heart_rate_zones, power_zones, pace_zones, physiology_reference")
+        .select("mode, heart_rate_zones, power_zones, pace_zones, physiology_reference")
         .eq("athlete_id", athlete_id)
         .maybeSingle(),
 
       supabase
         .from("athlete_hydration_profiles")
-        .select(`
-          last_session_date, last_percent_dehydration, last_sweat_rate_l_h,
-          last_hydration_stress_score, last_classification,
-          last_temperature_c, last_humidity_percent,
-          average_sweat_rate_l_h, max_observed_dehydration_percent,
-          total_sessions, baseline_usg
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .maybeSingle(),
 
       supabase
         .from("athlete_hydration_sessions")
-        .select(`
-          session_date, pre_weight_kg, post_weight_kg, fluid_intake_ml, urine_output_ml,
-          duration_min, temperature_c, humidity_percent, avg_hr, rpe,
-          usg_pre, usg_post, adjusted_sweat_loss_kg, percent_dehydration,
-          sweat_rate_l_h, heat_stress_factor, hydration_stress_score,
-          stress_classification, usg_classification, usg_post_classification, notes
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .order("session_date", { ascending: false })
         .limit(1)
@@ -134,25 +116,13 @@ Deno.serve(async (req: Request) => {
 
       supabase
         .from("athlete_heat_profiles")
-        .select(`
-          total_sessions, baseline_cardiac_load, latest_cardiac_load, cardiac_load_trend,
-          baseline_hr_drift, latest_hr_drift, hr_drift_trend,
-          baseline_rpe, latest_rpe, rpe_trend,
-          avg_sweat_rate_l_h, latest_sweat_rate_l_h,
-          adaptation_score, adaptation_classification, last_session_date
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .maybeSingle(),
 
       supabase
         .from("athlete_heat_sessions")
-        .select(`
-          session_date, temperature_c, humidity_percent, sport, duration_min,
-          avg_hr, hr_first_half, hr_second_half, external_load, load_unit,
-          pre_weight_kg, post_weight_kg, fluid_intake_ml,
-          percent_dehydration, sweat_rate_l_h, rpe,
-          heat_cardiac_load, hr_drift_percent, heat_adaptation_score, notes
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .order("session_date", { ascending: false })
         .limit(1)
@@ -160,12 +130,25 @@ Deno.serve(async (req: Request) => {
 
       supabase
         .from("fv_sessions")
-        .select(`
-          id, session_date, exercise, sport, notes,
-          f0, v0, pmax, fv_slope, r_squared, body_mass_kg
-        `)
+        .select("*")
         .eq("athlete_id", athlete_id)
         .order("session_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("biochemical_tests")
+        .select("*")
+        .eq("athlete_id", athlete_id)
+        .order("test_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+
+      supabase
+        .from("athlete_readiness_snapshots")
+        .select("*")
+        .eq("athlete_id", athlete_id)
+        .order("computed_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
     ]);
@@ -178,6 +161,25 @@ Deno.serve(async (req: Request) => {
     const heatProfile = heatProfileResult.data;
     const heatSession = heatSessionResult.data;
     const fvSession = fvSessionResult.data;
+    const biochemicalTest = biochemicalResult.data;
+    const readinessSnapshot = readinessResult.data;
+
+    const [hydrationHistoryResult, heatHistoryResult, fvHistoryResult, biochemicalHistoryResult] = await Promise.all([
+      supabase.from("athlete_hydration_sessions").select("*").eq("athlete_id", athlete_id).order("session_date", { ascending: false }),
+      supabase.from("athlete_heat_sessions").select("*").eq("athlete_id", athlete_id).order("session_date", { ascending: false }),
+      supabase.from("fv_sessions").select("*").eq("athlete_id", athlete_id).order("session_date", { ascending: false }),
+      supabase.from("biochemical_tests").select("*").eq("athlete_id", athlete_id).order("test_date", { ascending: false }),
+    ]);
+
+    let anthropometryMeasurement: Record<string, unknown> | null = null;
+    if (anthroProfile?.measurement_id) {
+      const { data: measurement } = await supabase
+        .from("anthropometry_measurements")
+        .select("*")
+        .eq("id", anthroProfile.measurement_id)
+        .maybeSingle();
+      anthropometryMeasurement = measurement;
+    }
 
     let fvReps: Array<Record<string, unknown>> = [];
     if (fvSession?.id) {
@@ -212,7 +214,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: result } = await supabase
         .from("test_results")
-        .select("advanced_metrics, training_zones, coach_notes")
+        .select("*")
         .eq("test_id", physProfile.last_test_id)
         .maybeSingle();
 
@@ -223,11 +225,7 @@ Deno.serve(async (req: Request) => {
     if (anthroProfile?.measurement_id) {
       const { data: kerr } = await supabase
         .from("anthropometry_kerr_results")
-        .select(`
-          adipose_mass_kg, muscle_mass_kg, bone_mass_kg, residual_mass_kg, skin_mass_kg,
-          adipose_mass_z_score, muscle_mass_z_score, bone_mass_z_score,
-          sum_6_skinfolds, index_muscle_bone
-        `)
+        .select("*")
         .eq("measurement_id", anthroProfile.measurement_id)
         .maybeSingle();
       kerrData = kerr;
@@ -345,6 +343,24 @@ Deno.serve(async (req: Request) => {
       ];
     }
 
+    const manualZones = trainingZones?.mode === "manual_override"
+      ? normalizeHubZones(trainingZones.heart_rate_zones as unknown[])
+      : [];
+    const manualPowerZones = trainingZones?.mode === "manual_override"
+      ? normalizeHubZones(trainingZones.power_zones as unknown[])
+      : [];
+    const manualPaceZones = trainingZones?.mode === "manual_override"
+      ? normalizeHubZones(trainingZones.pace_zones as unknown[])
+      : [];
+    const manualZoneSet = manualZones.length === 5 || manualZones.length === 7 ? manualZones : null;
+    const hubZones7 = manualZoneSet?.length === 7 ? manualZoneSet : hrZones7;
+    const hubZones5 = manualZoneSet?.length === 5 ? manualZoneSet : hrZones5;
+    const hubPowerZones7 = manualPowerZones.length === 7 ? manualPowerZones : pwrZones7;
+    const hubPowerZones5 = manualPowerZones.length === 5 ? manualPowerZones : pwrZones5;
+    const hubPaceZones = manualPaceZones.length > 0 ? manualPaceZones : null;
+    const hubRpeZones7 = manualZoneSet?.length === 7 ? manualZoneSet : rpeZones7;
+    const hubRpeZones5 = manualZoneSet?.length === 5 ? manualZoneSet : rpeZones5;
+
     const weightKg = (anthroProfile?.weight_kg ?? athlete.weight_kg) as number | null;
     const heightCm = (anthroProfile?.height_cm ?? athlete.height_cm) as number | null;
     const bodyFatPct = (anthroProfile?.body_fat_percent ?? athlete.body_fat_percent) as number | null;
@@ -381,6 +397,9 @@ Deno.serve(async (req: Request) => {
       notes: (testResults?.coach_notes as string | null) ?? null,
 
       physiological: {
+        profile: physProfile,
+        test_results: testResults,
+        advanced_metrics: advancedMetrics,
         vo2max: physProfile?.vo2max_relative_ml_kg_min ?? null,
         lt1_power: physProfile?.lt1_power ?? null,
         lt2_power: physProfile?.lt2_power ?? null,
@@ -392,26 +411,58 @@ Deno.serve(async (req: Request) => {
         running_threshold_pace: (physProfile?.lt2_pace ?? physProfile?.lt1_pace ?? null) as string | null,
         vam: vam,
         pam: pamWattsPerKg,
+        vam_kmh: physProfile?.vam_kmh ?? null,
+        pam_watts: physProfile?.pam_watts ?? null,
+        hrmax: physProfile?.hrmax ?? computedHRmax,
+        fatmax_hr: physProfile?.fatmax_hr ?? null,
+        fatmax_power: physProfile?.fatmax_power ?? null,
+        lt1_pace: physProfile?.lt1_pace ?? null,
+        lt2_pace: physProfile?.lt2_pace ?? null,
+        thresholds: {
+          lt1: { hr: physProfile?.lt1_hr ?? null, power: physProfile?.lt1_power ?? null, pace: physProfile?.lt1_pace ?? null },
+          lt2: { hr: physProfile?.lt2_hr ?? null, power: physProfile?.lt2_power ?? null, pace: physProfile?.lt2_pace ?? null },
+          vt1: (advancedMetrics.vt1 ?? null) as unknown,
+          vt2: (advancedMetrics.vt2 ?? null) as unknown,
+          ftp: extractFTP(physProfile?.lt2_power as number | null, physProfile?.pam_watts as number | null, advancedMetrics),
+          critical_power: (advancedMetrics.critical_power ?? null) as number | null,
+          anaerobic_capacity_kj: (advancedMetrics.anaerobic_capacity_kj ?? advancedMetrics.w_prime_kj ?? null) as number | null,
+        },
         training_zones: {
           base_method: "LT1_LT2_physiological",
           zones7: {
-            hr: hrZones7,
-            power: pwrZones7,
-            rpe: rpeZones7,
+            hr: hubZones7,
+            power: hubPowerZones7,
+            rpe: hubRpeZones7,
           },
           zones5: {
-            hr: hrZones5,
-            power: pwrZones5,
-            rpe: rpeZones5,
+            hr: hubZones5,
+            power: hubPowerZones5,
+            rpe: hubRpeZones5,
           },
           default_display: "5",
         },
-        power_zones_json: pwrZones5 ?? pwrZones7,
-        hr_zones_json: hrZones5,
-        rpe_zones_json: rpeZones5,
+        power_zones_json: hubPowerZones5 ?? hubPowerZones7,
+        hr_zones_json: hubZones5,
+        rpe_zones_json: hubRpeZones5,
+        pace_zones_json: hubPaceZones,
+        source: trainingZones?.mode === "manual_override" ? "manual_override" : "physiology_based",
       },
 
       anthropometry: {
+        raw_kerr_results: kerrData,
+        measurement: anthropometryMeasurement,
+        profile: anthroProfile,
+        composition_chart: kerrData ? {
+          type: "pie",
+          total_mass_kg: kerrData.structured_weight_kg ?? weightKg,
+          components: [
+            { name: "Muscle", kg: kerrData.muscle_mass_kg ?? null, percent: kerrData.muscle_mass_pct ?? null },
+            { name: "Adipose", kg: kerrData.adipose_mass_kg ?? null, percent: kerrData.adipose_mass_pct ?? null },
+            { name: "Bone", kg: kerrData.bone_mass_kg ?? null, percent: kerrData.bone_mass_pct ?? null },
+            { name: "Residual", kg: kerrData.residual_mass_kg ?? null, percent: kerrData.residual_mass_pct ?? null },
+            { name: "Skin", kg: kerrData.skin_mass_kg ?? null, percent: kerrData.skin_mass_pct ?? null },
+          ],
+        } : null,
         height_cm: heightCm,
         weight_kg: weightKg,
         body_fat_percent: bodyFatPct,
@@ -419,34 +470,54 @@ Deno.serve(async (req: Request) => {
         lean_mass_kg: leanMassKg,
         bone_mass_kg: boneMassKg,
         skinfold_sum_6: (kerrData?.sum_6_skinfolds ?? null) as number | null,
-        muscle_bone_index: (kerrData?.index_muscle_bone ?? null) as number | null,
+        muscle_bone_index: (kerrData?.muscle_bone_ratio ?? kerrData?.index_muscle_bone ?? null) as number | null,
+        muscle_bone_ratio: (kerrData?.muscle_bone_ratio ?? null) as number | null,
+        ballast_index: (kerrData?.ballast_index ?? null) as number | null,
+        adipose_muscle_ratio: (kerrData?.adipose_muscle_ratio ?? null) as number | null,
+        sum_6_skinfolds_mm: (kerrData?.sum_6_skinfolds ?? null) as number | null,
         z_adipose: (kerrData?.adipose_mass_z_score ?? null) as number | null,
         z_muscle: (kerrData?.muscle_mass_z_score ?? null) as number | null,
         z_bone: (kerrData?.bone_mass_z_score ?? null) as number | null,
       },
+
+      biochemical_lab: {
+        latest: biochemicalTest,
+        history: biochemicalHistoryResult.data ?? [],
+      },
+
+      readiness: readinessSnapshot,
 
       athletic_profile: {
         training_age_years: (advancedMetrics.training_age_years ?? null) as number | null,
         athlete_level: deriveAthleteLevel(physProfile?.vo2max_relative_ml_kg_min as number | null, athlete.sport as string),
       },
 
-      hydration: hydrationSession ? {
-        evaluation_date: hydrationSession.session_date,
-        sweat_rate_l_h: hydrationSession.sweat_rate_l_h,
-        percent_dehydration: hydrationSession.percent_dehydration,
+      hydration: hydrationSession || hydrationProfile ? {
+        profile: hydrationProfile,
+        session: hydrationSession,
+        history: hydrationHistoryResult.data ?? [],
+        evaluation_date: hydrationSession?.session_date ?? hydrationProfile?.last_session_date ?? null,
+        sweat_rate_l_h: hydrationSession?.sweat_rate_l_h ?? null,
+        percent_dehydration: hydrationSession?.percent_dehydration ?? null,
         average_sweat_rate_l_h: hydrationProfile?.average_sweat_rate_l_h ?? null,
-        temperature_c: hydrationSession.temperature_c,
-        humidity_percent: hydrationSession.humidity_percent,
+        temperature_c: hydrationSession?.temperature_c ?? null,
+        humidity_percent: hydrationSession?.humidity_percent ?? null,
       } : null,
 
-      heat_adaptation: heatSession ? {
-        evaluation_date: heatSession.session_date,
-        heat_adaptation_score: heatSession.heat_adaptation_score,
+      heat_adaptation: heatSession || heatProfile ? {
+        profile: heatProfile,
+        session: heatSession,
+        history: heatHistoryResult.data ?? [],
+        evaluation_date: heatSession?.session_date ?? heatProfile?.last_session_date ?? null,
+        heat_adaptation_score: heatSession?.heat_adaptation_score ?? null,
         adaptation_classification: heatProfile?.adaptation_classification ?? null,
         total_sessions: heatProfile?.total_sessions ?? null,
       } : null,
 
       force_velocity: fvSession ? {
+        session: fvSession,
+        history: fvHistoryResult.data ?? [],
+        repetitions: fvReps,
         evaluation_date: fvSession.session_date,
         exercise: fvSession.exercise,
         f0_n: fvF0,
@@ -460,6 +531,12 @@ Deno.serve(async (req: Request) => {
         optimal_velocity_ms: fvV0 != null ? parseFloat((fvV0 / 2).toFixed(2)) : null,
         fv_imbalance_percent: computeFVImbalance(fvF0, fvV0, fvBodyMass),
         fv_imbalance_direction: computeFVDirection(fvF0, fvV0, fvBodyMass),
+      } : null,
+
+      neuromuscular_lab: fvSession ? {
+        session: fvSession,
+        history: fvHistoryResult.data ?? [],
+        repetitions: fvReps,
       } : null,
     };
 
@@ -509,9 +586,11 @@ Deno.serve(async (req: Request) => {
         modules_sent: {
           physiological: passport.physiological.vo2max !== null || passport.physiological.lt1_hr !== null,
           anthropometry: passport.anthropometry.weight_kg !== null,
+          biochemical_lab: passport.biochemical_lab !== null,
+          readiness: passport.readiness !== null,
           hydration: passport.hydration !== null,
           heat_adaptation: passport.heat_adaptation !== null,
-          force_velocity: passport.force_velocity !== null,
+          neuromuscular_lab: passport.neuromuscular_lab !== null,
         },
         hub_response: hubResponseBody,
       }),
@@ -525,6 +604,25 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+function normalizeHubZones(zones: unknown[]): Array<Record<string, unknown>> {
+  return zones.map((zone, index) => {
+    const value = zone as Record<string, unknown>;
+    return {
+      zone: value.zone ?? index + 1,
+      name: value.name ?? `Zone ${value.zone ?? index + 1}`,
+      description: value.description ?? null,
+      min_bpm: value.min_bpm ?? value.hr_min ?? null,
+      max_bpm: value.max_bpm ?? value.hr_max ?? null,
+      min_watts: value.min_watts ?? value.power_min ?? null,
+      max_watts: value.max_watts ?? value.power_max ?? null,
+      min_pace: value.min_pace ?? value.pace_min ?? null,
+      max_pace: value.max_pace ?? value.pace_max ?? null,
+      rpe_min: value.rpe_min ?? null,
+      rpe_max: value.rpe_max ?? null,
+    };
+  });
+}
 
 function extractFTP(
   lt2Power: number | null,
