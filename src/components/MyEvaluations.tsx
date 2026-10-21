@@ -3,8 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import {
-  RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
 
 interface EvalSummary {
@@ -64,7 +63,7 @@ export default function MyEvaluations() {
   const [activeSection, setActiveSection] = useState<'lab' | 'anthropometry' | 'force-velocity' | 'hydration'>('lab');
 
   const tr: Record<string, Record<string, string>> = {
-    title: { en: 'My Evaluations', es: 'Mis Evaluaciones' },
+    title: { en: 'Passport history', es: 'Historial del pasaporte' },
     labSession: { en: 'Lab Session', es: 'Sesión de Lab' },
     anthropometry: { en: 'Anthropometry', es: 'Antropometría' },
     fvCurve: { en: 'Force-Power Curve', es: 'Curva Fuerza-Potencia' },
@@ -88,9 +87,9 @@ export default function MyEvaluations() {
     bone: { en: 'Bone Mass', es: 'Masa Ósea' },
     bmi: { en: 'BMI', es: 'IMC' },
     somatotype: { en: 'Somatotype', es: 'Somatotipo' },
-    noAnthro: { en: 'No anthropometry applied yet.', es: 'Sin antropometría aplicada aún.' },
-    noFV: { en: 'No force-velocity data yet.', es: 'Sin datos de fuerza-velocidad aún.' },
-    noHydration: { en: 'No hydration data yet.', es: 'Sin datos de hidratación aún.' },
+    noAnthro: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
+    noFV: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
+    noHydration: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
     sport: { en: 'Sport', es: 'Deporte' },
     date: { en: 'Date', es: 'Fecha' },
     cycling: { en: 'Cycling', es: 'Ciclismo' },
@@ -104,6 +103,10 @@ export default function MyEvaluations() {
     cm: { en: 'cm', es: 'cm' },
     weight: { en: 'Weight', es: 'Peso' },
     height: { en: 'Height', es: 'Talla' },
+    firstTest: { en: 'First available test', es: 'Primer test disponible' },
+    noComparable: { en: 'No comparable VO₂max value is available for the previous test.', es: 'No hay un VO₂max comparable disponible en el test anterior.' },
+    vo2Meaning: { en: 'VO₂max describes the maximum amount of oxygen your body can use during exercise.', es: 'VO₂máx describe la cantidad máxima de oxígeno que tu cuerpo puede utilizar durante el ejercicio.' },
+    technicalDetail: { en: 'Technical detail', es: 'Detalle técnico' },
   };
 
   const t = (key: string) => tr[key]?.[language] ?? tr[key]?.en ?? key;
@@ -199,12 +202,6 @@ export default function MyEvaluations() {
     vo2max: e.vo2max,
   }));
 
-  const somatoData = anthro ? [
-    { label: 'Endo', value: anthro.somatotype_endomorphy || 0 },
-    { label: 'Meso', value: anthro.somatotype_mesomorphy || 0 },
-    { label: 'Ecto', value: anthro.somatotype_ectomorphy || 0 },
-  ] : [];
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -270,7 +267,10 @@ export default function MyEvaluations() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {evals.map(ev => (
+              {evals.map((ev, index) => {
+                const previous = evals[index + 1];
+                const vo2Delta = ev.vo2max != null && previous?.vo2max != null ? ev.vo2max - previous.vo2max : null;
+                return (
                 <button
                   key={ev.testId}
                   onClick={() => setSelected(ev)}
@@ -318,15 +318,19 @@ export default function MyEvaluations() {
                       )}
                     </div>
                   </div>
+                  <p className="mt-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                    {vo2Delta == null ? (previous ? t('noComparable') : t('firstTest')) : `${vo2Delta > 0 ? '↑' : vo2Delta < 0 ? '↓' : '→'} ${Math.abs(vo2Delta).toFixed(1)} ml/kg/min ${vo2Delta > 0 ? (language === 'es' ? 'más' : 'higher') : vo2Delta < 0 ? (language === 'es' ? 'menos' : 'lower') : (language === 'es' ? 'sin cambio' : 'no change')} vs ${new Date(previous!.testDate).toLocaleDateString(language === 'es' ? 'es-AR' : 'en-US', { month: 'short', year: 'numeric' })}`}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{t('vo2Meaning')}</p>
                   {ev.training_zones && ev.training_zones.length > 0 && (
                     <div className="mt-3 flex gap-1">
-                      {ev.training_zones.slice(0, 5).map((_z, i) => (
+                      {ev.training_zones.map((_z, i) => (
                         <div key={i} className="flex-1 h-1.5 rounded-full" style={{ backgroundColor: ZONE_COLORS[i] || '#6b7280' }} />
                       ))}
                     </div>
                   )}
                 </button>
-              ))}
+              );})}
             </div>
           )}
         </div>
@@ -334,7 +338,7 @@ export default function MyEvaluations() {
 
       {activeSection === 'anthropometry' && (
         <div>
-          {anthro ? (
+          {anthro && (anthro.muscle_mass_kg != null || anthro.bone_mass_kg != null) ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
                 <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
@@ -342,12 +346,8 @@ export default function MyEvaluations() {
                 </h2>
                 <div className="space-y-3">
                   {[
-                    { label: t('weight'), value: anthro.weight_kg ? `${anthro.weight_kg} ${t('kg')}` : null },
-                    { label: t('height'), value: anthro.height_cm ? `${anthro.height_cm} ${t('cm')}` : null },
-                    { label: t('bodyFat'), value: anthro.body_fat_percent ? `${anthro.body_fat_percent.toFixed(1)}%` : null },
-                    { label: t('muscle'), value: anthro.muscle_mass_kg ? `${anthro.muscle_mass_kg.toFixed(1)} ${t('kg')}` : null },
-                    { label: t('bone'), value: anthro.bone_mass_kg ? `${anthro.bone_mass_kg.toFixed(2)} ${t('kg')}` : null },
-                    { label: t('bmi'), value: anthro.bmi ? `${anthro.bmi.toFixed(1)}` : null },
+                    { label: t('muscle'), value: anthro.muscle_mass_kg != null ? `${anthro.muscle_mass_kg.toFixed(1)} ${t('kg')}` : null },
+                    { label: t('bone'), value: anthro.bone_mass_kg != null ? `${anthro.bone_mass_kg.toFixed(1)} ${t('kg')}` : null },
                   ].filter(r => r.value).map((row, i) => (
                     <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-700/50 last:border-0">
                       <span className="text-sm text-gray-500 dark:text-gray-400">{row.label}</span>
@@ -362,32 +362,6 @@ export default function MyEvaluations() {
                 )}
               </div>
 
-              {(anthro.somatotype_endomorphy || anthro.somatotype_mesomorphy || anthro.somatotype_ectomorphy) && (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
-                  <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
-                    {t('somatotype')}
-                  </h2>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <RadarChart data={somatoData} cx="50%" cy="50%">
-                      <PolarGrid stroke="#e5e7eb" />
-                      <PolarAngleAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                      <Radar dataKey="value" stroke="#fdda36" fill="#fdda36" fillOpacity={0.25} strokeWidth={2} dot={{ fill: '#fdda36', r: 4 }} />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                  <div className="grid grid-cols-3 gap-3 mt-2">
-                    {[
-                      { label: 'Endo', value: anthro.somatotype_endomorphy },
-                      { label: 'Meso', value: anthro.somatotype_mesomorphy },
-                      { label: 'Ecto', value: anthro.somatotype_ectomorphy },
-                    ].map((s, i) => (
-                      <div key={i} className="text-center p-2 bg-gray-50 dark:bg-gray-700 rounded-xl">
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">{s.label}</p>
-                        <p className="text-lg font-bold text-gray-900 dark:text-white">{s.value?.toFixed(1) ?? '—'}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-12 text-center">
@@ -557,8 +531,13 @@ function EvalDetailModal({ eval: ev, onClose, t, sportLabel, language }: {
             ))}
           </div>
 
+          <p className="rounded-xl bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+            {t('vo2Meaning')}
+          </p>
+
           {ev.training_zones && ev.training_zones.length > 0 && (
-            <div>
+            <details className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100">{t('technicalDetail')}</summary>
               <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-3">{t('zones')}</h3>
               <div className="space-y-2">
                 {ev.training_zones.map((z, i) => {
@@ -581,7 +560,7 @@ function EvalDetailModal({ eval: ev, onClose, t, sportLabel, language }: {
                   );
                 })}
               </div>
-            </div>
+            </details>
           )}
 
           {ev.coach_notes && (

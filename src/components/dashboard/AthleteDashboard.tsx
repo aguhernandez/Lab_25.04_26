@@ -24,6 +24,10 @@ interface PhysiologyProfile {
   history: Array<{
     date: string;
     vo2max_relative_ml_kg_min: number | null;
+    lt1_hr?: number | null;
+    lt1_power?: number | null;
+    lt2_hr?: number | null;
+    lt2_power?: number | null;
   }> | null;
 }
 
@@ -59,7 +63,7 @@ interface ReadinessSnapshot {
   hydration_stress_score: number | null;
 }
 
-export default function AthleteDashboard() {
+export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: () => void }) {
   const { profile } = useAuth();
   const { language } = useLanguage();
   const [athlete, setAthlete] = useState<AthleteData | null>(null);
@@ -70,15 +74,15 @@ export default function AthleteDashboard() {
   const [loading, setLoading] = useState(true);
 
   const tr: Record<string, Record<string, string>> = {
-    welcome: { en: 'Welcome back', es: 'Bienvenido/a' },
+    welcome: { en: 'My passport', es: 'Mi pasaporte' },
     vo2max: { en: 'VO₂max', es: 'VO₂max' },
     lt1: { en: 'Aerobic Threshold', es: 'Umbral Aeróbico' },
     lt2: { en: 'Anaerobic Threshold', es: 'Umbral Anaeróbico' },
-    aerobicTrends: { en: 'VO₂max Trends', es: 'Tendencias VO₂max' },
+    aerobicTrends: { en: 'VO₂max history', es: 'Historial de VO₂max' },
     sweatRate: { en: 'Avg. Sweat Rate', es: 'Tasa de Sudoración' },
     trainingZones: { en: 'Training Zones', es: 'Zonas de Entrenamiento' },
-    noData: { en: 'No data available', es: 'Sin datos disponibles' },
-    noZones: { en: 'Complete an evaluation to see your zones', es: 'Completá una evaluación para ver tus zonas' },
+    noData: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
+    noZones: { en: 'Your zones will appear here after an evaluation.', es: 'Tus zonas aparecerán aquí cuando se complete una evaluación.' },
     bpm: { en: 'bpm', es: 'lpm' },
     mlkgmin: { en: 'ml/kg/min', es: 'ml/kg/min' },
     lh: { en: 'L/h', es: 'L/h' },
@@ -88,13 +92,20 @@ export default function AthleteDashboard() {
     triathlon: { en: 'Triathlon', es: 'Triatlón' },
     swimming: { en: 'Swimming', es: 'Natación' },
     bodyComposition: { en: 'Body Composition', es: 'Composición Corporal' },
-    bodyFat: { en: 'Body Fat', es: 'Grasa Corporal' },
     muscle: { en: 'Muscle', es: 'Músculo' },
-    bmi: { en: 'BMI', es: 'IMC' },
-    weight: { en: 'Weight', es: 'Peso' },
-    noAnthro: { en: 'No body composition data. Ask your coach to apply an anthropometry.', es: 'Sin datos de composición corporal. Pedile a tu entrenador que aplique una antropometría.' },
-    lastUpdate: { en: 'Last update', es: 'Última actualización' },
-    noProfile: { en: 'No physiological profile yet. Complete a lab session to see your data here.', es: 'Sin perfil fisiológico aún. Completá una sesión de laboratorio para ver tus datos aquí.' },
+    bone: { en: 'Bone mass', es: 'Masa ósea' },
+    noAnthro: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
+    lastUpdate: { en: 'Last test', es: 'Último test' },
+    noProfile: { en: 'No evaluated passport yet. Ask your professional about your next test.', es: 'Aún no hay un pasaporte evaluado. Consulta con tu profesional sobre tu próximo test.' },
+    changes: { en: 'What changed since your last test', es: 'Qué cambió desde tu último test' },
+    comparison: { en: 'vs previous snapshot', es: 'vs snapshot anterior' },
+    history: { en: 'Passport history', es: 'Historial del pasaporte' },
+    noPrevious: { en: 'This is your first available snapshot.', es: 'Este es el primer snapshot disponible.' },
+    noChange: { en: 'No comparable changes are available.', es: 'No hay cambios comparables disponibles.' },
+    vo2Meaning: { en: 'VO₂max describes the maximum amount of oxygen your body can use during exercise.', es: 'VO₂máx describe la cantidad máxima de oxígeno que tu cuerpo puede utilizar durante el ejercicio.' },
+    lt1Meaning: { en: 'LT1 is an intensity you can usually sustain comfortably for a long time.', es: 'LT1 es una intensidad que normalmente puedes sostener con comodidad durante bastante tiempo.' },
+    lt2Meaning: { en: 'LT2 marks a harder effort that is more demanding to sustain.', es: 'LT2 marca un esfuerzo más exigente y difícil de sostener durante mucho tiempo.' },
+    zonesMeaning: { en: 'Use these ranges to guide training intensity. Follow your professional’s plan.', es: 'Usa estos rangos para orientar la intensidad. Sigue el plan de tu profesional.' },
     readiness: { en: 'Athlete Readiness', es: 'Disposición del Atleta' },
     aerobic: { en: 'Aerobic', es: 'Aeróbico' },
     neuromuscular: { en: 'Neuromuscular', es: 'Neuromuscular' },
@@ -175,6 +186,10 @@ export default function AthleteDashboard() {
     : null;
 
   const zones = physiology?.physiology_zones || [];
+  const previousSnapshot = physiology?.history?.find((snapshot, index) => index > 0) ?? null;
+  const vo2Delta = physiology?.vo2max_relative_ml_kg_min != null && previousSnapshot?.vo2max_relative_ml_kg_min != null
+    ? physiology.vo2max_relative_ml_kg_min - previousSnapshot.vo2max_relative_ml_kg_min
+    : null;
 
   const sportLabel = (s: string) => {
     const map: Record<string, string> = { cycling: t('cycling'), running: t('running'), triathlon: t('triathlon'), swimming: t('swimming') };
@@ -191,7 +206,7 @@ export default function AthleteDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1">
             {t('welcome')}
@@ -204,6 +219,7 @@ export default function AthleteDashboard() {
               {sportLabel(athlete.sport)}
             </span>
           )}
+          {onViewHistory && <button type="button" onClick={onViewHistory} className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-[#514163]">{t('history')}</button>}
         </div>
         {physiology?.last_test_date && (
           <div className="text-right">
@@ -226,21 +242,37 @@ export default function AthleteDashboard() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 sm:p-6">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">{t('changes')}</h2>
+            {vo2Delta != null ? (
+              <p className="mt-3 text-sm text-gray-700 dark:text-gray-200 tabular-nums">
+                <span className="text-lg font-bold">{vo2Delta > 0 ? '+' : ''}{vo2Delta.toFixed(1)} ml/kg/min</span>
+                <span className="ml-2 text-gray-500 dark:text-gray-400">VO₂max {t('comparison')}</span>
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{previousSnapshot ? t('noChange') : t('noPrevious')}</p>
+            )}
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{t('vo2Meaning')}</p>
+          </section>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { label: 'VO₂max', value: physiology.vo2max_relative_ml_kg_min ? physiology.vo2max_relative_ml_kg_min.toFixed(1) : '—', unit: t('mlkgmin') },
-              { label: 'LT2', value: physiology.lt2_hr ? `${physiology.lt2_hr}` : '—', unit: t('bpm') },
+              { label: 'VO₂max', value: physiology.vo2max_relative_ml_kg_min != null ? physiology.vo2max_relative_ml_kg_min.toFixed(1) : null, unit: t('mlkgmin'), meaning: t('vo2Meaning') },
+              { label: 'LT1', value: physiology.lt1_hr != null ? `${physiology.lt1_hr}` : null, unit: t('bpm'), meaning: t('lt1Meaning') },
+              { label: 'LT2', value: physiology.lt2_hr != null ? `${physiology.lt2_hr}` : null, unit: t('bpm'), meaning: t('lt2Meaning') },
               {
                 label: physiology.pam_watts ? 'PAM' : physiology.vam_kmh ? 'VAM' : 'HRmax',
-                value: physiology.pam_watts ? `${physiology.pam_watts}` : physiology.vam_kmh ? physiology.vam_kmh.toFixed(1) : physiology.hrmax ? `${physiology.hrmax}` : '—',
+                value: physiology.pam_watts != null ? `${physiology.pam_watts}` : physiology.vam_kmh != null ? physiology.vam_kmh.toFixed(1) : physiology.hrmax != null ? `${physiology.hrmax}` : null,
                 unit: physiology.pam_watts ? 'W' : physiology.vam_kmh ? 'km/h' : t('bpm'),
+                meaning: t('zonesMeaning'),
               },
-              { label: t('sweatRate'), value: avgSweatRate ? avgSweatRate.toFixed(2) : '—', unit: t('lh') },
-            ].map((card, i) => (
+              ...(avgSweatRate != null ? [{ label: t('sweatRate'), value: avgSweatRate.toFixed(2), unit: t('lh'), meaning: t('zonesMeaning') }] : []),
+            ].filter(card => card.value != null).map((card, i) => (
               <div key={i} className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl p-4 text-white">
-                <p className="text-xs font-semibold uppercase tracking-wider text-white/60 mb-2">{card.label}</p>
-                <p className="text-3xl font-bold leading-none">{card.value}</p>
-                {card.value !== '—' && <p className="text-xs text-white/50 mt-1">{card.unit}</p>}
+                <p className="text-xs font-semibold uppercase tracking-wider text-white/80 mb-2">{card.label}</p>
+                <p className="text-3xl font-bold leading-none tabular-nums">{card.value} <span className="text-sm font-medium">{card.unit}</span></p>
+                {'power' in card && card.power != null && <p className="mt-1 text-sm tabular-nums">{card.power} W</p>}
+                <p className="mt-3 text-xs text-white/85">{card.meaning}</p>
               </div>
             ))}
           </div>
@@ -303,7 +335,7 @@ export default function AthleteDashboard() {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-44 flex items-center justify-center text-sm text-gray-300 dark:text-gray-600">
+                <div className="py-4 text-sm text-gray-600 dark:text-gray-300">
                   {t('noData')}
                 </div>
               )}
@@ -315,7 +347,7 @@ export default function AthleteDashboard() {
               </h2>
               {zones.length > 0 ? (
                 <div className="space-y-2">
-                  {zones.slice(0, 5).map((zone) => {
+              {zones.map((zone) => {
                     const zoneColors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
                     const color = zoneColors[zone.zone - 1] || '#6b7280';
                     const hrRange = zone.hr_min && zone.hr_max ? `${zone.hr_min}–${zone.hr_max} ${t('bpm')}` : null;
@@ -339,7 +371,7 @@ export default function AthleteDashboard() {
                   })}
                 </div>
               ) : (
-                <div className="h-44 flex items-center justify-center text-sm text-gray-300 dark:text-gray-600 text-center px-4">
+                <div className="py-3 text-sm text-gray-600 dark:text-gray-300">
                   {t('noZones')}
                 </div>
               )}
@@ -352,14 +384,12 @@ export default function AthleteDashboard() {
         <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
           {t('bodyComposition')}
         </h2>
-        {anthro ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {anthro && (anthro.muscle_mass_kg != null || anthro.bone_mass_kg != null) ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
-              { label: t('weight'), value: anthro.weight_kg ? String(anthro.weight_kg) : null, unit: 'kg' },
-              { label: t('bodyFat'), value: anthro.body_fat_percent ? anthro.body_fat_percent.toFixed(1) : null, unit: '%' },
-              { label: t('muscle'), value: anthro.muscle_mass_kg ? anthro.muscle_mass_kg.toFixed(1) : null, unit: 'kg' },
-              { label: t('bmi'), value: anthro.bmi ? anthro.bmi.toFixed(1) : null, unit: '' },
-            ].map((item, i) => (
+              { label: t('muscle'), value: anthro.muscle_mass_kg != null ? anthro.muscle_mass_kg.toFixed(1) : null, unit: 'kg' },
+              { label: t('bone'), value: anthro.bone_mass_kg != null ? anthro.bone_mass_kg.toFixed(1) : null, unit: 'kg' },
+            ].filter(item => item.value != null).map((item, i) => (
               <div key={i} className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4">
                 <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{item.label}</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white leading-none">{item.value ?? '—'}</p>

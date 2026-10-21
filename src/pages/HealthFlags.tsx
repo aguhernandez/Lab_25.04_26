@@ -150,41 +150,27 @@ export default function HealthFlags() {
           )}
 
           {flags.length > 0 ? (
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">{t('healthFlags.fromBiochemical')}</h3>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{selectedAthlete?.name}</p>
+            <details className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
+              <summary className="cursor-pointer text-sm font-semibold text-gray-900 dark:text-white">
+                {t('healthFlags.markerDetails')} ({flags.length})
+              </summary>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 mb-4">{selectedAthlete?.name}</p>
               <div className="space-y-2">
                 {flags.map(flag => (
-                  <div
-                    key={flag.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg border ${
-                      flag.status === 'red'
-                        ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
-                        : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800'
-                    }`}
-                  >
-                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                      flag.status === 'red' ? 'bg-red-500' : 'bg-amber-500'
-                    }`} />
+                  <div key={flag.id} className={`flex items-start gap-3 p-3 rounded-lg border ${flag.status === 'red' ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800'}`}>
+                    <div className={`mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 ${flag.status === 'red' ? 'bg-red-600' : 'bg-amber-600'}`} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {t(flag.markerLabelKey)}: {flag.value} {flag.unit}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {t(flag.domainLabelKey)}
-                      </p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{t(flag.markerLabelKey)}: {flag.value} {flag.unit}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-300">{t(flag.domainLabelKey)}</p>
+                      {flag.status !== 'green' && <p className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-200">{t('healthFlags.consultProfessional')}</p>}
                     </div>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      flag.status === 'red'
-                        ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                        : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                    }`}>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${flag.status === 'red' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
                       {t(statusConfig[flag.status].labelKey)}
                     </span>
                   </div>
                 ))}
               </div>
-            </div>
+            </details>
           ) : engineFlags.length === 0 ? (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-8 text-center">
               <div className="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-2xl flex items-center justify-center mx-auto mb-4">

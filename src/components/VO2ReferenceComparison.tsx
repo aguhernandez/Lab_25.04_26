@@ -63,12 +63,39 @@ export default function VO2ReferenceComparison({
   defaultSport,
   inline = false,
 }: VO2ReferenceComparisonProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const english = language === 'en';
   const [selectedSport, setSelectedSport] = useState<Sport>(defaultSport ?? 'cycling_road');
   const [selectedCategory, setSelectedCategory] = useState<PopulationCategory | 'all'>('all');
   const [compareTab, setCompareTab] = useState<CompareTab>('vo2');
   const [refs, setRefs] = useState<VO2Reference[]>([]);
   const [showCitations, setShowCitations] = useState(false);
+
+  const sportName = (sport: Sport) => english ? ({
+    cycling_road: 'Road cycling', cycling_mtb: 'Mountain biking (XCO)', cycling_track: 'Track cycling',
+    running_road: 'Road running / marathon', running_track: 'Track athletics', trail_running: 'Trail running',
+    swimming: 'Swimming', triathlon_olympic: 'Triathlon (Olympic)', triathlon_ironman: 'Triathlon (Ironman)', triathlon_long: 'Triathlon (long distance)',
+  } as Record<Sport, string>)[sport] : SPORT_LABELS[sport];
+  const categoryName = (category: PopulationCategory) => english
+    ? ({ active: 'Active (recreational)', amateur: 'Amateur (competitive)', professional: 'Professional / elite' } as Record<PopulationCategory, string>)[category]
+    : POPULATION_CATEGORY_LABELS[category];
+  const descriptor = (value: string) => {
+    if (!english) return value;
+    const replacements: Array<[RegExp, string]> = [
+      [/Africano Oriental/g, 'East African'], [/Keniano/g, 'Kenyan'], [/Etíope/g, 'Ethiopian'],
+      [/Español|Española/g, 'Spanish'], [/Francés|Francesa/g, 'French'], [/Italiano/g, 'Italian'], [/Suizo/g, 'Swiss'],
+      [/Noruego/g, 'Norwegian'], [/Alemán/g, 'German'], [/Sueco/g, 'Swedish'], [/Belga/g, 'Belgian'],
+      [/Europeo|Europea/g, 'European'], [/Americano/g, 'American'], [/Australiana|Australiano/g, 'Australian'],
+      [/Canadiense/g, 'Canadian'], [/Latinoamericano/g, 'Latin American'], [/Sudamericano/g, 'South American'],
+      [/Mixto/g, 'Mixed'], [/Internacional/g, 'International'], [/Olímpico/g, 'Olympic'],
+      [/Recreativo/g, 'Recreational'], [/Profesional/g, 'Professional'], [/Élite/g, 'Elite'],
+      [/Mundial/g, 'World Class'], [/Nacional/g, 'National'], [/Nivel/g, 'Level'],
+      [/Universitaria|Universitario/g, 'University'], [/Femenina/g, 'Women’s'], [/Masculino/g, 'Men’s'],
+      [/Sub-élite/g, 'sub-elite'], [/Larga Distancia/g, 'Long Distance'],
+    ];
+    return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), value);
+  };
+  const levelName = (level: CompetitiveLevel, original: string) => english ? descriptor(original || LEVEL_LABELS[level]) : original;
 
   useEffect(() => {
     loadRefs();
@@ -107,7 +134,7 @@ export default function VO2ReferenceComparison({
   if (refs.length === 0) {
     return (
       <div className="bg-gray-50 dark:bg-gray-700/40 rounded-xl p-4">
-        <p className="text-sm text-gray-500 dark:text-gray-400">{t('vo2ref.noData')} {SPORT_LABELS[selectedSport]} ({sex}).</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('vo2ref.noData')} {sportName(selectedSport)} ({sex}).</p>
       </div>
     );
   }
@@ -160,7 +187,7 @@ export default function VO2ReferenceComparison({
                 className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {sports.map(s => (
-                  <option key={s} value={s}>{SPORT_LABELS[s]}</option>
+                  <option key={s} value={s}>{sportName(s)}</option>
                 ))}
               </select>
             </div>
@@ -186,7 +213,7 @@ export default function VO2ReferenceComparison({
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${selectedCategory === cat ? CATEGORY_ACTIVE_COLORS[cat] : CATEGORY_COLORS[cat]}`}
                 >
-                  {POPULATION_CATEGORY_LABELS[cat]}
+                  {categoryName(cat)}
                 </button>
               ))}
             </div>
@@ -215,8 +242,8 @@ export default function VO2ReferenceComparison({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider opacity-60 mb-0.5">{t('vo2ref.closestLevel')}</p>
-                    <p className="text-base font-bold">{closestRef.level_label}</p>
-                    <p className="text-xs mt-0.5 opacity-80">{closestRef.sport_label} · {closestRef.population}</p>
+                    <p className="text-base font-bold">{levelName(closestRef.level, closestRef.level_label)}</p>
+                    <p className="text-xs mt-0.5 opacity-80">{sportName(closestRef.sport)} · {descriptor(closestRef.population)}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-xs font-medium opacity-60">{t('vo2ref.vsMean')} ({closestRef.vo2max_mean})</p>
@@ -266,7 +293,7 @@ export default function VO2ReferenceComparison({
                     return (
                       <span key={level} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium text-white" style={{ backgroundColor: LEVEL_COLORS[level] }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
-                        {LEVEL_LABELS[level]}
+                        {t(`vo2ref.level.${level}`)}
                       </span>
                     );
                   })}
@@ -290,14 +317,14 @@ export default function VO2ReferenceComparison({
                       <div className="w-1.5 flex-shrink-0 h-full rounded-full self-stretch" style={{ backgroundColor: LEVEL_COLORS[ref.level], minHeight: 40 }} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-semibold text-gray-900 dark:text-white">{ref.level_label}</span>
+                          <span className="text-xs font-semibold text-gray-900 dark:text-white">{levelName(ref.level, ref.level_label)}</span>
                           <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium border ${CATEGORY_COLORS[ref.population_category]}`}>
-                            {POPULATION_CATEGORY_LABELS[ref.population_category]}
+                            {categoryName(ref.population_category)}
                           </span>
                           {ref.is_custom && <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs rounded font-medium">{t('vo2ref.custom')}</span>}
                           {inRange && <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ backgroundColor: LEVEL_COLORS[ref.level] + '20', color: LEVEL_COLORS[ref.level] }}>{t('vo2ref.yourRange')}</span>}
                         </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{ref.population} · {ref.citation_short} ({ref.year})</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{descriptor(ref.population)} · {ref.citation_short} ({ref.year})</p>
                         {(ref.lactate_lt1_vo2_percent || ref.lactate_lt2_vo2_percent) && (
                           <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">
                             {ref.lactate_lt1_vo2_percent && `LT1: ${ref.lactate_lt1_vo2_percent}% VO2max`}
@@ -355,9 +382,9 @@ export default function VO2ReferenceComparison({
                       <div key={ref.id} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700">
                         <div className="flex items-center gap-2 flex-wrap mb-2">
                           <div className="w-1.5 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: LEVEL_COLORS[ref.level] }} />
-                          <span className="text-xs font-semibold text-gray-900 dark:text-white">{ref.level_label}</span>
+                          <span className="text-xs font-semibold text-gray-900 dark:text-white">{levelName(ref.level, ref.level_label)}</span>
                           <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium border ${CATEGORY_COLORS[ref.population_category]}`}>
-                            {POPULATION_CATEGORY_LABELS[ref.population_category]}
+                            {categoryName(ref.population_category)}
                           </span>
                           <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto">{ref.citation_short} ({ref.year})</span>
                         </div>
@@ -416,8 +443,8 @@ export default function VO2ReferenceComparison({
               {refs.map((ref) => (
                 <div key={ref.id} className="text-xs text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-600 last:border-0 pb-2 last:pb-0">
                   <span className="inline-block w-2 h-2 rounded-full mr-2 mb-0.5 align-middle" style={{ backgroundColor: LEVEL_COLORS[ref.level] }} />
-                  <strong>{ref.level_label}</strong> · {ref.citation}
-                  {ref.notes && <p className="ml-4 mt-0.5 italic text-gray-500 dark:text-gray-500">{ref.notes}</p>}
+                  <strong>{levelName(ref.level, ref.level_label)}</strong> · {ref.citation}
+                  {ref.notes && !english && <p className="ml-4 mt-0.5 italic text-gray-500 dark:text-gray-500">{ref.notes}</p>}
                 </div>
               ))}
             </div>

@@ -18,6 +18,7 @@ import Toast from './Toast';
 import VO2ReferenceComparison from './VO2ReferenceComparison';
 import EditDataModal from './EditDataModal';
 import { RefreshCw, Save, FileDown, Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ResultsViewProps {
   testId: string;
@@ -36,6 +37,7 @@ interface SavedSnapshot {
 }
 
 export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps) {
+  const { language } = useLanguage();
   const [test, setTest] = useState<Test | null>(null);
   const [athlete, setAthlete] = useState<Athlete | null>(null);
   const [dataPoints, setDataPoints] = useState<TestDataPoint[]>([]);
@@ -515,6 +517,19 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         </div>
       )}
 
+      {results.vo2max && (
+        <section aria-label="VO2max reference comparison" className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
+          <h2 className="mb-4 text-base font-bold text-gray-900 dark:text-white">
+            {language === 'es' ? 'Comparativa VO₂máx por deporte y disciplina' : 'VO₂max comparison by sport and discipline'}
+          </h2>
+          <VO2ReferenceComparison
+            vo2max={results.vo2max}
+            sex={(athlete.sex === 'male' || athlete.sex === 'female') ? athlete.sex : 'male'}
+            inline
+          />
+        </section>
+      )}
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden border border-gray-100 dark:border-gray-700">
         <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
           <div className="flex items-center gap-3">
@@ -856,13 +871,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           />
           <AdvancedData dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
         </>
-      )}
-
-      {results.vo2max && (
-        <VO2ReferenceComparison
-          vo2max={results.vo2max}
-          sex={(athlete.sex === 'male' || athlete.sex === 'female') ? athlete.sex : 'male'}
-        />
       )}
 
       <CoachNotes testId={test.id} />

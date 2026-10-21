@@ -6,13 +6,14 @@ import { Athlete } from '../types';
 
 interface DashboardProps {
   onViewAthlete?: (athlete: Athlete) => void;
+  onViewHistory?: () => void;
 }
 
-export default function Dashboard({ onViewAthlete }: DashboardProps) {
+export default function Dashboard({ onViewAthlete, onViewHistory }: DashboardProps) {
   const { profile } = useAuth();
   const role = profile?.role ?? 'coach';
 
-  if (role === 'athlete') return <AthleteDashboard />;
+  if (role === 'athlete') return <AthleteDashboard onViewHistory={onViewHistory} />;
   if (role === 'admin') return <AdminDashboard />;
   return <CoachDashboard onViewAthlete={onViewAthlete} />;
 }
