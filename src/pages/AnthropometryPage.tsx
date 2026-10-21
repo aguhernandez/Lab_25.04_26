@@ -21,15 +21,16 @@ import ConfirmDialog from '../components/ConfirmDialog';
 interface AnthropometryPageProps {
   initialAthlete?: Athlete;
   lockAthlete?: boolean;
+  openLatestResult?: boolean;
   onNavigateToReports?: (athlete: Athlete) => void;
 }
 
-export default function AnthropometryPage({ initialAthlete, lockAthlete = false, onNavigateToReports }: AnthropometryPageProps) {
+export default function AnthropometryPage({ initialAthlete, lockAthlete = false, openLatestResult = false, onNavigateToReports }: AnthropometryPageProps) {
   const { profile } = useAuth();
   const isAthlete = profile?.role === 'athlete';
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(initialAthlete ?? null);
   const [showAthleteSelector, setShowAthleteSelector] = useState(!isAthlete && !initialAthlete);
-  const [viewMode, setViewMode] = useState<'new' | 'history' | 'results' | 'comparison' | 'raw-data'>('new');
+  const [viewMode, setViewMode] = useState<'new' | 'history' | 'results' | 'comparison' | 'raw-data'>(openLatestResult ? 'results' : 'new');
   const [measurements, setMeasurements] = useState<AnthropometryData>({
     measurement_method: 'manual',
     age_years: undefined,
@@ -103,11 +104,14 @@ export default function AnthropometryPage({ initialAthlete, lockAthlete = false,
 
     if (data && data.length > 0) {
       setSelectedMeasurement(data[0]);
-      loadKerrResults(data[0].id);
+      if (openLatestResult) setViewMode('results');
+      void loadKerrResults(data[0].id);
 
       if (data.length > 1) {
         loadKerrResults(data[1].id, true);
       }
+    } else if (openLatestResult) {
+      setViewMode('history');
     }
   };
 
@@ -120,6 +124,12 @@ export default function AnthropometryPage({ initialAthlete, lockAthlete = false,
 
     if (error) {
       console.error('Error loading Kerr results:', error);
+      if (openLatestResult && !isPrevious) setViewMode('history');
+      return;
+    }
+
+    if (!data && openLatestResult && !isPrevious) {
+      setViewMode('history');
       return;
     }
 

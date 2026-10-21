@@ -10,19 +10,21 @@ interface KerrPresentationDashboardProps {
   athleteName?: string;
   sum6Skinfolds?: number;
   stature?: number;
+  showObjectives?: boolean;
 }
 
 type Tab = 'conclusiones' | 'resultados' | 'objetivos';
 
-export default function KerrPresentationDashboard({ results, athleteName, sum6Skinfolds, stature }: KerrPresentationDashboardProps) {
+export default function KerrPresentationDashboard({ results, athleteName, sum6Skinfolds, stature, showObjectives = true }: KerrPresentationDashboardProps) {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<Tab>('conclusiones');
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'conclusiones', label: t('kerr.tab.conclusions'), icon: <PieIcon className="w-4 h-4" /> },
     { id: 'resultados', label: t('kerr.tab.results'), icon: <FileText className="w-4 h-4" /> },
     { id: 'objetivos', label: t('kerr.tab.targets'), icon: <Target className="w-4 h-4" /> },
   ];
+  const tabs = showObjectives ? allTabs : allTabs.filter(tab => tab.id !== 'objetivos');
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
@@ -229,7 +231,7 @@ export default function KerrPresentationDashboard({ results, athleteName, sum6Sk
           </div>
         )}
 
-        {activeTab === 'objetivos' && (
+        {showObjectives && activeTab === 'objetivos' && (
           <BodyCompositionTargets results={results} stature={stature} />
         )}
       </div>

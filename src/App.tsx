@@ -41,6 +41,7 @@ function AppContent() {
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
   const [athleteForReports, setAthleteForReports] = useState<Athlete | null>(null);
+  const [openLatestAnthropometry, setOpenLatestAnthropometry] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   if (loading || (hasToken && !user && !isDevMode)) {
@@ -168,6 +169,7 @@ function AppContent() {
     const view = viewMap[path];
     if (view) {
       setCurrentView(view);
+      setOpenLatestAnthropometry(false);
       setSelectedAthlete(null);
       setSelectedTestId(null);
       if (view !== 'reports') setAthleteForReports(null);
@@ -280,14 +282,14 @@ function AppContent() {
         </header>
 
         <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-          {currentView === 'dashboard' && <Dashboard onViewAthlete={handleViewAthlete} onViewHistory={() => setCurrentView('my-evaluations')} />}
+          {currentView === 'dashboard' && <Dashboard onViewAthlete={handleViewAthlete} onViewHistory={() => setCurrentView('my-evaluations')} onViewAnthropometry={(athlete) => { setSelectedAthlete(athlete); setOpenLatestAnthropometry(true); setCurrentView('anthropometry'); }} />}
           {currentView === 'admin' && <AdminPanel />}
           {currentView === 'users' && <UserManagement />}
           {currentView === 'settings' && <Settings />}
           {currentView === 'profile' && <ProfileView />}
           {currentView === 'my-evaluations' && <MyEvaluations />}
           {currentView === 'evaluations' && <Evaluations onViewResults={handleViewResults} />}
-          {currentView === 'anthropometry' && <AnthropometryPage onNavigateToReports={handleNavigateToReports} />}
+          {currentView === 'anthropometry' && <AnthropometryPage initialAthlete={selectedAthlete ?? undefined} openLatestResult={openLatestAnthropometry} onNavigateToReports={handleNavigateToReports} />}
           {currentView === 'anthropometry-dashboard' && <AnthropometryDashboard />}
 
           {currentView === 'environmental-physiology' && <EnvironmentalPhysiology />}

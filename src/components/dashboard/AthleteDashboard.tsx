@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import KerrPresentationDashboard from '../anthropometry/KerrPresentationDashboard';
+import type { AnthropometryMeasurement, KerrResults } from '../../types/anthropometry.types';
+import type { Athlete } from '../../types';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
@@ -9,7 +12,9 @@ import {
 interface AthleteData {
   id: string;
   name: string;
-  sport: string;
+  sport: Athlete['sport'];
+  created_at: string;
+  updated_at: string;
 }
 
 interface PhysiologyProfile {
@@ -29,15 +34,6 @@ interface PhysiologyProfile {
     lt2_hr?: number | null;
     lt2_power?: number | null;
   }> | null;
-}
-
-interface AnthroProfile {
-  body_fat_percent: number | null;
-  muscle_mass_kg: number | null;
-  bone_mass_kg: number | null;
-  weight_kg: number | null;
-  bmi: number | null;
-  applied_at: string | null;
 }
 
 interface TrainingZoneLocal {
@@ -63,12 +59,12 @@ interface ReadinessSnapshot {
   hydration_stress_score: number | null;
 }
 
-export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: () => void }) {
+export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }: { onViewHistory?: () => void; onViewAnthropometry?: (athlete: Athlete) => void }) {
   const { profile } = useAuth();
   const { language } = useLanguage();
   const [athlete, setAthlete] = useState<AthleteData | null>(null);
   const [physiology, setPhysiology] = useState<PhysiologyProfile | null>(null);
-  const [anthro, setAnthro] = useState<AnthroProfile | null>(null);
+  const [latestAnthropometry, setLatestAnthropometry] = useState<{ measurement: AnthropometryMeasurement; results: KerrResults | null } | null>(null);
   const [hydration, setHydration] = useState<HydrationSummary[]>([]);
   const [readiness, setReadiness] = useState<ReadinessSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,10 +87,10 @@ export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: ()
     running: { en: 'Running', es: 'Carrera' },
     triathlon: { en: 'Triathlon', es: 'Triatlón' },
     swimming: { en: 'Swimming', es: 'Natación' },
-    bodyComposition: { en: 'Body Composition', es: 'Composición Corporal' },
-    muscle: { en: 'Muscle', es: 'Músculo' },
-    bone: { en: 'Bone mass', es: 'Masa ósea' },
+    bodyComposition: { en: 'Latest anthropometry', es: 'Última antropometría' },
     noAnthro: { en: 'Not evaluated. Ask your professional about this module.', es: 'No evaluado. Consulta con tu profesional sobre este módulo.' },
+    viewAnthropometry: { en: 'Open full evaluation', es: 'Ver evaluación completa' },
+    anthropometryResultUnavailable: { en: 'The latest measurement has no saved Kerr result.', es: 'La última medición no tiene un resultado Kerr guardado.' },
     lastUpdate: { en: 'Last test', es: 'Último test' },
     noProfile: { en: 'No evaluated passport yet. Ask your professional about your next test.', es: 'Aún no hay un pasaporte evaluado. Consulta con tu profesional sobre tu próximo test.' },
     changes: { en: 'What changed since your last test', es: 'Qué cambió desde tu último test' },
@@ -131,22 +127,17 @@ export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: ()
     try {
       const { data: athleteData } = await supabase
         .from('athletes')
-        .select('id, name, sport')
+        .select('id, name, sport, created_at, updated_at')
         .eq('hub_user_id', profile!.hub_user_id)
         .maybeSingle();
 
       if (!athleteData) { setLoading(false); return; }
       setAthlete(athleteData);
 
-      const [physRes, anthroRes, hydrationRes, readinessRes] = await Promise.all([
+      const [physRes, hydrationRes, readinessRes, measurementRes] = await Promise.all([
         supabase
           .from('athlete_physiology_profiles')
           .select('vo2max_relative_ml_kg_min, lt1_hr, lt2_hr, pam_watts, vam_kmh, hrmax, physiology_zones, last_test_date, history')
-          .eq('athlete_id', athleteData.id)
-          .maybeSingle(),
-        supabase
-          .from('athlete_anthropometry_profiles')
-          .select('body_fat_percent, muscle_mass_kg, bone_mass_kg, weight_kg, bmi, applied_at')
           .eq('athlete_id', athleteData.id)
           .maybeSingle(),
         supabase
@@ -161,12 +152,27 @@ export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: ()
           .eq('athlete_id', athleteData.id)
           .order('computed_at', { ascending: false })
           .limit(1),
+        supabase
+          .from('anthropometry_measurements')
+          .select('*')
+          .eq('athlete_id', athleteData.id)
+          .order('measurement_date', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       setPhysiology(physRes.data || null);
-      setAnthro(anthroRes.data || null);
       setHydration(hydrationRes.data || []);
       setReadiness(readinessRes.data?.[0] || null);
+      const measurement = measurementRes.data as AnthropometryMeasurement | null;
+      if (measurement) {
+        const { data: kerrResult } = await supabase
+          .from('anthropometry_kerr_results')
+          .select('*')
+          .eq('measurement_id', measurement.id)
+          .maybeSingle();
+        setLatestAnthropometry({ measurement, results: kerrResult as KerrResults | null });
+      }
     } catch { }
     finally { setLoading(false); }
   }
@@ -190,6 +196,19 @@ export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: ()
   const vo2Delta = physiology?.vo2max_relative_ml_kg_min != null && previousSnapshot?.vo2max_relative_ml_kg_min != null
     ? physiology.vo2max_relative_ml_kg_min - previousSnapshot.vo2max_relative_ml_kg_min
     : null;
+  const latestSum6Skinfolds = (() => {
+    const measurement = latestAnthropometry?.measurement;
+    if (!measurement) return undefined;
+    const sum6 = [
+      measurement.triceps_sf_mm_median ?? measurement.triceps_sf_mm,
+      measurement.subscapular_sf_mm_median ?? measurement.subscapular_sf_mm,
+      measurement.supraspinale_sf_mm_median ?? measurement.supraspinale_sf_mm,
+      measurement.abdominal_sf_mm_median ?? measurement.abdominal_sf_mm,
+      measurement.front_thigh_sf_mm_median ?? measurement.front_thigh_sf_mm,
+      measurement.medial_calf_sf_mm_median ?? measurement.medial_calf_sf_mm,
+    ];
+    return sum6.every(value => value != null) ? sum6.reduce<number>((total, value) => total + (value ?? 0), 0) : undefined;
+  })();
 
   const sportLabel = (s: string) => {
     const map: Record<string, string> = { cycling: t('cycling'), running: t('running'), triathlon: t('triathlon'), swimming: t('swimming') };
@@ -380,27 +399,34 @@ export default function AthleteDashboard({ onViewHistory }: { onViewHistory?: ()
         </>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+      <section className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
         <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-4">
           {t('bodyComposition')}
         </h2>
-        {anthro && (anthro.muscle_mass_kg != null || anthro.bone_mass_kg != null) ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { label: t('muscle'), value: anthro.muscle_mass_kg != null ? anthro.muscle_mass_kg.toFixed(1) : null, unit: 'kg' },
-              { label: t('bone'), value: anthro.bone_mass_kg != null ? anthro.bone_mass_kg.toFixed(1) : null, unit: 'kg' },
-            ].filter(item => item.value != null).map((item, i) => (
-              <div key={i} className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4">
-                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{item.label}</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white leading-none">{item.value ?? '—'}</p>
-                {item.unit && item.value && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{item.unit}</p>}
-              </div>
-            ))}
-          </div>
+        {latestAnthropometry ? (
+          <>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {new Date(latestAnthropometry.measurement.measurement_date).toLocaleDateString(language === 'es' ? 'es-AR' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
+              {onViewAnthropometry && athlete && <button type="button" onClick={() => onViewAnthropometry(athlete)} className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-[#514163]">{t('viewAnthropometry')}</button>}
+            </div>
+            {latestAnthropometry.results ? (
+              <KerrPresentationDashboard
+                results={latestAnthropometry.results}
+                athleteName={athlete?.name}
+                sum6Skinfolds={latestSum6Skinfolds}
+                stature={latestAnthropometry.measurement.stature_cm ?? undefined}
+                showObjectives={false}
+              />
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('anthropometryResultUnavailable')}</p>
+            )}
+          </>
         ) : (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t('noAnthro')}</p>
         )}
-      </div>
+      </section>
     </div>
   );
 }
