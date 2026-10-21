@@ -27,10 +27,12 @@ interface SavedSession {
   r_squared: number | null;
 }
 
-export default function ForceVelocityLab() {
+interface ForceVelocityLabProps { initialAthlete?: Athlete; }
+
+export default function ForceVelocityLab({ initialAthlete }: ForceVelocityLabProps) {
   const { t } = useLanguage();
-  const [step, setStep] = useState<Step>('select-athlete');
-  const [athlete, setAthlete] = useState<Athlete | null>(null);
+  const [step, setStep] = useState<Step>(initialAthlete ? 'setup' : 'select-athlete');
+  const [athlete, setAthlete] = useState<Athlete | null>(initialAthlete ?? null);
   const [exercise, setExercise] = useState('Back Squat');
   const [customExercise, setCustomExercise] = useState('');
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().slice(0, 10));
@@ -224,9 +226,11 @@ export default function ForceVelocityLab() {
                 <h2 className="text-lg font-semibold text-white">{t('fv.sessionSetup')}</h2>
                 <p className="text-xs text-white/70">{athlete?.name}</p>
               </div>
-              <button onClick={() => setStep('select-athlete')} className="text-white/60 hover:text-white text-sm">
-                {t('fv.changeAthlete')}
-              </button>
+              {!initialAthlete && (
+                <button onClick={() => setStep('select-athlete')} className="text-white/60 hover:text-white text-sm">
+                  {t('fv.changeAthlete')}
+                </button>
+              )}
             </div>
           </div>
           <div className="p-6 space-y-4">

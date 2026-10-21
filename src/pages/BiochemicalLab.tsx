@@ -37,11 +37,13 @@ export interface BiochemicalTest {
   created_at: string;
 }
 
-export default function BiochemicalLab() {
+interface BiochemicalLabProps { initialAthlete?: Athlete; lockAthlete?: boolean; }
+
+export default function BiochemicalLab({ initialAthlete, lockAthlete = false }: BiochemicalLabProps) {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const isAthlete = profile?.role === 'athlete';
-  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(initialAthlete ?? null);
   const [activeTab, setActiveTab] = useState<TabId>('input');
   const [tests, setTests] = useState<BiochemicalTest[]>([]);
   const [latestResult, setLatestResult] = useState<BiochemicalResult | null>(null);
@@ -132,7 +134,7 @@ export default function BiochemicalLab() {
           <h1 className="text-2xl font-heading font-bold text-gray-900 dark:text-white">{t('bio.title')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{selectedAthlete.name}</p>
         </div>
-        {!isAthlete && (
+        {!isAthlete && !lockAthlete && (
           <button
             onClick={() => setSelectedAthlete(null)}
             className="px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-400"

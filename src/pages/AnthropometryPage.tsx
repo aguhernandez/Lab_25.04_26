@@ -19,14 +19,16 @@ import EditMeasurementModal from '../components/anthropometry/EditMeasurementMod
 import ConfirmDialog from '../components/ConfirmDialog';
 
 interface AnthropometryPageProps {
+  initialAthlete?: Athlete;
+  lockAthlete?: boolean;
   onNavigateToReports?: (athlete: Athlete) => void;
 }
 
-export default function AnthropometryPage({ onNavigateToReports }: AnthropometryPageProps) {
+export default function AnthropometryPage({ initialAthlete, lockAthlete = false, onNavigateToReports }: AnthropometryPageProps) {
   const { profile } = useAuth();
   const isAthlete = profile?.role === 'athlete';
-  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
-  const [showAthleteSelector, setShowAthleteSelector] = useState(!isAthlete);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(initialAthlete ?? null);
+  const [showAthleteSelector, setShowAthleteSelector] = useState(!isAthlete && !initialAthlete);
   const [viewMode, setViewMode] = useState<'new' | 'history' | 'results' | 'comparison' | 'raw-data'>('new');
   const [measurements, setMeasurements] = useState<AnthropometryData>({
     measurement_method: 'manual',
@@ -583,7 +585,7 @@ export default function AnthropometryPage({ onNavigateToReports }: Anthropometry
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
-          {!isAthlete && selectedAthlete && (
+          {!isAthlete && !lockAthlete && selectedAthlete && (
             <button
               onClick={() => setShowAthleteSelector(true)}
               className="btn btn-secondary px-4 py-2 text-sm"

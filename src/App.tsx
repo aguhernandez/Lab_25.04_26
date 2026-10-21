@@ -9,7 +9,7 @@ import AthleteSelector from './components/AthleteSelector';
 import AthleteForm from './components/AthleteForm';
 import AthleteEditForm from './components/AthleteEditForm';
 import AthleteList from './components/AthleteList';
-import AthleteDetail from './components/AthleteDetail';
+import ProfessionalAthleteView from './components/ProfessionalAthleteView';
 import TestView from './components/TestView';
 import ResultsView from './components/ResultsView';
 import UserManagement from './components/UserManagement';
@@ -329,7 +329,7 @@ function AppContent() {
           )}
 
           {currentView === 'athlete-detail' && selectedAthlete && (
-            <AthleteDetail
+            <ProfessionalAthleteView
               athlete={selectedAthlete}
               onStartTest={() => handleStartTest(selectedAthlete)}
               onViewResults={handleViewResults}

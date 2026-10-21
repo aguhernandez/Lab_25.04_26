@@ -8,15 +8,17 @@ import { useLanguage } from '../contexts/LanguageContext';
 type Module = 'hydration' | 'heat-adaptation';
 type Step = 'select-module' | 'select-athlete' | 'lab';
 
-export default function EnvironmentalPhysiology() {
+interface EnvironmentalPhysiologyProps { initialAthlete?: Athlete; }
+
+export default function EnvironmentalPhysiology({ initialAthlete }: EnvironmentalPhysiologyProps) {
   const { t } = useLanguage();
   const [module, setModule] = useState<Module | null>(null);
   const [step, setStep] = useState<Step>('select-module');
-  const [athlete, setAthlete] = useState<Athlete | null>(null);
+  const [athlete, setAthlete] = useState<Athlete | null>(initialAthlete ?? null);
 
   const handleSelectModule = (m: Module) => {
     setModule(m);
-    setStep('select-athlete');
+    setStep(initialAthlete ? 'lab' : 'select-athlete');
   };
 
   const handleSelectAthlete = (a: Athlete) => {
@@ -26,8 +28,8 @@ export default function EnvironmentalPhysiology() {
 
   const handleBack = () => {
     if (step === 'lab') {
-      setStep('select-athlete');
-      setAthlete(null);
+      setStep(initialAthlete ? 'select-module' : 'select-athlete');
+      if (!initialAthlete) setAthlete(null);
     } else {
       setStep('select-module');
       setModule(null);
