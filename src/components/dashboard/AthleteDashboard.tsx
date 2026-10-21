@@ -5,6 +5,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import KerrPresentationDashboard from '../anthropometry/KerrPresentationDashboard';
 import type { AnthropometryMeasurement, KerrResults } from '../../types/anthropometry.types';
 import type { Athlete } from '../../types';
+import AthleteTestAnalysis from './AthleteTestAnalysis';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
@@ -427,6 +428,8 @@ export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }:
           <p className="text-sm text-gray-400 dark:text-gray-500">{t('noAnthro')}</p>
         )}
       </section>
+
+      {athlete && <AthleteTestAnalysis athleteId={athlete.id} />}
     </div>
   );
 }

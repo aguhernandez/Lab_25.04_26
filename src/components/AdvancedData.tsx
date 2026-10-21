@@ -260,9 +260,9 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
               <ResponsiveContainer width="100%" height={320}>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey={hasPower ? 'power' : 'stage'} type="number"
-                    name={hasPower ? 'Power (W)' : 'Stage'}
-                    label={{ value: hasPower ? 'Power (W)' : 'Stage', position: 'insideBottom', offset: -5 }}
+                  <XAxis dataKey="load" type="number"
+                    name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'}
+                    label={{ value: hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage', position: 'insideBottom', offset: -5 }}
                     stroke="#9ca3af" />
                   <YAxis dataKey="lactate" type="number" name="Lactate"
                     label={{ value: 'Lactate (mmol/L)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
@@ -284,7 +284,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="stage" stroke="#9ca3af" />
+                <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                   <YAxis domain={[0, 10]} stroke="#9ca3af" />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Line type="monotone" dataKey="rpe" stroke="#10b981" strokeWidth={2} name="RPE"
@@ -344,12 +344,12 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
 
               <SectionCard title="% Energy by Substrate vs Stage">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  Estimated distribution of fat and carbohydrates as energy source per stage
+                    Estimated distribution of fat and carbohydrates as energy source by test intensity
                 </p>
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="stage" stroke="#9ca3af" />
+                    <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                     <YAxis domain={[0, 100]} stroke="#9ca3af" unit="%" />
                     <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => `${v}%`} />
                     <Legend />
@@ -533,7 +533,7 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="stage" stroke="#9ca3af" />
+                  <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                   <YAxis stroke="#9ca3af" />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Legend />
