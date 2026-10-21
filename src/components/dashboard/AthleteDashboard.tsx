@@ -251,6 +251,8 @@ export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }:
         )}
       </div>
 
+      {athlete && <AthleteTestAnalysis athleteId={athlete.id} />}
+
       {!physiology ? (
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-10 text-center">
           <div className="w-12 h-12 rounded-2xl bg-gray-50 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
@@ -429,7 +431,6 @@ export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }:
         )}
       </section>
 
-      {athlete && <AthleteTestAnalysis athleteId={athlete.id} />}
     </div>
   );
 }
