@@ -5,8 +5,11 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ScatterChart, Scatter, ReferenceLine, BarChart, Bar, ReferenceDot
 } from 'recharts';
+import VLamaxPanel from './VLamaxPanel';
 
 interface AdvancedDataProps {
+  testId?: string;
+  bodyMassKg?: number | null;
   dataPoints: TestDataPoint[];
   results: PhysiologyResults;
   advancedMetrics?: AdvancedMetrics | null;
@@ -45,6 +48,12 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 function parseSpeedKmh(value: string | null | undefined): number | null {
   if (!value) return null;
+  // Accept both a speed (12.5 km/h) and a running pace (5:00/km).
+  const pace = value.match(/^(\d+):([0-5]\d)\s*(?:\/\s*km)?$/i);
+  if (pace) {
+    const minutes = Number(pace[1]) + Number(pace[2]) / 60;
+    return minutes > 0 ? 60 / minutes : null;
+  }
   const match = value.match(/-?\d+(?:[.,]\d+)?/);
   return match ? Number(match[0].replace(',', '.')) : null;
 }
@@ -72,7 +81,7 @@ function MetricTile({
   );
 }
 
-export default function AdvancedData({ dataPoints, results, advancedMetrics, timelineSamples }: AdvancedDataProps) {
+export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, advancedMetrics, timelineSamples }: AdvancedDataProps) {
   const [activeTab, setActiveTab] = useState<Tab>('charts');
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
 
@@ -141,6 +150,15 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
     fat_pct: advancedMetrics?.energyProfile.percent_fat_vs_stage[i] ?? null,
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
+
+  const lactatePoints = chartData.filter(d => d.lactate != null && d.load != null);
+  const lactateCurve = results.lactate_analysis?.curve.map(point => ({
+    load: point.load,
+    measured: point.measured,
+    smoothed: point.smoothed,
+  })) ?? lactatePoints.map(point => ({ load: Number(point.load), measured: Number(point.lactate), smoothed: Number(point.lactate) }));
+  const lt1Point = results.lactate_analysis?.lt1 ?? null;
+  const lt2Point = results.lactate_analysis?.lt2 ?? null;
 
   const hasVO2 = results.has_vo2;
   const hasLactate = results.has_lactate;
@@ -257,24 +275,40 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
 
           {hasLactate && (
             <SectionCard title="Lactate Curve">
+              {results.lactate_analysis && (
+                <div className={`mb-4 rounded-lg border px-3 py-2 text-xs ${results.lactate_analysis.quality.validForThresholds ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300' : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'}`}>
+                  <strong>Data quality: {results.lactate_analysis.quality.grade} ({results.lactate_analysis.quality.score}/100)</strong>
+                  {' · '}{results.lactate_analysis.quality.sampleCount} samples · {results.lactate_analysis.quality.monotonicityPercent}% monotonic · load {results.lactate_analysis.quality.loadMonotonic ? 'valid' : 'invalid'}
+                  {results.lactate_analysis.quality.issues.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4">
+                      {results.lactate_analysis.quality.issues.map(issue => <li key={`${issue.code}-${issue.stage ?? 'all'}`}>{issue.message}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+                <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-red-500" />Measured lactate</span>
+                <span><i className="mr-1 inline-block h-0.5 w-4 align-middle bg-purple-500" />Quality-controlled trend</span>
+                {lt1Point && <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />LT1 {lt1Point.method} ({lt1Point.lactate.toFixed(1)} mmol/L)</span>}
+                {lt2Point && <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-purple-600" />LT2 {lt2Point.method} ({lt2Point.lactate.toFixed(1)} mmol/L)</span>}
+              </div>
               <ResponsiveContainer width="100%" height={320}>
-                <ScatterChart>
+                <LineChart data={lactateCurve} margin={{ top: 12, right: 18, bottom: 18, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="load" type="number"
+                  <XAxis dataKey="load" type="number" domain={['dataMin', 'dataMax']}
                     name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'}
                     label={{ value: hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage', position: 'insideBottom', offset: -5 }}
                     stroke="#9ca3af" />
-                  <YAxis dataKey="lactate" type="number" name="Lactate"
+                  <YAxis type="number" domain={[0, 'dataMax + 1']} name="Lactate"
                     label={{ value: 'Lactate (mmol/L)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
-                  <ReferenceLine y={2} stroke="#f59e0b" strokeDasharray="4 4"
-                    label={{ value: 'LT1 ~2', fill: '#f59e0b', fontSize: 11 }} />
-                  <ReferenceLine y={4} stroke="#ef4444" strokeDasharray="4 4"
-                    label={{ value: 'LT2 ~4', fill: '#ef4444', fontSize: 11 }} />
                   <Tooltip contentStyle={tooltipStyle} />
-                  <Scatter data={chartData.filter(d => d.lactate != null)} fill="#ef4444"
-                    line={{ stroke: '#ef4444', strokeWidth: 2 }} />
-                </ScatterChart>
+                  <Line type="linear" dataKey="measured" stroke="transparent" name="Measured (mmol/L)" dot={{ r: 5, fill: '#dc2626', stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 7 }} />
+                  <Line type="monotone" dataKey="smoothed" stroke="#7c3aed" strokeWidth={2.5} strokeDasharray="7 4" name="Quality-controlled trend" dot={false} />
+                  {lt1Point && <ReferenceLine x={lt1Point.load} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: 'LT1', fill: '#b45309', fontSize: 11, position: 'top' }} />}
+                  {lt2Point && <ReferenceLine x={lt2Point.load} stroke="#7c3aed" strokeDasharray="5 4" label={{ value: 'LT2', fill: '#6d28d9', fontSize: 11, position: 'top' }} />}
+                </LineChart>
               </ResponsiveContainer>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Red dots are untouched measurements. The dashed trend uses isotonic regression for threshold detection; it never replaces the raw samples.</p>
             </SectionCard>
           )}
 
@@ -319,6 +353,16 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
 
       {activeTab === 'energy' && (
         <div className="space-y-6">
+          {(results.lactate_analysis?.fuelProfile.length ?? 0) > 0 && (
+            <SectionCard title="Measured Fuel Profile (VO₂ + VCO₂)">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <MetricTile label="Max fat oxidation" value={results.lactate_analysis?.maxFatOxidation?.fatGramsPerMin.toFixed(2)} unit="g/min" note="Measured gas exchange" />
+                <MetricTile label="FatMax stage" value={results.lactate_analysis?.maxFatOxidation?.stage} />
+                <MetricTile label="RER at FatMax" value={results.lactate_analysis?.maxFatOxidation?.rer.toFixed(2)} />
+                <MetricTile label="Valid gas stages" value={results.lactate_analysis?.fuelProfile.length} />
+              </div>
+            </SectionCard>
+          )}
           {hasEnergyData ? (
             <>
               <SectionCard title="RER per Stage (Estimated from VO₂)">
@@ -564,6 +608,11 @@ export default function AdvancedData({ dataPoints, results, advancedMetrics, tim
 
       {activeTab === 'anaerobic' && (
         <div className="space-y-6">
+          {testId && (
+            <SectionCard title="VLamax / Glycolytic Capacity">
+              <VLamaxPanel testId={testId} bodyMassKg={bodyMassKg} />
+            </SectionCard>
+          )}
           <SectionCard title="Anaerobic Test / Sprint (5–30 sec)">
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
               Sprint or Wingate test data. Entered separately from the incremental test.
