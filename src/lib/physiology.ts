@@ -1,6 +1,7 @@
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
 import { buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
+import { analyzeLactate, type LactateAnalysisResult } from './lactateAnalysis';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
 
@@ -77,6 +78,7 @@ export interface PhysiologyResults {
   has_rer: boolean;
   has_pace: boolean;
   threshold_source: 'ventilatory' | 'lactate';
+  lactate_analysis?: LactateAnalysisResult | null;
   // Unified thresholds (LT + VT)
   thresholds: UnifiedThresholds;
 }
@@ -126,6 +128,12 @@ export function calculatePhysiology(
   const has_vo2 = sortedPoints.some(p => p.vo2_ml_kg_min !== null && p.vo2_ml_kg_min !== undefined);
   const has_rer = sortedPoints.some(p => p.vco2_ml_kg_min != null && p.vco2_ml_kg_min > 0);
   const has_pace = sortedPoints.some(p => p.speed_pace !== null && p.speed_pace !== undefined && p.speed_pace !== '');
+  const lactate_analysis = (has_lactate || (has_vo2 && has_rer)) ? analyzeLactate(sortedPoints, athlete.weight_kg, {
+    lt1Method: overrides?.lactate_lt1_method,
+    lt2Method: overrides?.lactate_lt2_method,
+    iatDeltaMmol: overrides?.lactate_iat_delta_mmol,
+  }) : null;
+  const valid_lactate_for_thresholds = lactate_analysis?.quality.validForThresholds ?? false;
 
   const leanBodyMassKg = calculateLeanBodyMass(athlete);
 
@@ -141,7 +149,7 @@ export function calculatePhysiology(
 
   let { lt1_hr, lt1_power, lt1_pace, lt1_vo2, lt1_percent_vo2max, lt1_percent_hrmax, lt1_confidence } = calculateLT1(
     sortedPoints,
-    has_lactate,
+    valid_lactate_for_thresholds,
     vo2max,
     hrmax,
     athlete.weight_kg || null
@@ -149,17 +157,39 @@ export function calculatePhysiology(
 
   let { lt2_hr, lt2_power, lt2_pace, lt2_vo2, lt2_percent_vo2max, lt2_percent_hrmax, lt2_confidence } = calculateLT2(
     sortedPoints,
-    has_lactate,
+    valid_lactate_for_thresholds,
     vo2max,
     hrmax,
     athlete.weight_kg || null
   );
 
+  // The dedicated lactate engine is authoritative when its quality checks pass.
+  if (lactate_analysis?.lt1) {
+    const threshold = lactate_analysis.lt1;
+    lt1_hr = threshold.heartRate;
+    lt1_power = threshold.power;
+    lt1_pace = threshold.pace;
+    lt1_vo2 = threshold.vo2 && athlete.weight_kg ? convertVO2ToAbsolute(threshold.vo2, athlete.weight_kg) : null;
+    lt1_percent_vo2max = threshold.vo2 && vo2max ? Math.round((threshold.vo2 / vo2max) * 1000) / 10 : null;
+    lt1_percent_hrmax = Math.round((threshold.heartRate / hrmax) * 1000) / 10;
+    lt1_confidence = 'measured';
+  }
+  if (lactate_analysis?.lt2) {
+    const threshold = lactate_analysis.lt2;
+    lt2_hr = threshold.heartRate;
+    lt2_power = threshold.power;
+    lt2_pace = threshold.pace;
+    lt2_vo2 = threshold.vo2 && athlete.weight_kg ? convertVO2ToAbsolute(threshold.vo2, athlete.weight_kg) : null;
+    lt2_percent_vo2max = threshold.vo2 && vo2max ? Math.round((threshold.vo2 / vo2max) * 1000) / 10 : null;
+    lt2_percent_hrmax = Math.round((threshold.heartRate / hrmax) * 1000) / 10;
+    lt2_confidence = 'measured';
+  }
+
   let { fatmax_hr, fatmax_power, fatmax_pace, fatmax_vo2, fatmax_confidence, fatmax_method } = calculateFatMax(
     sortedPoints,
     null,
     hrmax,
-    has_lactate,
+    valid_lactate_for_thresholds,
     has_rer,
     lt1_hr,
     lt1_confidence,
@@ -209,7 +239,7 @@ export function calculatePhysiology(
 
   const hr_drift_percent = calculateHRDrift(sortedPoints);
 
-  const thresholdSource: 'ventilatory' | 'lactate' = has_lactate ? 'lactate' : 'ventilatory';
+  const thresholdSource: 'ventilatory' | 'lactate' = valid_lactate_for_thresholds ? 'lactate' : 'ventilatory';
   const zoneOptions: ZoneCalculationOptions = {
     vam_kmh,
     pam_watts,
@@ -315,6 +345,7 @@ export function calculatePhysiology(
     has_rer,
     has_pace,
     threshold_source: thresholdSource,
+    lactate_analysis,
     thresholds
   };
 }
@@ -330,7 +361,7 @@ function emptyPhysiologyResults(): PhysiologyResults {
     training_zones: [], zones_data: { baseMethod: 'LT1_LT2_physiological', zones7: [], zones5: [], defaultDisplay: '5' }, data_quality: 'No data', data_quality_score: 0,
     metabolic_profile: { aerobic_capacity: 'Unknown', fat_utilization: 'Unknown', anaerobic_contribution: 'Unknown', durability: 'Unknown' },
     stage_analysis: [], has_power: false, has_lactate: false, has_vo2: false, has_rer: false, has_pace: false,
-    threshold_source: 'lactate', thresholds: { LT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, LT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, vt_source: 'estimated_from_lt', delta_lt1_vt1_hr: null, delta_lt2_vt2_hr: null },
+    threshold_source: 'lactate', lactate_analysis: null, thresholds: { LT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, LT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT1: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, VT2: { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'inferred' }, vt_source: 'estimated_from_lt', delta_lt1_vt1_hr: null, delta_lt2_vt2_hr: null },
   };
 }
 
@@ -530,10 +561,10 @@ function calculateLT1(
       const crossingPoint = lactatePoints.find(p => p.lactate! >= lt1Threshold) || null;
 
       if (crossingPoint) {
-        // If there's a point just before the crossing, use linear interpolation to refine
+        // Interpolate the crossing instead of silently returning the previous stage.
         const crossingIndex = lactatePoints.indexOf(crossingPoint);
         if (crossingIndex > 0) {
-          lt1Point = lactatePoints[crossingIndex - 1];
+          lt1Point = interpolateLactatePoint(lactatePoints[crossingIndex - 1], crossingPoint, lt1Threshold);
         } else {
           lt1Point = crossingPoint;
         }
@@ -639,10 +670,9 @@ function calculateLT2(
     // prefer the 4.0 mmol/L point as it represents the onset of blood lactate accumulation
     const oblaPoint = lactatePoints.find(p => p.lactate! >= 4.0) || null;
     if (oblaPoint) {
-      // Use the stage just before 4.0 mmol/L if available (as LT2 is the threshold, not above it)
       const oblaIndex = lactatePoints.indexOf(oblaPoint);
       if (oblaIndex > 0 && lactatePoints[oblaIndex - 1].lactate! < 4.0) {
-        lt2Point = lactatePoints[oblaIndex - 1];
+        lt2Point = interpolateLactatePoint(lactatePoints[oblaIndex - 1], oblaPoint, 4.0);
       } else {
         lt2Point = oblaPoint;
       }
@@ -702,16 +732,45 @@ function calculateLT2(
   };
 }
 
+/** Linear interpolation between adjacent lactate stages for a threshold crossing. */
+function interpolateLactatePoint(previous: TestDataPoint, next: TestDataPoint, targetLactate: number): TestDataPoint {
+  const y1 = Number(previous.lactate);
+  const y2 = Number(next.lactate);
+  const fraction = Number.isFinite(y1) && Number.isFinite(y2) && y2 !== y1
+    ? Math.max(0, Math.min(1, (targetLactate - y1) / (y2 - y1)))
+    : 0;
+  const interpolate = (a: number | null | undefined, b: number | null | undefined): number | null =>
+    a != null && b != null ? a + (b - a) * fraction : (a ?? b ?? null);
+  return {
+    ...previous,
+    stage_number: previous.stage_number + fraction * (next.stage_number - previous.stage_number),
+    heart_rate: Math.round(interpolate(previous.heart_rate, next.heart_rate) ?? previous.heart_rate),
+    power_watts: interpolate(previous.power_watts, next.power_watts),
+    vo2_ml_kg_min: interpolate(previous.vo2_ml_kg_min, next.vo2_ml_kg_min),
+    lactate: Math.round(targetLactate * 100) / 100,
+    // Pace strings cannot be interpolated safely; keep the closest stage value.
+    speed_pace: fraction < 0.5 ? previous.speed_pace : next.speed_pace,
+  };
+}
+
 function calculateDmax(lactatePoints: TestDataPoint[]): TestDataPoint | null {
   if (lactatePoints.length < 4) return null;
 
   const sorted = [...lactatePoints].sort((a, b) => a.stage_number - b.stage_number);
 
-  // Use HR as X-axis if available (physiologically meaningful), otherwise power, otherwise stage number
+  // Use external load as X-axis. HR is a response variable and can distort Dmax when cardiac drift is present.
   // Cheng et al. 1992: perpendicular distance from the line connecting first and last point of the lactate curve
   const getX = (p: TestDataPoint): number => {
-    if (p.heart_rate > 0) return p.heart_rate;
     if (p.power_watts && p.power_watts > 0) return p.power_watts;
+    if (p.speed_pace) {
+      const pace = p.speed_pace.match(/^(\d+):(\d{2})/);
+      if (pace) {
+        const minutes = Number(pace[1]) + Number(pace[2]) / 60;
+        if (minutes > 0) return 60 / minutes;
+      }
+      const numeric = Number(p.speed_pace.replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    }
     return p.stage_number;
   };
 
