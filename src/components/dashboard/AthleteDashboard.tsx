@@ -193,7 +193,7 @@ export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }:
     : null;
 
   const zones = physiology?.physiology_zones || [];
-  const previousSnapshot = physiology?.history?.find((snapshot, index) => index > 0) ?? null;
+  const previousSnapshot = physiology?.history?.find((_, index) => index > 0) ?? null;
   const vo2Delta = physiology?.vo2max_relative_ml_kg_min != null && previousSnapshot?.vo2max_relative_ml_kg_min != null
     ? physiology.vo2max_relative_ml_kg_min - previousSnapshot.vo2max_relative_ml_kg_min
     : null;
@@ -293,8 +293,7 @@ export default function AthleteDashboard({ onViewHistory, onViewAnthropometry }:
               <div key={i} className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl p-4 text-white">
                 <p className="text-xs font-semibold uppercase tracking-wider text-white/80 mb-2">{card.label}</p>
                 <p className="text-3xl font-bold leading-none tabular-nums">{card.value} <span className="text-sm font-medium">{card.unit}</span></p>
-                {'power' in card && card.power != null && <p className="mt-1 text-sm tabular-nums">{card.power} W</p>}
-                <p className="mt-3 text-xs text-white/85">{card.meaning}</p>
+                <p className="mt-3 text-xs text-white/85">{String(card.meaning ?? '')}</p>
               </div>
             ))}
           </div>
