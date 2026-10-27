@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, ScatterChart, Scatter, ReferenceLine, BarChart, Bar, ReferenceDot
 } from 'recharts';
 import VLamaxPanel from './VLamaxPanel';
+import LactateDynamicsPanel from './LactateDynamicsPanel';
 
 interface AdvancedDataProps {
   testId?: string;
@@ -353,6 +354,9 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
 
       {activeTab === 'energy' && (
         <div className="space-y-6">
+          <SectionCard title="Dinámica de lactato · Producción, oxidación y recuperación">
+            <LactateDynamicsPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} />
+          </SectionCard>
           {(results.lactate_analysis?.fuelProfile.length ?? 0) > 0 && (
             <SectionCard title="Measured Fuel Profile (VO₂ + VCO₂)">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
