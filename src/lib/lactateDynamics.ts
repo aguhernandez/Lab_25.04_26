@@ -63,6 +63,62 @@ export interface LactateDynamicsModel {
   issues: string[];
 }
 
+export interface ConstantLoadLactateTrial {
+  id: string;
+  load: number;
+  lactate10Mmol: number;
+  lactate20Mmol: number;
+  lactate30Mmol: number;
+  date?: string;
+}
+
+export interface EvaluatedConstantLoadTrial extends ConstantLoadLactateTrial {
+  drift10To30Mmol: number;
+  stable: boolean;
+}
+
+export interface MeasuredMLSSResult {
+  load: number | null;
+  lactateMmol: number | null;
+  status: 'confirmed' | 'lower_bound' | 'not_found';
+  trials: EvaluatedConstantLoadTrial[];
+}
+
+export interface EstimatedMLSSResult {
+  load: number;
+  lactateMmol: number;
+  drift10To30Mmol: number;
+  productionMmolLMin: number;
+  oxidationMmolLMin: number;
+  confidence: 'moderate' | 'low';
+}
+
+export interface MetabolicDemandSample {
+  load: number;
+  vo2MlKgMin?: number | null;
+  vco2MlKgMin?: number | null;
+}
+
+export interface MetabolicDemandPoint {
+  load: number;
+  oxygenDemandMlKgMin: number;
+  actualVo2MlKgMin: number;
+  oxygenDeficitMlKgMin: number;
+  aerobicPercent: number;
+  anaerobicPercent: number;
+  unmetPercent: number;
+  fatPercent: number;
+  carbohydratePercent: number;
+  rer: number;
+  rerSource: 'measured' | 'estimated';
+}
+
+export interface MetabolicDemandCurve {
+  points: MetabolicDemandPoint[];
+  demandSource: 'measured_regression' | 'inferred';
+  vo2TimeConstantSeconds: number;
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const round = (value: number, digits = 3) => Number(value.toFixed(digits));
 
@@ -200,4 +256,152 @@ export function estimateRecoveryMinutes(
   const points = simulateLactateProtocol(model, [{ label: 'Recovery', load: recoveryLoad, durationSeconds: maxMinutes * 60 }], startLactateMmol, 5);
   const recovered = points.find(point => point.bloodLactateMmol <= targetLactateMmol);
   return recovered ? round(recovered.timeSeconds / 60, 1) : null;
+}
+
+/**
+ * Estimates the highest load with <=1 mmol/L blood-lactate drift from minute 10
+ * to minute 30. This mirrors the operational MLSS confirmation criterion, but
+ * remains a model estimate until constant-load trials confirm it.
+ */
+export function estimateMLSS(model: LactateDynamicsModel, resolution = 101): EstimatedMLSSResult {
+  let best: EstimatedMLSSResult | null = null;
+  const startLoad = model.input.maxLoad * 0.35;
+  const endLoad = model.input.maxLoad * 0.98;
+  const count = Math.max(20, resolution);
+
+  for (let index = 0; index < count; index += 1) {
+    const load = startLoad + (endLoad - startLoad) * index / (count - 1);
+    const simulation = simulateLactateProtocol(model, [{ label: 'MLSS', load, durationSeconds: 30 * 60 }], model.input.baselineLactateMmol, 10);
+    const at10 = simulation.find(point => point.timeSeconds >= 10 * 60);
+    const at30 = simulation[simulation.length - 1];
+    if (!at10 || !at30) continue;
+    const drift = at30.bloodLactateMmol - at10.bloodLactateMmol;
+    if (drift <= 1 && at30.bloodLactateMmol <= 25) {
+      const flux = lactateFluxAt(model, load, at30.metabolicLactateMmol);
+      best = {
+        load: round(load, 1),
+        lactateMmol: round(at30.bloodLactateMmol, 2),
+        drift10To30Mmol: round(drift, 2),
+        productionMmolLMin: flux.productionMmolLMin,
+        oxidationMmolLMin: flux.oxidationMmolLMin,
+        confidence: model.parameters.inferredThresholds ? 'low' : 'moderate',
+      };
+    }
+  }
+
+  if (best) return best;
+  return {
+    load: round(startLoad, 1),
+    lactateMmol: model.input.baselineLactateMmol,
+    drift10To30Mmol: 0,
+    productionMmolLMin: 0,
+    oxidationMmolLMin: 0,
+    confidence: 'low',
+  };
+}
+
+export function evaluateConstantLoadTrials(trials: ConstantLoadLactateTrial[]): MeasuredMLSSResult {
+  const evaluated = trials
+    .filter(trial => trial.load > 0 && [trial.lactate10Mmol, trial.lactate20Mmol, trial.lactate30Mmol].every(value => value >= 0.3 && value <= 25))
+    .map(trial => {
+      const drift = trial.lactate30Mmol - trial.lactate10Mmol;
+      return { ...trial, drift10To30Mmol: round(drift, 2), stable: drift <= 1 };
+    })
+    .sort((a, b) => a.load - b.load);
+  const stable = evaluated.filter(trial => trial.stable);
+  if (!stable.length) return { load: null, lactateMmol: null, status: 'not_found', trials: evaluated };
+  const highestStable = stable[stable.length - 1];
+  const higherUnstable = evaluated.some(trial => trial.load > highestStable.load && !trial.stable);
+  return {
+    load: highestStable.load,
+    lactateMmol: highestStable.lactate30Mmol,
+    status: higherUnstable ? 'confirmed' : 'lower_bound',
+    trials: evaluated,
+  };
+}
+
+function interpolateSample(samples: Array<{ load: number; value: number }>, load: number): number | null {
+  if (!samples.length) return null;
+  const sorted = [...samples].sort((a, b) => a.load - b.load);
+  if (load <= sorted[0].load) return sorted[0].value;
+  if (load >= sorted[sorted.length - 1].load) return sorted[sorted.length - 1].value;
+  const upperIndex = sorted.findIndex(sample => sample.load >= load);
+  const lower = sorted[upperIndex - 1];
+  const upper = sorted[upperIndex];
+  const fraction = (load - lower.load) / Math.max(0.0001, upper.load - lower.load);
+  return lower.value + (upper.value - lower.value) * fraction;
+}
+
+function linearRegression(samples: Array<{ load: number; vo2: number }>): { slope: number; intercept: number } | null {
+  if (samples.length < 2) return null;
+  const meanX = samples.reduce((sum, sample) => sum + sample.load, 0) / samples.length;
+  const meanY = samples.reduce((sum, sample) => sum + sample.vo2, 0) / samples.length;
+  const denominator = samples.reduce((sum, sample) => sum + Math.pow(sample.load - meanX, 2), 0);
+  if (denominator <= 0) return null;
+  const slope = samples.reduce((sum, sample) => sum + (sample.load - meanX) * (sample.vo2 - meanY), 0) / denominator;
+  return { slope: Math.max(0, slope), intercept: Math.max(0, meanY - slope * meanX) };
+}
+
+/**
+ * Returns continuous energy-system estimates in oxygen equivalents. Anaerobic
+ * glycolysis is constrained by the modelled lactate-production rate; substrate
+ * use is derived from measured RER when available and otherwise estimated.
+ */
+export function buildMetabolicDemandCurve(
+  model: LactateDynamicsModel,
+  samples: MetabolicDemandSample[],
+  effortDurationSeconds = 180,
+  pointCount = 41,
+  vo2TimeConstantSeconds = 30,
+): MetabolicDemandCurve {
+  const validVo2 = samples.flatMap(sample => sample.vo2MlKgMin != null && sample.vo2MlKgMin > 0
+    ? [{ load: sample.load, vo2: sample.vo2MlKgMin }]
+    : []);
+  const submaximal = validVo2.filter(sample => sample.vo2 <= model.input.vo2maxMlKgMin * 0.9);
+  const regression = linearRegression(submaximal.length >= 2 ? submaximal : validVo2);
+  const demandSource = regression ? 'measured_regression' as const : 'inferred' as const;
+  const fallbackIntercept = 3.5;
+  const fallbackSlope = (model.input.vo2maxMlKgMin - fallbackIntercept) / Math.max(1, model.input.maxLoad * 0.9);
+  const vo2Samples = validVo2.map(sample => ({ load: sample.load, value: sample.vo2 }));
+  const rerSamples = samples.flatMap(sample => {
+    if (!(sample.vo2MlKgMin && sample.vco2MlKgMin) || sample.vo2MlKgMin <= 0 || sample.vco2MlKgMin <= 0) return [];
+    const rer = sample.vco2MlKgMin / sample.vo2MlKgMin;
+    return rer >= 0.65 && rer <= 1.15 ? [{ load: sample.load, value: rer }] : [];
+  });
+  const kineticsFraction = clamp(1 - Math.exp(-Math.max(1, effortDurationSeconds) / Math.max(10, vo2TimeConstantSeconds)), 0, 1);
+
+  const points = Array.from({ length: Math.max(2, pointCount) }, (_, index): MetabolicDemandPoint => {
+    const load = model.input.maxLoad * index / (Math.max(2, pointCount) - 1);
+    const oxygenDemand = Math.max(0, (regression?.intercept ?? fallbackIntercept) + (regression?.slope ?? fallbackSlope) * load);
+    const interpolatedVo2 = interpolateSample(vo2Samples, load);
+    const steadyVo2 = Math.min(model.input.vo2maxMlKgMin, interpolatedVo2 ?? oxygenDemand);
+    const actualVo2 = Math.min(oxygenDemand, steadyVo2 * kineticsFraction);
+    const oxygenDeficit = Math.max(0, oxygenDemand - actualVo2);
+    const production = lactateFluxAt(model, load, model.input.baselineLactateMmol + 3).productionMmolLMin;
+    const glycolyticCapacity = production * 3;
+    const anaerobic = Math.min(oxygenDeficit, glycolyticCapacity);
+    const unmet = Math.max(0, oxygenDeficit - anaerobic);
+    const total = Math.max(0.001, oxygenDemand);
+    const measuredRer = interpolateSample(rerSamples, load);
+    const rer = clamp(measuredRer ?? (0.7 + 0.3 * load / Math.max(1, model.input.maxLoad)), 0.7, 1);
+    const aerobicCarbFraction = clamp((rer - 0.7) / 0.3, 0, 1);
+    const fatEquivalent = actualVo2 * (1 - aerobicCarbFraction);
+    const carbohydrateEquivalent = actualVo2 * aerobicCarbFraction + anaerobic;
+    const substrateTotal = Math.max(0.001, fatEquivalent + carbohydrateEquivalent);
+    return {
+      load: round(load, 1),
+      oxygenDemandMlKgMin: round(oxygenDemand, 1),
+      actualVo2MlKgMin: round(actualVo2, 1),
+      oxygenDeficitMlKgMin: round(oxygenDeficit, 1),
+      aerobicPercent: round(actualVo2 / total * 100, 1),
+      anaerobicPercent: round(anaerobic / total * 100, 1),
+      unmetPercent: round(unmet / total * 100, 1),
+      fatPercent: round(fatEquivalent / substrateTotal * 100, 1),
+      carbohydratePercent: round(carbohydrateEquivalent / substrateTotal * 100, 1),
+      rer: round(rer, 2),
+      rerSource: measuredRer == null ? 'estimated' : 'measured',
+    };
+  });
+
+  return { points, demandSource, vo2TimeConstantSeconds };
 }

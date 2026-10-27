@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { createLactateDynamicsModel, estimateRecoveryMinutes, lactateFluxAt, simulateLactateProtocol } from './lactateDynamics';
+import {
+  buildMetabolicDemandCurve,
+  createLactateDynamicsModel,
+  estimateMLSS,
+  estimateRecoveryMinutes,
+  evaluateConstantLoadTrials,
+  lactateFluxAt,
+  simulateLactateProtocol,
+} from './lactateDynamics';
 
 const model = createLactateDynamicsModel({
   vlamaxMmolLSecond: 0.45, vo2maxMlKgMin: 60, bodyMassKg: 70,
@@ -23,5 +31,34 @@ describe('dynamic lactate model', () => {
     expect(peak).toBeGreaterThan(1.1);
     expect(timeline[timeline.length - 1].bloodLactateMmol).toBeLessThan(peak);
     expect(estimateRecoveryMinutes(model, peak, 150)).not.toBeNull();
+  });
+
+  it('estimates MLSS with the 30-minute stability criterion', () => {
+    const mlss = estimateMLSS(model);
+    expect(mlss.load).toBeGreaterThan(250);
+    expect(mlss.load).toBeLessThan(380);
+    expect(mlss.drift10To30Mmol).toBeLessThanOrEqual(1);
+  });
+
+  it('only confirms measured MLSS when a higher unstable trial brackets it', () => {
+    const result = evaluateConstantLoadTrials([
+      { id: 'stable', load: 300, lactate10Mmol: 3.2, lactate20Mmol: 3.5, lactate30Mmol: 3.9 },
+      { id: 'unstable', load: 315, lactate10Mmol: 3.8, lactate20Mmol: 4.5, lactate30Mmol: 5.2 },
+    ]);
+    expect(result.status).toBe('confirmed');
+    expect(result.load).toBe(300);
+  });
+
+  it('separates oxygen demand, uptake and anaerobic contribution', () => {
+    const curve = buildMetabolicDemandCurve(model, [
+      { load: 100, vo2MlKgMin: 18, vco2MlKgMin: 14 },
+      { load: 200, vo2MlKgMin: 32, vco2MlKgMin: 27 },
+      { load: 300, vo2MlKgMin: 48, vco2MlKgMin: 45 },
+    ], 60);
+    const hard = curve.points[curve.points.length - 1];
+    expect(curve.demandSource).toBe('measured_regression');
+    expect(hard.oxygenDemandMlKgMin).toBeGreaterThan(hard.actualVo2MlKgMin);
+    expect(hard.anaerobicPercent).toBeGreaterThan(0);
+    expect(hard.fatPercent + hard.carbohydratePercent).toBeCloseTo(100, 0);
   });
 });

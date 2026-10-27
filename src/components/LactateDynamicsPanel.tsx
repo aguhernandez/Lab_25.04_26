@@ -13,6 +13,7 @@ import {
   type LactateProtocolSegment,
 } from '../lib/lactateDynamics';
 import { supabase } from '../lib/supabase';
+import MLSSMetabolicPanel from './MLSSMetabolicPanel';
 
 interface Props {
   testId?: string;
@@ -140,6 +141,8 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
           <div className="mb-3"><h5 className="text-sm font-semibold text-gray-900 dark:text-white">Producción, oxidación y acumulación por carga</h5><p className="text-xs text-gray-500 dark:text-gray-400">Oxidación y neto calculados a {referenceLactate} mmol/L. La línea neta bajo cero indica capacidad de aclaramiento.</p></div>
           <ResponsiveContainer width="100%" height={320}><LineChart data={curve}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="load" stroke="#9ca3af" unit={` ${loadUnit}`} /><YAxis stroke="#9ca3af" unit=" /min" /><Tooltip contentStyle={tooltipStyle} /><Legend /><ReferenceLine y={0} stroke="#6b7280" /><ReferenceLine x={model.parameters.lt2Load} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'LT2', fill: '#7c3aed', fontSize: 11 }} /><Line type="monotone" dataKey="productionMmolLMin" name="Producción" stroke="#e11d48" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="oxidationMmolLMin" name="Oxidación efectiva" stroke="#2563eb" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="oxidationCapacityMmolLMin" name="Oxidación máxima" stroke="#059669" strokeDasharray="5 3" dot={false} /><Line type="monotone" dataKey="netMmolLMin" name="Acumulación neta" stroke="#f59e0b" strokeWidth={2.5} dot={false} /></LineChart></ResponsiveContainer>
         </div>
+
+        <MLSSMetabolicPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} model={model} loadUnit={model.input.loadUnit} />
 
         <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
           <div className="mb-4"><h5 className="text-sm font-semibold text-gray-900 dark:text-white">Simulador de intervalos</h5><p className="text-xs text-gray-500 dark:text-gray-400">Simula el lactato metabólico y el lactato sanguíneo observable con retardo.</p></div>
