@@ -115,7 +115,7 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+      <div className="border-l-4 border-blue-500 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-200">
         Modelo dinámico de un compartimento con retardo sanguíneo. Se calibra con VLamax, VO₂max y los umbrales del atleta; sirve para comparar escenarios, no sustituye una medición directa con trazadores.
       </div>
 
@@ -126,7 +126,7 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
         <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">Volumen de distribución (L/kg)<input className={fieldClass} type="number" min="0.35" max="0.65" step="0.01" value={distribution} onChange={event => setDistribution(event.target.value)} /></label>
       </div>
 
-      {missing.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">Faltan datos para calcular el modelo: {missing.join(', ')}.</div>}
+      {missing.length > 0 && <div className="border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">Faltan datos para calcular el modelo: {missing.join(', ')}.</div>}
 
       {model && selectedFlux && <>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -137,28 +137,28 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
           <Metric label="Equilibrio estimado" value={selectedFlux.equilibriumLactateMmol ?? 'No estable'} unit={selectedFlux.equilibriumLactateMmol == null ? '' : 'mmol/L'} color={selectedFlux.stable ? 'text-emerald-600' : 'text-rose-600'} />
         </div>
 
-        <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+        <section className="border-t border-gray-200 pt-5 dark:border-gray-700">
           <div className="mb-3"><h5 className="text-sm font-semibold text-gray-900 dark:text-white">Producción, oxidación y acumulación por carga</h5><p className="text-xs text-gray-500 dark:text-gray-400">Oxidación y neto calculados a {referenceLactate} mmol/L. La línea neta bajo cero indica capacidad de aclaramiento.</p></div>
           <ResponsiveContainer width="100%" height={320}><LineChart data={curve}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="load" stroke="#9ca3af" unit={` ${loadUnit}`} /><YAxis stroke="#9ca3af" unit=" /min" /><Tooltip contentStyle={tooltipStyle} /><Legend /><ReferenceLine y={0} stroke="#6b7280" /><ReferenceLine x={model.parameters.lt2Load} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'LT2', fill: '#7c3aed', fontSize: 11 }} /><Line type="monotone" dataKey="productionMmolLMin" name="Producción" stroke="#e11d48" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="oxidationMmolLMin" name="Oxidación efectiva" stroke="#2563eb" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="oxidationCapacityMmolLMin" name="Oxidación máxima" stroke="#059669" strokeDasharray="5 3" dot={false} /><Line type="monotone" dataKey="netMmolLMin" name="Acumulación neta" stroke="#f59e0b" strokeWidth={2.5} dot={false} /></LineChart></ResponsiveContainer>
-        </div>
+        </section>
 
         <MLSSMetabolicPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} model={model} loadUnit={model.input.loadUnit} />
 
-        <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+        <section className="border-t border-gray-200 pt-5 dark:border-gray-700">
           <div className="mb-4"><h5 className="text-sm font-semibold text-gray-900 dark:text-white">Simulador de intervalos</h5><p className="text-xs text-gray-500 dark:text-gray-400">Simula el lactato metabólico y el lactato sanguíneo observable con retardo.</p></div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5"><NumberField label={`Trabajo (${loadUnit})`} value={workLoad} onChange={setWorkLoad} /><NumberField label="Duración trabajo (s)" value={workSeconds} onChange={setWorkSeconds} /><NumberField label={`Recuperación (${loadUnit})`} value={recoveryLoad} onChange={setRecoveryLoad} /><NumberField label="Duración recup. (s)" value={recoverySeconds} onChange={setRecoverySeconds} /><NumberField label="Repeticiones" value={repeats} onChange={setRepeats} /></div>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3"><Metric label="Pico sanguíneo" value={peakBloodLactate.toFixed(2)} unit="mmol/L" /><Metric label="Recuperación a basal +0.5" value={recoveryMinutes ?? '>60'} unit="min" /><Metric label="Duración total" value={(timeline.length ? timeline[timeline.length - 1].timeSeconds / 60 : 0).toFixed(1)} unit="min" /></div>
           <div className="mt-4"><ResponsiveContainer width="100%" height={300}><LineChart data={timelineChart}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="minutes" stroke="#9ca3af" unit=" min" /><YAxis stroke="#9ca3af" unit=" mmol/L" /><Tooltip contentStyle={tooltipStyle} /><Legend /><ReferenceLine y={Number(baseline) + 0.5} stroke="#10b981" strokeDasharray="4 4" /><Line type="monotone" dataKey="bloodLactateMmol" name="Lactato sanguíneo" stroke="#7c3aed" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="metabolicLactateMmol" name="Pool metabólico" stroke="#f97316" strokeDasharray="5 3" dot={false} /></LineChart></ResponsiveContainer></div>
-        </div>
+        </section>
 
-        <details className="rounded-lg border border-gray-200 p-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"><summary className="cursor-pointer font-semibold text-gray-700 dark:text-gray-200">Supuestos y calidad del modelo</summary><div className="mt-2 space-y-1"><p>Producción máxima: {model.parameters.maxProductionMmolLMin} mmol/L/min · oxidación máxima estimada: {model.parameters.maxOxidationMmolLMin} mmol/L/min · pico de oxidación: {model.parameters.oxidationPeakLoad} {loadUnit}.</p><p>El modelo calibra el cruce producción–oxidación alrededor de LT2 y usa un retardo sanguíneo de {model.parameters.bloodLagSeconds}s.</p>{model.issues.map(issue => <p key={issue} className="text-amber-700 dark:text-amber-300">{issue}</p>)}</div></details>
+        <details className="border-y border-gray-200 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"><summary className="cursor-pointer font-semibold text-gray-700 dark:text-gray-200">Supuestos y calidad del modelo</summary><div className="mt-2 space-y-1"><p>Producción máxima: {model.parameters.maxProductionMmolLMin} mmol/L/min · oxidación máxima estimada: {model.parameters.maxOxidationMmolLMin} mmol/L/min · pico de oxidación: {model.parameters.oxidationPeakLoad} {loadUnit}.</p><p>El modelo calibra el cruce producción–oxidación alrededor de LT2 y usa un retardo sanguíneo de {model.parameters.bloodLagSeconds}s.</p>{model.issues.map(issue => <p key={issue} className="text-amber-700 dark:text-amber-300">{issue}</p>)}</div></details>
       </>}
     </div>
   );
 }
 
 function Metric({ label, value, unit, color = 'text-gray-900 dark:text-white' }: { label: string; value: string | number; unit: string; color?: string }) {
-  return <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40"><p className="text-xs text-gray-500 dark:text-gray-400">{label}</p><p className={`mt-1 text-lg font-bold ${color}`}>{value}<span className="ml-1 text-xs font-normal text-gray-500">{unit}</span></p></div>;
+  return <div className="border-l border-gray-200 px-3 first:border-l-0 dark:border-gray-700"><p className="text-xs text-gray-500 dark:text-gray-400">{label}</p><p className={`mt-1 text-lg font-bold ${color}`}>{value}<span className="ml-1 text-xs font-normal text-gray-500">{unit}</span></p></div>;
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

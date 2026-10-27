@@ -213,7 +213,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
       )}
 
       {/* Athlete header card */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden border border-gray-100 dark:border-gray-700">
+      <div className="border-y border-gray-200 dark:border-gray-700">
         <div className="px-6 py-5" style={{ background: 'linear-gradient(135deg, #514163 0%, #6b5580 100%)' }}>
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -252,7 +252,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
           </div>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="py-6 space-y-5">
           <div className="flex gap-1.5 flex-wrap">
             {athlete.sport && (
               <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 capitalize">
@@ -273,8 +273,8 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {athlete.date_of_birth && (
-              <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
-                <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
+              <div className="flex items-center gap-3 border-l-2 border-gray-200 px-3 py-1 dark:border-gray-600">
+                <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
                   <Calendar className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                 </div>
                 <div>
@@ -284,8 +284,8 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
               </div>
             )}
             {athleteEmail && (
-              <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
-                <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
+              <div className="flex items-center gap-3 border-l-2 border-gray-200 px-3 py-1 dark:border-gray-600">
+                <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
                   <Mail className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                 </div>
                 <div className="min-w-0">
@@ -298,21 +298,21 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
             {athlete.weight_kg && (
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-center">
+              <div className="border-l border-gray-200 px-3 text-center first:border-l-0 dark:border-gray-600">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Peso</p>
                 <p className="text-lg font-bold text-gray-900 dark:text-white">{athlete.weight_kg}</p>
                 <p className="text-[10px] text-gray-400">kg</p>
               </div>
             )}
             {athlete.height_cm && (
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-center">
+              <div className="border-l border-gray-200 px-3 text-center first:border-l-0 dark:border-gray-600">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Altura</p>
                 <p className="text-lg font-bold text-gray-900 dark:text-white">{athlete.height_cm}</p>
                 <p className="text-[10px] text-gray-400">cm</p>
               </div>
             )}
             {athlete.body_fat_percent && (
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-center">
+              <div className="border-l border-gray-200 px-3 text-center first:border-l-0 dark:border-gray-600">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">% Grasa</p>
                 <p className="text-lg font-bold text-gray-900 dark:text-white">{athlete.body_fat_percent}</p>
                 <p className="text-[10px] text-gray-400">%</p>
@@ -339,7 +339,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
       <HydrationProfileCard athleteId={athlete.id} />
 
       {/* Test history section */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+      <div className="border-y border-gray-200 py-6 dark:border-gray-700">
         <h3 className="text-2xl font-heading font-bold text-gray-900 dark:text-white mb-6">Historial de Tests</h3>
 
         {loading ? (
@@ -358,7 +358,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
 
             {/* Progress comparison (requires 2+ completed tests with results) */}
             {latestTest && previousTest && (
-              <div className="rounded-2xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30 p-5">
+              <div className="border-y border-gray-200 py-5 dark:border-gray-700">
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-4">
                   Progreso — {formatDate(previousTest.test_date)} → {formatDate(latestTest.test_date)}
                 </p>
@@ -426,7 +426,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
 
             {/* VO2max trend chart */}
             {chartData.length >= 2 && (
-              <div className="rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+              <div className="border-t border-gray-200 pt-5 dark:border-gray-700">
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-4">
                   Evolución Fisiológica
                 </p>
@@ -499,16 +499,16 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
             )}
 
             {/* Test list */}
-            <div className="space-y-3">
+            <div className="divide-y divide-gray-200 border-y border-gray-200 dark:divide-gray-700 dark:border-gray-700">
               {tests.map((test) => {
                 const r = test.result;
                 return (
                   <div
                     key={test.id}
                     onClick={() => test.status === 'completed' && onViewResults(test.id)}
-                    className={`group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden transition-all duration-200 ${
+                    className={`group py-1 transition-colors ${
                       test.status === 'completed'
-                        ? 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5'
+                        ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60'
                         : 'opacity-70'
                     }`}
                   >

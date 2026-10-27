@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
 import { TestDataPoint, AdvancedMetrics } from '../types';
 import { PhysiologyResults, computeStageHRFromTimeline, interpolateHRAtLoad, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
 import {
@@ -8,6 +8,8 @@ import {
 import VLamaxPanel from './VLamaxPanel';
 import LactateDynamicsPanel from './LactateDynamicsPanel';
 
+type AnalysisSurface = 'results' | 'dashboard';
+
 interface AdvancedDataProps {
   testId?: string;
   bodyMassKg?: number | null;
@@ -15,6 +17,7 @@ interface AdvancedDataProps {
   results: PhysiologyResults;
   advancedMetrics?: AdvancedMetrics | null;
   timelineSamples?: TimelineHRSample[] | null;
+  surface?: AnalysisSurface;
 }
 
 type Tab = 'charts' | 'energy' | 'economy' | 'recovery' | 'anaerobic' | 'rawdata';
@@ -36,7 +39,21 @@ const tooltipStyle = {
   fontSize: '13px',
 };
 
+const AnalysisSurfaceContext = createContext<AnalysisSurface>('dashboard');
+
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  const surface = useContext(AnalysisSurfaceContext);
+  if (surface === 'results') {
+    return (
+      <section className="border-t border-gray-200 pt-5 dark:border-gray-700">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="h-7 w-1 bg-[#5A4E6B] dark:bg-[#c4b8d4]" />
+          <h4 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h4>
+        </div>
+        <div>{children}</div>
+      </section>
+    );
+  }
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
       <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] px-6 py-4">
@@ -67,9 +84,10 @@ function MetricTile({
   unit?: string;
   note?: string;
 }) {
+  const surface = useContext(AnalysisSurfaceContext);
   const hasValue = value !== null && value !== undefined && value !== '';
   return (
-    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 text-center">
+    <div className={surface === 'results' ? 'border-l border-gray-200 px-3 text-left first:border-l-0 dark:border-gray-700' : 'bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 text-center'}>
       <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">{label}</p>
       <p className="text-2xl font-bold text-gray-900 dark:text-white">
         {hasValue ? value : '—'}
@@ -82,8 +100,9 @@ function MetricTile({
   );
 }
 
-export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, advancedMetrics, timelineSamples }: AdvancedDataProps) {
+export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
   const [activeTab, setActiveTab] = useState<Tab>('charts');
+  const [selectedStage, setSelectedStage] = useState<number | null>(null);
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
 
   // Compute per-stage HR from timeline samples (last 30s window)
@@ -151,6 +170,15 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
     fat_pct: advancedMetrics?.energyProfile.percent_fat_vs_stage[i] ?? null,
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
+  const selectedPoint = selectedStage == null ? null : chartData.find(point => point.stage === selectedStage) ?? null;
+  const selectChartPoint = (event: any) => {
+    const point = event?.activePayload?.[0]?.payload;
+    if (point?.stage != null) setSelectedStage(Number(point.stage));
+    else if (point?.load != null) {
+      const closest = chartData.reduce((best, candidate) => Math.abs(Number(candidate.load) - Number(point.load)) < Math.abs(Number(best.load) - Number(point.load)) ? candidate : best, chartData[0]);
+      if (closest) setSelectedStage(closest.stage);
+    }
+  };
 
   const lactatePoints = chartData.filter(d => d.lactate != null && d.load != null);
   const lactateCurve = results.lactate_analysis?.curve.map(point => ({
@@ -186,7 +214,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
         </p>
       )}
       <ResponsiveContainer width="100%" height={320}>
-        <LineChart data={chartData}>
+        <LineChart data={chartData} onClick={selectChartPoint}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
           <XAxis dataKey="stage" stroke="#9ca3af" />
           <YAxis stroke="#9ca3af" />
@@ -227,6 +255,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
   ) : null;
 
   return (
+    <AnalysisSurfaceContext.Provider value={surface}>
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D7B] rounded-lg p-2">
@@ -254,6 +283,16 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
           </button>
         ))}
       </div>
+
+      {surface === 'results' && selectedPoint && (
+        <div className="grid grid-cols-2 gap-y-3 border-y border-gray-200 py-3 text-sm sm:grid-cols-5 dark:border-gray-700">
+          <Reading label="Etapa" value={selectedPoint.stage} />
+          <Reading label={hasPower ? 'Potencia' : 'Velocidad'} value={selectedPoint.load ?? '—'} unit={hasPower ? 'W' : 'km/h'} />
+          <Reading label="FC" value={selectedPoint.hr ?? '—'} unit="bpm" />
+          <Reading label="Lactato" value={selectedPoint.lactate ?? '—'} unit="mmol/L" />
+          <Reading label="VO₂" value={selectedPoint.vo2 ?? '—'} unit="ml/kg/min" />
+        </div>
+      )}
 
       {activeTab === 'charts' && (
         <div className="space-y-6">
@@ -294,7 +333,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
                 {lt2Point && <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-purple-600" />LT2 {lt2Point.method} ({lt2Point.lactate.toFixed(1)} mmol/L)</span>}
               </div>
               <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={lactateCurve} margin={{ top: 12, right: 18, bottom: 18, left: 8 }}>
+                <LineChart data={lactateCurve} margin={{ top: 12, right: 18, bottom: 18, left: 8 }} onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="load" type="number" domain={['dataMin', 'dataMax']}
                     name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'}
@@ -307,6 +346,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
                   <Line type="monotone" dataKey="smoothed" stroke="#7c3aed" strokeWidth={2.5} strokeDasharray="7 4" name="Quality-controlled trend" dot={false} />
                   {lt1Point && <ReferenceLine x={lt1Point.load} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: 'LT1', fill: '#b45309', fontSize: 11, position: 'top' }} />}
                   {lt2Point && <ReferenceLine x={lt2Point.load} stroke="#7c3aed" strokeDasharray="5 4" label={{ value: 'LT2', fill: '#6d28d9', fontSize: 11, position: 'top' }} />}
+                  {selectedPoint?.load != null && <ReferenceLine x={selectedPoint.load} stroke="#5A4E6B" strokeDasharray="2 3" strokeOpacity={0.65} />}
                 </LineChart>
               </ResponsiveContainer>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Red dots are untouched measurements. The dashed trend uses isotonic regression for threshold detection; it never replaces the raw samples.</p>
@@ -317,7 +357,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
             <SectionCard title="RPE vs Stage">
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Borg Scale 1–10</p>
               <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={chartData}>
+                <LineChart data={chartData} onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                   <YAxis domain={[0, 10]} stroke="#9ca3af" />
@@ -335,7 +375,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
                 Estimated from VO₂ and intensity. Peak at ~40–60% VO₂max.
               </p>
               <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={chartData}>
+                <LineChart data={chartData} onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="stage" stroke="#9ca3af" />
                   <YAxis domain={[0, 100]} stroke="#9ca3af" unit="%" />
@@ -375,7 +415,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
                   Yellow line = substrate crossover threshold (RER 0.85)
                 </p>
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={chartData}>
+                  <LineChart data={chartData} onClick={selectChartPoint}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="stage" stroke="#9ca3af" />
                     <YAxis domain={[0.65, 1.05]} stroke="#9ca3af" />
@@ -579,7 +619,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
                 </p>
               )}
               <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={chartData}>
+                <LineChart data={chartData} onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                   <YAxis stroke="#9ca3af" />
@@ -822,5 +862,10 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
         </div>
       )}
     </div>
+    </AnalysisSurfaceContext.Provider>
   );
+}
+
+function Reading({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
+  return <div className="border-l border-gray-200 px-3 first:border-l-0 dark:border-gray-700"><p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">{label}</p><p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{typeof value === 'number' ? value.toFixed(1).replace(/\.0$/, '') : value} {unit && <span className="text-xs font-normal text-gray-500">{unit}</span>}</p></div>;
 }

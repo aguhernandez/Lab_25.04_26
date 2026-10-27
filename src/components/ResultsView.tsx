@@ -501,7 +501,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       {/* Unsaved changes indicator */}
       {isDirty && !isSaved && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+        <div className="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-4 py-2.5 dark:bg-amber-900/20">
           <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
           <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">
             {hasSavedResults ? 'You have unsaved changes. Click "Save" to persist them.' : 'New test — results calculated but not yet saved. Click "Save" to persist.'}
@@ -509,7 +509,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         </div>
       )}
       {isSaved && !isDirty && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+        <div className="flex items-center gap-2 border-l-4 border-green-500 bg-green-50 px-4 py-2.5 dark:bg-green-900/20">
           <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
           <span className="text-sm text-green-700 dark:text-green-300 font-medium">
             Results saved{savedSnapshot?.savedAt ? ` · ${new Date(savedSnapshot.savedAt).toLocaleString()}` : ''}
@@ -518,7 +518,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       )}
 
       {results.vo2max && (
-        <section aria-label="VO2max reference comparison" className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
+        <section aria-label="VO2max reference comparison" className="border-t border-gray-200 pt-5 dark:border-gray-700">
           <h2 className="mb-4 text-base font-bold text-gray-900 dark:text-white">
             {language === 'es' ? 'Comparativa VO₂máx por deporte y disciplina' : 'VO₂max comparison by sport and discipline'}
           </h2>
@@ -530,7 +530,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         </section>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg overflow-hidden border border-gray-100 dark:border-gray-700">
+      <section className="border-y border-gray-200 dark:border-gray-700">
         <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
           <div className="flex items-center gap-3">
             <img src="/logo_transp.png" alt="Asciende" className="h-10 w-auto rounded-md bg-white/90 px-1.5 py-1 object-contain" />
@@ -548,7 +548,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           </div>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="py-6 space-y-4">
           <div className="flex flex-wrap gap-3">
             {/* Recalculate */}
             <button
@@ -625,7 +625,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             </button>
           </div>
 
-          <div className="border border-gray-200 dark:border-gray-600 rounded-xl p-4 bg-gray-50 dark:bg-gray-700/40">
+          <div className="border-y border-gray-200 bg-gray-50 py-4 dark:border-gray-600 dark:bg-gray-700/40">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className={`w-2.5 h-2.5 rounded-full ${profileSynced ? 'bg-green-500' : 'bg-yellow-500'}`} />
@@ -665,7 +665,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             )}
           </div>
         </div>
-      </div>
+      </section>
 
       {test.anthropometry_snapshot && (
         <div className={`border-l-4 rounded-lg p-4 ${
@@ -730,7 +730,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
       )}
 
       {showJSONSummary && completeJSON && (
-        <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-lg border-l-4 p-6 ${
+        <div className={`border-l-4 border-y border-gray-200 py-6 pl-4 dark:border-gray-700 ${
           completeJSON.validation.isComplete
             ? 'bg-green-50 dark:bg-green-900/10 border-green-500'
             : 'bg-yellow-50 dark:bg-yellow-900/10 border-yellow-500'
@@ -792,7 +792,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+      <section className="border-y border-gray-200 py-6 dark:border-gray-700">
         <div className="flex justify-between items-start mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Data Quality</h3>
           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -836,7 +836,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             </span>
           )}
         </div>
-      </div>
+      </section>
 
       <div className={showAdvanced ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-6'}>
         <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
@@ -870,7 +870,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             athleteId={athlete?.id}
             onSaved={handleZonesSaved}
           />
-          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
+          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
         </>
       )}
 
