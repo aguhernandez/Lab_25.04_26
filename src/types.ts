@@ -44,9 +44,20 @@ export interface ThresholdOverrides {
   vt2_vo2?: number | null;
   vt2_power?: number | null;
   vt2_pace?: string | null;
+  lactate_lt1_method?: LT1Method;
+  lactate_lt2_method?: LT2Method;
+  lactate_iat_delta_mmol?: number;
 }
 
 export type VTSource = 'estimated_from_lt' | 'manual' | 'direct_measurement';
+export type LT1Method = 'baseline_plus_0_5' | 'fixed_2mmol';
+export type LT2Method = 'dmax' | 'obla_4mmol' | 'iat';
+
+export interface LactateThresholdConfig {
+  lt1Method: LT1Method;
+  lt2Method: LT2Method;
+  iatDeltaMmol: number;
+}
 
 export type ThresholdConfidence = 'measured' | 'estimated' | 'inferred' | 'manual';
 
