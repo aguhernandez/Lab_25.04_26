@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { AdvancedMetrics, Test, TestDataPoint } from '../../types';
 import type { PhysiologyResults, TimelineHRSample } from '../../lib/physiology';
+import { normalizeLongitudinalLactate } from '../../lib/lactateAnalysis';
 import AdvancedData from '../AdvancedData';
 import MetabolicProfile from '../MetabolicProfile';
 import {
@@ -10,7 +11,7 @@ import {
 } from 'recharts';
 
 interface SavedTestAnalysis {
-  test: Pick<Test, 'id' | 'test_date' | 'sport' | 'test_type'>;
+  test: Pick<Test, 'id' | 'test_date' | 'sport' | 'test_type' | 'anthropometry_snapshot'>;
   points: TestDataPoint[];
   timeline: TimelineHRSample[];
   results: PhysiologyResults;
@@ -20,14 +21,6 @@ interface SavedTestAnalysis {
 interface SavedSnapshot {
   results?: PhysiologyResults;
   advancedMetrics?: AdvancedMetrics | null;
-}
-
-function speedKmh(value?: string | null): number | null {
-  if (!value) return null;
-  const pace = value.match(/^(\d+):(\d{2})(?:\s*\/\s*km)?$/i);
-  if (pace) return 60 / (Number(pace[1]) + Number(pace[2]) / 60);
-  const numeric = value.match(/-?\d+(?:[.,]\d+)?/);
-  return numeric ? Number(numeric[0].replace(',', '.')) : null;
 }
 
 export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }) {
@@ -43,7 +36,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
       try {
         const { data: testRows, error: testError } = await supabase
           .from('tests')
-          .select('id, test_date, sport, test_type')
+          .select('id, test_date, sport, test_type, anthropometry_snapshot')
           .eq('athlete_id', athleteId)
           .eq('status', 'completed')
           .order('test_date', { ascending: false });
@@ -89,13 +82,19 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
     .slice(0, 8)
     .reverse(), [tests]);
 
-  const lactateByTest = useMemo(() => lactateHistory.map(test => ({
-    label: new Date(test.test.test_date).toLocaleDateString(es ? 'es-AR' : 'en-US', { month: 'short', year: '2-digit' }),
-    points: test.points.flatMap(point => {
-      const speed = speedKmh(point.speed_pace);
-      return point.lactate != null && speed != null ? [{ speed, lactate: point.lactate, pace: point.speed_pace }] : [];
-    }),
-  })), [lactateHistory, es]);
+  const lactateByTest = useMemo(() => {
+    const normalized = normalizeLongitudinalLactate(lactateHistory.map(test => ({
+      id: test.test.id,
+      date: test.test.test_date,
+      points: test.points,
+      weightKg: test.test.anthropometry_snapshot?.weight_kg,
+    })));
+    const latestBasis = normalized[normalized.length - 1]?.basis;
+    return normalized.filter(series => series.basis === latestBasis).map(series => ({
+      ...series,
+      label: `${new Date(series.date).toLocaleDateString(es ? 'es-AR' : 'en-US', { month: 'short', year: '2-digit' })} · ${series.basis}`,
+    }));
+  }, [lactateHistory, es]);
 
   if (loading) return <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500">{es ? 'Cargando resultados guardados…' : 'Loading saved test results…'}</div>;
   if (tests.length === 0) return null;
@@ -118,11 +117,11 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" dataKey="speed" domain={['dataMin', 'dataMax']} label={{ value: es ? 'Velocidad (km/h)' : 'Speed (km/h)', position: 'insideBottom', offset: -2 }} />
+                <XAxis type="number" dataKey="load" domain={['dataMin', 'dataMax']} label={{ value: lactateByTest[0]?.basis === 'W/kg' ? 'W/kg' : (es ? 'Velocidad (km/h)' : 'Speed (km/h)'), position: 'insideBottom', offset: -2 }} />
                 <YAxis dataKey="lactate" unit=" mmol/L" />
                 <Tooltip />
                 <Legend />
-                {lactateByTest.map((series, index) => <Scatter key={lactateHistory[index].test.id} name={series.label} data={series.points} fill={colors[index % colors.length]} line={{ stroke: colors[index % colors.length], strokeWidth: 2 }} />)}
+                {lactateByTest.map((series, index) => <Scatter key={series.id} name={series.label} data={series.points} fill={colors[index % colors.length]} line={{ stroke: colors[index % colors.length], strokeWidth: 2 }} />)}
               </ScatterChart>
             </ResponsiveContainer>
           </div>
@@ -150,7 +149,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
               </div>
             ))}
           </div>
-          {points.length > 0 && <AdvancedData dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} />}
+          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} />}
           <MetabolicProfile results={results} />
           {[
             { key: 'LT1', value: results.thresholds?.LT1?.percent_vo2max },
