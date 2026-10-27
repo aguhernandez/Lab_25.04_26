@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { TestDataPoint, Athlete, Test, AnthropometryData, ThresholdOverrides, VTSource } from '../types';
+import { TestDataPoint, Athlete, Test, AnthropometryData, ThresholdOverrides, VTSource, LT1Method, LT2Method } from '../types';
 
 interface EditRow {
   id: string;
@@ -15,7 +15,6 @@ interface EditRow {
   vt1_marker: boolean;
   vt2_marker: boolean;
 }
-
 interface EditDataModalProps {
   testId: string;
   dataPoints: TestDataPoint[];
@@ -77,6 +76,9 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
   });
 
   const [vtSource, setVtSource] = useState<VTSource>(existingOverrides?.vt_source ?? 'estimated_from_lt');
+  const [lt1Method, setLt1Method] = useState<LT1Method>(existingOverrides?.lactate_lt1_method ?? 'baseline_plus_0_5');
+  const [lt2Method, setLt2Method] = useState<LT2Method>(existingOverrides?.lactate_lt2_method ?? 'dmax');
+  const [iatDelta, setIatDelta] = useState(String(existingOverrides?.lactate_iat_delta_mmol ?? 1.5));
   const [vtFields, setVtFields] = useState({
     vt1_hr: existingOverrides?.vt1_hr != null ? String(existingOverrides.vt1_hr) : '',
     vt1_vo2: existingOverrides?.vt1_vo2 != null ? String(existingOverrides.vt1_vo2) : '',
@@ -154,6 +156,10 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
       if (lt1Val && !isNaN(lt1Val)) threshold_overrides.lt1_hr = lt1Val;
       if (lt2Val && !isNaN(lt2Val)) threshold_overrides.lt2_hr = lt2Val;
       if (fatmaxVal && !isNaN(fatmaxVal)) threshold_overrides.fatmax_hr = fatmaxVal;
+      threshold_overrides.lactate_lt1_method = lt1Method;
+      threshold_overrides.lactate_lt2_method = lt2Method;
+      const parsedIatDelta = parseFloat(iatDelta);
+      threshold_overrides.lactate_iat_delta_mmol = Number.isFinite(parsedIatDelta) && parsedIatDelta > 0 ? parsedIatDelta : 1.5;
 
       // VT source and manual VT fields
       threshold_overrides.vt_source = vtSource;
@@ -474,6 +480,31 @@ export default function EditDataModal({ testId, dataPoints, athlete, test, onClo
 
           <div className="text-xs text-gray-500 dark:text-gray-400">
             * Required fields. Optional fields left blank will be stored as empty.
+          </div>
+
+          {/* Lactate threshold method selection — functional control, intentionally minimal UI. */}
+          <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <label className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                LT1 method
+                <select className="mt-1.5 w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm" value={lt1Method} onChange={event => setLt1Method(event.target.value as LT1Method)} disabled={saving}>
+                  <option value="baseline_plus_0_5">Baseline + 0.5 mmol/L</option>
+                  <option value="fixed_2mmol">Fixed 2.0 mmol/L</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                LT2 method
+                <select className="mt-1.5 w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm" value={lt2Method} onChange={event => setLt2Method(event.target.value as LT2Method)} disabled={saving}>
+                  <option value="dmax">Dmax</option>
+                  <option value="obla_4mmol">OBLA 4.0 mmol/L</option>
+                  <option value="iat">IAT (baseline + delta)</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                IAT delta (mmol/L)
+                <input type="number" min="0.5" max="5" step="0.1" className="mt-1.5 w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm" value={iatDelta} onChange={event => setIatDelta(event.target.value)} disabled={saving || lt2Method !== 'iat'} />
+              </label>
+            </div>
           </div>
 
           {/* Threshold Overrides */}
