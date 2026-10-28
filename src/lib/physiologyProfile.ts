@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { createClient } from '@supabase/supabase-js';
 import { PhysiologyResults } from './physiology';
 import { Athlete, Test, TrainingZone } from '../types';
-import { calculateZones7, convertTo5Zones, ZoneDefinition, ZoneCalculationOptions } from './trainingZones';
+import { paceToKmh, calculateZones7, convertTo5Zones, ZoneDefinition, ZoneCalculationOptions } from './trainingZones';
 import { Sport } from '../types';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 
@@ -86,10 +86,12 @@ export interface AthleteTrainingZones {
   updated_at: string;
 }
 
-function buildPhysiologyZones(results: PhysiologyResults): TrainingZone[] {
-  const sport: Sport = (results as any).sport ?? 'other';
+function buildPhysiologyZones(results: PhysiologyResults, sport: Sport): TrainingZone[] {
   const dataPoints = (results as any).stage_analysis ?? [];
   const options: ZoneCalculationOptions = {
+    lt1_power: results.lt1_power, lt2_power: results.lt2_power,
+    lt1_speed_kmh: results.lt1_pace ? paceToKmh(results.lt1_pace, sport) : null,
+    lt2_speed_kmh: results.lt2_pace ? paceToKmh(results.lt2_pace, sport) : null,
     vam_kmh: results.vam_kmh,
     pam_watts: results.pam_watts,
     threshold_source: results.has_lactate ? 'lactate' : 'ventilatory',
@@ -143,7 +145,7 @@ export async function updateAthletePhysiologyProfile(
 ): Promise<{ success: boolean; isNewProfile: boolean }> {
   const existing = await fetchAthletePhysiologyProfile(athlete.id);
 
-  const physiologyZones = buildPhysiologyZones(results);
+  const physiologyZones = buildPhysiologyZones(results, test.sport);
 
   const snapshot: PhysiologyProfileSnapshot = {
     date: test.test_date,
@@ -464,30 +466,33 @@ export async function updateTrainingZonesManual(
   modifiedBy: 'coach' | 'athlete'
 ): Promise<boolean> {
   const existing = await fetchAthleteTrainingZones(athleteId);
-  if (!existing) return false;
-
+  if (existing?.locked_to_lab) return false;
+  const now = new Date().toISOString();
   const zoneHistoryEntry: ZoneHistoryEntry = {
-    date: new Date().toISOString(),
+    date: now,
     source: modifiedBy === 'coach' ? 'manual_override_coach' : 'manual_override_athlete',
     modified_by: modifiedBy,
-    zones_snapshot: zones
+    zones_snapshot: zones,
   };
-
-  const zoneHistory: ZoneHistoryEntry[] = [zoneHistoryEntry, ...(existing.zone_history || [])];
-
-  const { error } = await supabase
-    .from('athlete_training_zones')
-    .update({
-      mode: 'manual_override',
-      last_modified_by: modifiedBy,
-      last_modified_at: new Date().toISOString(),
-      heart_rate_zones: zones,
-      zone_history: zoneHistory,
-      updated_at: new Date().toISOString()
-    })
-    .eq('athlete_id', athleteId);
-
-  return !error;
+  const hasHR = zones.some(z => z.hr_min != null || z.hr_max != null);
+  const hasPower = zones.some(z => z.power_min != null || z.power_max != null || z.power_label);
+  const hasPace = zones.some(z => z.pace_min || z.pace_max);
+  // Keep independently prescribed metrics intact; store this method with its own metric.
+  const payload = {
+    athlete_id: athleteId,
+    mode: 'manual_override' as const,
+    last_modified_by: modifiedBy,
+    last_modified_at: now,
+    heart_rate_zones: hasHR ? zones : existing?.heart_rate_zones ?? [],
+    power_zones: hasPower ? zones : existing?.power_zones ?? [],
+    pace_zones: hasPace ? zones : existing?.pace_zones ?? [],
+    zone_history: [zoneHistoryEntry, ...(existing?.zone_history ?? [])],
+    updated_at: now,
+  };
+  const { data, error } = existing
+    ? await supabase.from('athlete_training_zones').update(payload).eq('athlete_id', athleteId).select('athlete_id').maybeSingle()
+    : await supabase.from('athlete_training_zones').upsert(payload, { onConflict: 'athlete_id' }).select('athlete_id').maybeSingle();
+  return !error && data?.athlete_id === athleteId;
 }
 
 export async function lockZonesToLab(athleteId: string, locked: boolean): Promise<boolean> {

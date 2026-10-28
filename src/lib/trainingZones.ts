@@ -1,4 +1,5 @@
 import { Sport } from '../types';
+import { parseSpeedKmh } from './lactateAnalysis';
 
 export type ZoneConfidence = 'measured' | 'estimated' | 'inferred';
 
@@ -18,9 +19,19 @@ export interface ZoneDefinition {
   rpe_max?: number | null;
   description: string;
   confidence?: ZoneConfidence;
+  speed_min_kmh?: number | null;
+  speed_max_kmh?: number | null;
+  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; formula: string; source?: string; custom?: boolean };
+  zone_label?: string;
+  power_label?: string;
+  pace_label?: string;
 }
 
 export interface ZoneCalculationOptions {
+  lt1_power?: number | null;
+  lt2_power?: number | null;
+  lt1_speed_kmh?: number | null;
+  lt2_speed_kmh?: number | null;
   vam_kmh?: number | null;
   pam_watts?: number | null;
   threshold_source?: 'ventilatory' | 'lactate';
@@ -162,93 +173,32 @@ function getHRLabel(zone: number, lang: Language): string | null {
 
 // ---- Internal pace/speed helpers ----
 
-function paceToKmh(pace: string, sport: Sport): number | null {
-  if (!pace || pace.trim() === '') return null;
-  const trimmed = pace.trim();
-
-  if (sport === 'cycling' || sport === 'triathlon') {
-    const num = parseFloat(trimmed.replace(',', '.'));
-    return !isNaN(num) && num > 0 ? num : null;
-  }
-
-  if (sport === 'running') {
-    if (trimmed.includes(':')) {
-      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
-      if (parts.length >= 2) {
-        const mins = parseInt(parts[0]);
-        const secs = parseInt(parts[1]);
-        if (!isNaN(mins) && !isNaN(secs) && (mins + secs / 60) > 0) {
-          return 60 / (mins + secs / 60);
-        }
-      }
-    }
-    const num = parseFloat(trimmed.replace(',', '.'));
-    return !isNaN(num) && num > 0 ? num : null;
-  }
-
-  if (sport === 'swimming') {
-    if (trimmed.includes(':')) {
-      const parts = trimmed.replace(/[^0-9:]/g, '').split(':');
-      if (parts.length >= 2) {
-        const mins = parseInt(parts[0]);
-        const secs = parseInt(parts[1]);
-        const totalMins = mins + secs / 60;
-        if (!isNaN(totalMins) && totalMins > 0) {
-          return (0.1 / totalMins) * 60;
-        }
-      }
-    }
-    return null;
-  }
-
-  return null;
+export function paceToKmh(pace: string, sport: Sport): number | null {
+  const text = pace.trim();
+  return parseSpeedKmh(sport === 'swimming' && text.includes(':') && !text.includes('/') ? `${text}/100m` : text);
 }
 
-function kmhToPace(kmh: number, sport: Sport): string | null {
-  if (!kmh || kmh <= 0) return null;
-
-  if (sport === 'cycling' || sport === 'triathlon') {
-    return (Math.round(kmh * 10) / 10).toString();
-  }
-
-  if (sport === 'running') {
-    const minsPerKm = 60 / kmh;
-    const m = Math.floor(minsPerKm);
-    const s = Math.round((minsPerKm - m) * 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-
-  if (sport === 'swimming') {
-    const minsPer100m = 6 / kmh;
-    const m = Math.floor(minsPer100m);
-    const s = Math.round((minsPer100m - m) * 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-
-  return null;
+export function kmhToPace(kmh: number, sport: Sport): string | null {
+  if (!Number.isFinite(kmh) || kmh <= 0) return null;
+  if (sport !== 'running' && sport !== 'swimming') return (Math.round(kmh * 10) / 10).toString();
+  const seconds = Math.round((sport === 'swimming' ? 360 : 3600) / kmh);
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
-function interpolateHR(
-  currentVal: number,
-  lowVal: number,
-  highVal: number,
-  lowHR: number,
-  highHR: number,
-): number {
-  if (highVal === lowVal) return lowHR;
-  const ratio = Math.max(0, Math.min(1, (currentVal - lowVal) / (highVal - lowVal)));
-  return Math.round(lowHR + ratio * (highHR - lowHR));
+const positive = (value: number | null | undefined): value is number => value != null && Number.isFinite(value) && value > 0;
+
+/** Interpolate only inside the observed HR range; never select the next stage or extrapolate. */
+function atHR(points: Array<{ hr: number; value: number }>, hr: number): number | null {
+  const sorted = points.filter(p => positive(p.hr) && positive(p.value)).sort((a, b) => a.hr - b.hr);
+  const exact = sorted.filter(p => p.hr === hr);
+  if (exact.length) return exact.reduce((sum, p) => sum + p.value, 0) / exact.length;
+  const upper = sorted.findIndex(p => p.hr > hr);
+  if (upper <= 0) return null;
+  const a = sorted[upper - 1], b = sorted[upper];
+  return a.value + (b.value - a.value) * (hr - a.hr) / (b.hr - a.hr);
 }
 
-function ensureValidRange(min: number | null, max: number | null): { min: number | null; max: number | null } {
-  if (min == null || max == null) return { min, max };
-  if (min === max) return { min: min - 1, max: max + 1 };
-  if (min > max) return { min: max, max: min };
-  return { min, max };
-}
-
-// ---- Main unified zone calculation ----
-
+/** Asciende's practical subdivisions around LT1/LT2; not a published 7-zone protocol. */
 export function calculateZones7(
   lt1_hr: number | null,
   lt2_hr: number | null,
@@ -257,267 +207,68 @@ export function calculateZones7(
   dataPoints?: Array<{ heart_rate: number; power_watts?: number | null; speed_pace?: string | null }>,
   options?: ZoneCalculationOptions,
 ): ZoneDefinition[] {
-  const lang: Language = options?.language ?? 'en';
-  const thresholdSource: 'ventilatory' | 'lactate' = options?.threshold_source ?? 'lactate';
-
-  const lt1 = lt1_hr ?? Math.round(hrmax * 0.72);
-  const lt2 = lt2_hr ?? Math.round(hrmax * 0.87);
-  const thresholdConfidence = options?.threshold_confidence ?? 'estimated';
-
-  const hasPower = !!dataPoints?.some(p => p.power_watts != null && p.power_watts > 0);
-  const hasPace = !!dataPoints?.some(p => p.speed_pace && p.speed_pace.trim() !== '');
-
-  // Resolve VAM/PAM
-  let vamKmh: number | null = options?.vam_kmh ?? null;
-  let pamWatts: number | null = options?.pam_watts ?? null;
-  let vamPamConfidence: ZoneConfidence = 'measured';
-
-  if (!vamKmh && dataPoints && hasPace) {
-    let maxSpeed = 0;
-    for (const p of dataPoints) {
-      if (p.speed_pace && p.speed_pace.trim() !== '') {
-        const speed = paceToKmh(p.speed_pace, sport);
-        if (speed !== null && speed > maxSpeed) maxSpeed = speed;
-      }
-    }
-    if (maxSpeed > 0) vamKmh = Math.round(maxSpeed * 10) / 10;
+  const lang = options?.language ?? 'en';
+  const source = options?.threshold_source ?? 'lactate';
+  if (!positive(hrmax)) return [];
+  const lt1 = Math.round(positive(lt1_hr) ? lt1_hr : hrmax * 0.72);
+  const lt2 = Math.round(positive(lt2_hr) ? lt2_hr : hrmax * 0.87);
+  if (!(lt1 > 0 && lt1 < lt2 && lt2 < hrmax)) return [];
+  const hrEdges = [Math.round(lt1 * 0.85), Math.round(lt1 * 0.925), lt1, lt2, Math.floor(hrmax)];
+  if (hrEdges.some((v, i) => i > 0 && v <= hrEdges[i - 1])) return [];
+  const zones: ZoneDefinition[] = Array.from({ length: 7 }, (_, i) => ({
+    zone: i + 1,
+    name: getZone7Name(i + 1, lang, source),
+    hr_min: i === 0 || i >= 5 ? null : hrEdges[i - 1] + 1,
+    hr_max: i < 5 ? hrEdges[i] : null,
+    hr_label: i >= 5 ? getHRLabel(i + 1, lang) : null,
+    rpe_min: [1, 3, 4, 5, 7, 8, 9][i],
+    rpe_max: [3, 4, 5, 6, 8, 9, 10][i],
+    description: getZone7Description(i + 1, lang),
+    confidence: positive(lt1_hr) && positive(lt2_hr) ? 'estimated' : 'inferred',
+    calculation: { method: 'LT1_LT2_physiological', version: '2.0.0', metric: 'combined', reference: lt2,
+      formula: `LT1=${lt1}; LT2=${lt2}; HRmax=${hrmax}; sub-LT1: 85%, 92.5%, 100%; supra-LT2 HR not discriminative for sprints` },
+  }));
+  const points = dataPoints ?? [];
+  const powerAt = (hr: number) => atHR(points.map(p => ({ hr: p.heart_rate, value: p.power_watts ?? NaN })), hr);
+  const p1 = options?.lt1_power ?? powerAt(lt1);
+  const p2 = options?.lt2_power ?? powerAt(lt2);
+  if (positive(p1) && positive(p2) && p1 < p2) {
+    const pam = positive(options?.pam_watts) && options.pam_watts > p2 ? options.pam_watts : p2 * 1.3;
+    const edges = [p1 * 0.85, p1 * 0.925, p1, p2, pam, pam * 1.15].map(Math.round);
+    if (edges.every((v, i) => i === 0 || v > edges[i - 1])) zones.forEach((z, i) => {
+      z.power_min = i === 0 ? 0 : edges[i - 1] + 1;
+      z.power_max = i < edges.length ? edges[i] : null;
+      z.calculation!.formula += `; power LT1=${p1}, LT2=${p2}, PAM=${pam}${positive(options?.pam_watts) && options.pam_watts > p2 ? '' : ' (estimated 1.3×LT2)'}; Z6 ceiling=1.15×PAM; Z7 open`;
+    });
   }
-
-  if (!pamWatts && dataPoints && hasPower) {
-    const maxPwr = Math.max(...dataPoints.map(p => p.power_watts ?? 0));
-    if (maxPwr > 0) pamWatts = maxPwr;
-  }
-
-  // Fallback if still no VAM/PAM
-  if (!vamKmh && !pamWatts) {
-    vamPamConfidence = 'estimated';
-    if (hasPower && dataPoints) {
-      const lt2Power = dataPoints.find(p => p.heart_rate >= lt2)?.power_watts ?? null;
-      if (lt2Power && lt2Power > 0) pamWatts = Math.round(lt2Power * 1.30);
-    }
-    if (hasPace && dataPoints) {
-      const lt2PacePoint = dataPoints
-        .filter(p => p.speed_pace && p.speed_pace.trim() !== '')
-        .reduce((prev, curr) =>
-          Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev,
-        );
-      const lt2Speed = lt2PacePoint?.speed_pace ? paceToKmh(lt2PacePoint.speed_pace, sport) : null;
-      if (lt2Speed && lt2Speed > 0) vamKmh = Math.round(lt2Speed * 1.20 * 10) / 10;
-    }
-  }
-
-  const zoneConfidence: ZoneConfidence =
-    thresholdConfidence === 'measured' && vamPamConfidence === 'measured' ? 'measured' : 'estimated';
-
-  // ---- HR band boundaries ----
-  // Z1: everything below 85% of threshold 1 HR
-  // Z2 & Z3: split the range [85% of threshold 1, threshold 1] into two equal bands
-  // Z4: exact range [threshold 1, threshold 2]
-  // Z5: from threshold 2 to VAM/PAM (HR interpolated)
-  // Z6 & Z7: above VAM/PAM — HR is null (not discriminative at these intensities)
-
-  const t1LowerBound = Math.round(lt1 * 0.85);
-  const z2z3Range = lt1 - t1LowerBound;
-  const z2Upper = t1LowerBound + Math.round(z2z3Range / 2);
-  const z3Upper = lt1;
-
-  const zones: ZoneDefinition[] = [
-    {
-      zone: 1,
-      name: getZone7Name(1, lang, thresholdSource),
-      hr_min: Math.round(hrmax * 0.50),
-      hr_max: t1LowerBound,
-      rpe_min: 1,
-      rpe_max: 3,
-      description: getZone7Description(1, lang),
-      confidence: zoneConfidence,
-    },
-    {
-      zone: 2,
-      name: getZone7Name(2, lang, thresholdSource),
-      hr_min: t1LowerBound + 1,
-      hr_max: z2Upper,
-      rpe_min: 3,
-      rpe_max: 4,
-      description: getZone7Description(2, lang),
-      confidence: zoneConfidence,
-    },
-    {
-      zone: 3,
-      name: getZone7Name(3, lang, thresholdSource),
-      hr_min: z2Upper + 1,
-      hr_max: z3Upper,
-      rpe_min: 4,
-      rpe_max: 5,
-      description: getZone7Description(3, lang),
-      confidence: zoneConfidence,
-    },
-    {
-      zone: 4,
-      name: getZone7Name(4, lang, thresholdSource),
-      hr_min: lt1 + 1,
-      hr_max: lt2,
-      rpe_min: 5,
-      rpe_max: 6,
-      description: getZone7Description(4, lang),
-      confidence: zoneConfidence,
-    },
-    {
-      zone: 5,
-      name: getZone7Name(5, lang, thresholdSource),
-      hr_min: lt2 + 1,
-      hr_max: null, // derived below
-      rpe_min: 7,
-      rpe_max: 8,
-      description: getZone7Description(5, lang),
-      confidence: zoneConfidence,
-    },
-    {
-      zone: 6,
-      name: getZone7Name(6, lang, thresholdSource),
-      hr_min: null,
-      hr_max: null,
-      hr_label: getHRLabel(6, lang),
-      rpe_min: 8,
-      rpe_max: 9,
-      description: getZone7Description(6, lang),
-      confidence: vamPamConfidence,
-    },
-    {
-      zone: 7,
-      name: getZone7Name(7, lang, thresholdSource),
-      hr_min: null,
-      hr_max: null,
-      hr_label: getHRLabel(7, lang),
-      rpe_min: 9,
-      rpe_max: 10,
-      description: getZone7Description(7, lang),
-      confidence: vamPamConfidence,
-    },
-  ];
-
-  // ---- Power zones (cycling) ----
-  if (hasPower && dataPoints) {
-    const maxPower = Math.max(...dataPoints.map(p => p.power_watts ?? 0));
-    const lt1Power = dataPoints.find(p => p.heart_rate >= lt1)?.power_watts ?? maxPower * 0.55;
-    const lt2Power = dataPoints.find(p => p.heart_rate >= lt2)?.power_watts ?? maxPower * 0.75;
-
-    // Z1: below 85% of LT1 power
-    const t1PowerLower = Math.round(lt1Power * 0.85);
-    const z2z3PowerRange = lt1Power - t1PowerLower;
-    const z2PowerUpper = t1PowerLower + Math.round(z2z3PowerRange / 2);
-
-    // Z5: LT2 to PAM
-    const z5MaxPower = pamWatts ?? Math.round(lt2Power * 1.30);
-    // Z6 & Z7: above PAM, split into two equal bands
-    const z67PowerRange = Math.round(maxPower * 1.30) - z5MaxPower;
-    const z6MaxPower = z5MaxPower + Math.round(z67PowerRange / 2);
-    const z7MaxPower = z5MaxPower + z67PowerRange;
-
-    zones[0].power_min = Math.round(maxPower * 0.35);
-    zones[0].power_max = t1PowerLower;
-    zones[1].power_min = t1PowerLower + 1;
-    zones[1].power_max = z2PowerUpper;
-    zones[2].power_min = z2PowerUpper + 1;
-    zones[2].power_max = Math.round(lt1Power);
-    zones[3].power_min = Math.round(lt1Power) + 1;
-    zones[3].power_max = Math.round(lt2Power);
-    zones[4].power_min = Math.round(lt2Power) + 1;
-    zones[4].power_max = z5MaxPower;
-    zones[5].power_min = z5MaxPower + 1;
-    zones[5].power_max = z6MaxPower;
-    zones[6].power_min = z6MaxPower + 1;
-    zones[6].power_max = z7MaxPower;
-
-    // Interpolate HR for Z5 using power as the driver
-    const z5HR = interpolateHR(z5MaxPower, lt2Power, z5MaxPower, lt2, hrmax);
-    zones[4].hr_max = z5HR;
-    zones[5].hr_min = z5HR + 1;
-  }
-
-  // ---- Pace zones (running/swimming) ----
-  if (hasPace && dataPoints) {
-    const points = dataPoints.filter(p => p.speed_pace && p.speed_pace.trim() !== '');
-    if (points.length >= 2) {
-      const lt1PacePoint = points.reduce((prev, curr) =>
-        Math.abs(curr.heart_rate - lt1) < Math.abs(prev.heart_rate - lt1) ? curr : prev,
-      );
-      const lt2PacePoint = points.reduce((prev, curr) =>
-        Math.abs(curr.heart_rate - lt2) < Math.abs(prev.heart_rate - lt2) ? curr : prev,
-      );
-
-      const lt1Speed = lt1PacePoint.speed_pace ? paceToKmh(lt1PacePoint.speed_pace, sport) : null;
-      const lt2Speed = lt2PacePoint.speed_pace ? paceToKmh(lt2PacePoint.speed_pace, sport) : null;
-
-      if (lt1Speed && lt2Speed) {
-        // Z1: below 85% of LT1 speed (slower = lower speed)
-        const t1SpeedLower = lt1Speed * 0.85;
-        const z2z3SpeedRange = lt1Speed - t1SpeedLower;
-        const z2SpeedUpper = t1SpeedLower + z2z3SpeedRange / 2;
-
-        // Z5: LT2 to VAM
-        const vamSpeed = vamKmh ?? lt2Speed * 1.20;
-        // Z6 & Z7: above VAM, split into two equal bands
-        const z67SpeedRange = vamSpeed * 1.30 - vamSpeed;
-        const z6SpeedUpper = vamSpeed + z67SpeedRange / 2;
-        const z7SpeedUpper = vamSpeed + z67SpeedRange;
-
-        // For running/swimming: pace_min = faster (higher speed = lower time), pace_max = slower
-        zones[0].pace_min = null;
-        zones[0].pace_max = kmhToPace(t1SpeedLower, sport);
-        zones[1].pace_min = kmhToPace(z2SpeedUpper, sport);
-        zones[1].pace_max = kmhToPace(t1SpeedLower, sport);
-        zones[2].pace_min = kmhToPace(lt1Speed, sport);
-        zones[2].pace_max = kmhToPace(z2SpeedUpper, sport);
-        zones[3].pace_min = kmhToPace(lt2Speed, sport);
-        zones[3].pace_max = kmhToPace(lt1Speed, sport);
-        zones[4].pace_min = kmhToPace(vamSpeed, sport);
-        zones[4].pace_max = kmhToPace(lt2Speed, sport);
-        zones[5].pace_min = kmhToPace(z7SpeedUpper, sport);
-        zones[5].pace_max = kmhToPace(vamSpeed, sport);
-        zones[6].pace_min = kmhToPace(z7SpeedUpper * 1.0, sport);
-        zones[6].pace_max = kmhToPace(z6SpeedUpper, sport);
-
-        // Interpolate HR for Z5 using speed as the driver
-        const z5HR = interpolateHR(vamSpeed, lt2Speed, vamSpeed, lt2, hrmax);
-        zones[4].hr_max = z5HR;
-        zones[5].hr_min = z5HR + 1;
-      }
+  if (sport === 'running' || sport === 'swimming') {
+    const speedAt = (hr: number) => atHR(points.map(p => ({ hr: p.heart_rate, value: p.speed_pace ? paceToKmh(p.speed_pace, sport) ?? NaN : NaN })), hr);
+    const v1 = options?.lt1_speed_kmh ?? speedAt(lt1);
+    const v2 = options?.lt2_speed_kmh ?? speedAt(lt2);
+    if (positive(v1) && positive(v2) && v1 < v2) {
+      const vam = positive(options?.vam_kmh) && options.vam_kmh > v2 ? options.vam_kmh : v2 * 1.2;
+      const edges = [v1 * 0.85, v1 * 0.925, v1, v2, vam, vam * 1.15];
+      zones.forEach((z, i) => {
+        z.speed_min_kmh = i === 0 ? 0 : edges[i - 1];
+        z.speed_max_kmh = i < edges.length ? edges[i] : null;
+        z.pace_min = z.speed_max_kmh == null ? null : kmhToPace(z.speed_max_kmh, sport);
+        z.pace_max = z.speed_min_kmh > 0 ? kmhToPace(z.speed_min_kmh, sport) : null;
+        z.calculation!.formula += `; speed LT1=${v1}, LT2=${v2}, VAM=${vam}${positive(options?.vam_kmh) && options.vam_kmh > v2 ? '' : ' (estimated 1.2×LT2)'}; Z6 ceiling=1.15×VAM; Z7 open`;
+      });
     }
   }
-
-  // ---- HR-only fallback for Z5 (no power or pace) ----
-  if (!hasPower && !hasPace) {
-    const z5HR = Math.round(lt2 + (hrmax - lt2) * 0.25);
-    zones[4].hr_max = z5HR;
-    zones[5].hr_min = z5HR + 1;
-  }
-
-  // ---- Validate ranges (skip Z6/Z7 HR since they're intentionally null) ----
-  for (const zone of zones) {
-    if (zone.zone <= 5) {
-      const hr = ensureValidRange(zone.hr_min, zone.hr_max);
-      zone.hr_min = hr.min;
-      zone.hr_max = hr.max;
-    }
-
-    if (zone.power_min != null && zone.power_max != null) {
-      const pwr = ensureValidRange(zone.power_min, zone.power_max);
-      zone.power_min = pwr.min;
-      zone.power_max = pwr.max;
-    }
-  }
-
   return zones;
 }
 
 // ---- 5-zone collapse: group 7 zones into 5 ----
-// Grouping: 5Z1 = 7Z1+7Z2, 5Z2 = 7Z3, 5Z3 = 7Z4, 5Z4 = 7Z5+7Z6, 5Z5 = 7Z7
+// Grouping: [1], [2,3], [4], [5], [6,7]. Only for the Asciende physiological method.
 
 // Z1/Z2 split is a practical training convention, not a measured physiological threshold.
 // The 85% of threshold 1 boundary is reused from the 7-zone model to separate recovery from aerobic.
 export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, language?: Language): ZoneDefinition[] {
   const lang: Language = language ?? 'en';
+  if (zones7.length !== 7 || Array.from({ length: 7 }, (_, i) => i + 1).some(n => !zones7.some(z => z.zone === n))) return [];
+  if (zones7.some(z => z.calculation && z.calculation.method !== 'LT1_LT2_physiological')) return [];
   const z = (n: number) => zones7.find(zd => zd.zone === n)!;
 
   const hasPower = zones7.some(zone => zone.power_min != null);
@@ -553,7 +304,7 @@ export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, languag
       description: getZone5Description(2, lang),
       confidence: z(2).confidence,
       ...(hasPower ? { power_min: z(2).power_min, power_max: z(3).power_max } : {}),
-      ...(hasPace ? { pace_min: z(2).pace_min ?? z(3).pace_min, pace_max: z(3).pace_max } : {}),
+      ...(hasPace ? { pace_min: z(3).pace_min, pace_max: z(2).pace_max } : {}),
     },
     {
       zone: 3,
@@ -590,11 +341,16 @@ export function convertTo5Zones(zones7: ZoneDefinition[], _sport: Sport, languag
       description: getZone5Description(5, lang),
       confidence: z(6).confidence,
       ...(hasPower ? { power_min: z(6).power_min, power_max: z(7).power_max } : {}),
-      ...(hasPace ? { pace_min: z(6).pace_min ?? z(7).pace_min, pace_max: z(7).pace_max } : {}),
+      ...(hasPace ? { pace_min: z(7).pace_min, pace_max: z(6).pace_max } : {}),
     },
   ];
 
-  return zones5;
+  const groups = [[1], [2, 3], [4], [5], [6, 7]];
+  return zones5.map((zone, i) => ({ ...zone,
+    speed_min_kmh: z(groups[i][0]).speed_min_kmh,
+    speed_max_kmh: z(groups[i][groups[i].length - 1]).speed_max_kmh,
+    calculation: z(groups[i][0]).calculation,
+  }));
 }
 
 export function buildTrainingZonesData(

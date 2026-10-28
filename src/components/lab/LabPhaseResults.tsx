@@ -313,6 +313,11 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
 
           <MetabolicProfile results={activeResults} />
           <TrainingZonesTable
+            key={`${test?.id}-${athlete.id}`}
+            lt1_power={activeResults.lt1_power}
+            lt2_power={activeResults.lt2_power}
+            lt1_pace={activeResults.lt1_pace}
+            lt2_pace={activeResults.lt2_pace}
             zonesData={activeResults.zones_data}
             zones={activeResults.training_zones}
             sport={test?.sport ?? 'cycling'}
@@ -324,7 +329,12 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
             pam_watts={activeResults.pam_watts}
             thresholdSource={activeResults.threshold_source}
             athleteId={athlete.id}
-            onSaved={(updatedZones) => onUpdate({ trainingZones: { ...session.trainingZones, heart_rate_zones: updatedZones } as any })}
+            onSaved={(updatedZones) => onUpdate({ trainingZones: {
+              ...session.trainingZones,
+              ...(updatedZones.some(z => z.hr_min != null || z.hr_max != null) ? { heart_rate_zones: updatedZones } : {}),
+              ...(updatedZones.some(z => z.power_min != null || z.power_max != null || z.power_label) ? { power_zones: updatedZones } : {}),
+              ...(updatedZones.some(z => z.pace_min || z.pace_max) ? { pace_zones: updatedZones } : {}),
+            } as any })}
           />
 
           {(dataPoints.length > 0 || advancedMetrics) && (

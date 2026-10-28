@@ -1,12 +1,11 @@
 import jsPDF from 'jspdf';
-import type { Athlete, Test, TestDataPoint, TrainingZone } from '../types';
+import type { Athlete, Test, TestDataPoint, TrainingZone, Sport } from '../types';
 import type { PhysiologyResults } from './physiology';
 import type { AdvancedMetrics } from '../types';
 import type { AnthropometryMeasurement, KerrResults } from '../types/anthropometry.types';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import type { PreTestData } from './labSession';
-import { convertTo5Zones, calculateZones7 } from './trainingZones';
-import type { ZoneDefinition } from './trainingZones';
+import { formatZonePace } from './zoneMethods';
 
 async function loadHtml2Canvas(): Promise<typeof import('html2canvas')['default']> {
   const mod = await import('html2canvas');
@@ -1078,7 +1077,7 @@ function renderFatOxidation(b: PDFBuilder, data: ReportData) {
   b.spacer(4);
 }
 
-function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, hasPower: boolean, hasPace: boolean, hasRpe: boolean) {
+function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, hasPower: boolean, hasPace: boolean, hasRpe: boolean, sport: Sport = 'running') {
   b.doc.setFontSize(9);
   b.doc.setFont('helvetica', 'bold');
   b.textColor(C.gray700);
@@ -1109,14 +1108,14 @@ function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, ha
   zones.forEach((zone: TrainingZone, i: number) => {
     const color = ZONE_COLORS[zone.zone] || C.gray500;
     const row: Array<{ value: string; width: number }> = [
-      { value: `Z${zone.zone}`, width: zoneW },
+      { value: `Z${zone.zone_label ?? zone.zone}`, width: zoneW },
       { value: zone.name, width: nameW },
       { value: zone.hr_min != null && zone.hr_max != null
           ? `${zone.hr_min}-${zone.hr_max}`
-          : (zone as any).hr_label || '\u2014', width: hrW },
+          : zone.hr_label || (zone.hr_min != null ? `>=${zone.hr_min}` : zone.hr_max != null ? `<=${zone.hr_max}` : '\u2014'), width: hrW },
     ];
-    if (hasPower) row.push({ value: zone.power_min && zone.power_max ? `${zone.power_min}-${zone.power_max}` : '\u2014', width: powerW });
-    if (hasPace) row.push({ value: zone.pace_min && zone.pace_max ? `${zone.pace_min}-${zone.pace_max}` : '\u2014', width: paceW });
+    if (hasPower) row.push({ value: zone.power_label || (zone.power_min != null && zone.power_max != null ? `${zone.power_min}-${zone.power_max}` : zone.power_min != null ? `>=${zone.power_min}` : zone.power_max != null ? `<=${zone.power_max}` : '\u2014'), width: powerW });
+    if (hasPace) row.push({ value: formatZonePace(zone, sport), width: paceW });
     if (hasRpe) {
       const rpeMin = (zone as any).rpe_min;
       const rpeMax = (zone as any).rpe_max;
@@ -1130,129 +1129,27 @@ function renderZoneTable(b: PDFBuilder, zones: TrainingZone[], title: string, ha
 
 function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOptions) {
   b.sectionHeader(tr('secZones'));
-
-  const manualZones = options.useManualZones && options.manualTrainingZones?.length
-    ? options.manualTrainingZones
-    : null;
-
-  const zones = manualZones ?? data.physiologyResults?.training_zones;
-
-  if (!zones?.length) { b.paragraph('No training zones available.'); return; }
-
+  const manual = options.useManualZones && options.manualTrainingZones?.length ? options.manualTrainingZones : null;
+  const saved = data.physiologyResults?.training_zones;
+  const meta = saved?.[0]?.calculation;
+  const selected = manual ?? (meta && (meta.custom || meta.method !== 'LT1_LT2_physiological') ? saved : null);
   const mode: ZoneDisplayMode = options.zoneDisplayMode ?? '5';
-  const zonesData = data.physiologyResults?.zones_data;
-
-  const computeFlags = (zs: TrainingZone[]) => ({
-    hasPower: zs.some(z => z.power_min || z.power_max),
-    hasPace: zs.some(z => z.pace_min || z.pace_max),
-    hasRpe: zs.some(z => (z as any).rpe_min != null || (z as any).rpe_max != null),
-  });
-
-  if (manualZones) {
-    const lang = getCurrentLanguage();
-    const f = computeFlags(manualZones);
-
-    if (mode === 'both') {
-      // Render both 5-zone and 7-zone tables, preserving manual edits in each.
-      if (manualZones.length === 7) {
-        const z7 = manualZones as ZoneDefinition[];
-        const z5 = convertTo5Zones(z7, 'cycling', lang);
-        const f5 = computeFlags(z5 as unknown as TrainingZone[]);
-        const f7 = f;
-        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
-        b.spacer(3);
-        renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
-      } else {
-        // Manual zones are 5-zone; derive 7-zone from thresholds and overlay manual edits.
-        const z5 = manualZones as ZoneDefinition[];
-        const r = data.physiologyResults;
-        let z7: ZoneDefinition[] = [];
-        if (r?.lt1_hr != null && r?.lt2_hr != null && r?.hrmax != null) {
-          z7 = calculateZones7(r.lt1_hr, r.lt2_hr, r.hrmax, 'cycling', undefined, {
-            vam_kmh: r.vam_kmh, pam_watts: r.pam_watts, threshold_source: r.threshold_source, language: lang,
-          });
-          // Overlay manual HR, RPE, pace from 5-zone onto 7-zone by index
-          z5.forEach((z5z, i) => {
-            if (i < z7.length) {
-              z7[i].hr_min = z5z.hr_min;
-              z7[i].hr_max = z5z.hr_max;
-              z7[i].rpe_min = z5z.rpe_min;
-              z7[i].rpe_max = z5z.rpe_max;
-              z7[i].pace_min = z5z.pace_min;
-              z7[i].pace_max = z5z.pace_max;
-            }
-          });
-        }
-        const f5 = f;
-        const f7 = computeFlags(z7 as unknown as TrainingZone[]);
-        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
-        b.spacer(3);
- if (z7.length > 0) {
-          renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
-        }
-      }
-    } else if (mode === '7') {
-      if (manualZones.length === 7) {
-        renderZoneTable(b, manualZones, tr('zones7Title') || '7-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
-      } else {
-        // Convert 5-zone manual to 7-zone
-        const r = data.physiologyResults;
-        if (r?.lt1_hr != null && r?.lt2_hr != null && r?.hrmax != null) {
-          const z7 = calculateZones7(r.lt1_hr, r.lt2_hr, r.hrmax, 'cycling', undefined, {
-            vam_kmh: r.vam_kmh, pam_watts: r.pam_watts, threshold_source: r.threshold_source, language: getCurrentLanguage(),
-          });
-          manualZones.forEach((z5z, i) => {
-            if (i < z7.length) {
-              z7[i].hr_min = z5z.hr_min;
-              z7[i].hr_max = z5z.hr_max;
-              z7[i].rpe_min = (z5z as any).rpe_min;
-              z7[i].rpe_max = (z5z as any).rpe_max;
-              z7[i].pace_min = z5z.pace_min;
-              z7[i].pace_max = z5z.pace_max;
-            }
-          });
-          const f7 = computeFlags(z7 as unknown as TrainingZone[]);
-          renderZoneTable(b, z7 as unknown as TrainingZone[], tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
-        } else {
-          renderZoneTable(b, manualZones, tr('zones7Title') || '7-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
-        }
-      }
-    } else {
-      // mode === '5'
-      if (manualZones.length === 5) {
-        renderZoneTable(b, manualZones, tr('zones5Title') || '5-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
-      } else {
-        // Convert 7-zone manual to 5-zone
-        const z5 = convertTo5Zones(manualZones as ZoneDefinition[], 'cycling', getCurrentLanguage());
-        const f5 = computeFlags(z5 as unknown as TrainingZone[]);
-        renderZoneTable(b, z5 as unknown as TrainingZone[], tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
-      }
-    }
-  } else if (mode === 'both' && zonesData) {
-    const z5 = zonesData.zones5 as unknown as TrainingZone[];
-    const z7 = zonesData.zones7 as unknown as TrainingZone[];
-    const f5 = computeFlags(z5);
-    const f7 = computeFlags(z7);
-    renderZoneTable(b, z5, tr('zones5Title') || '5-Zone Model', f5.hasPower, f5.hasPace, f5.hasRpe);
-    b.spacer(3);
-    renderZoneTable(b, z7, tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
-  } else if (mode === '7' && zonesData) {
-    const z7 = zonesData.zones7 as unknown as TrainingZone[];
-    const f7 = computeFlags(z7);
-    renderZoneTable(b, z7, tr('zones7Title') || '7-Zone Model', f7.hasPower, f7.hasPace, f7.hasRpe);
-  } else {
-    const f = computeFlags(zones);
-    renderZoneTable(b, zones, tr('zones5Title') || '5-Zone Model', f.hasPower, f.hasPace, f.hasRpe);
-  }
-
-  if (manualZones) {
-    b.spacer(2);
-    b.textColor(C.gray500);
-    b.setJostFont(7, 'normal');
-    b.doc.text('* Manually adjusted zones', b.ml, b.y);
-    b.y += 4;
-  }
-
+  const render = (zones: TrainingZone[]) => {
+    if (!zones.length) return;
+    const calc = zones[0]?.calculation;
+    if (calc) b.paragraph(`${calc.method}${calc.custom ? ' (custom)' : ''} · v${calc.version} · ref=${calc.reference ?? 'n/a'}${calc.restingHR ? `; HRrest=${calc.restingHR}` : ''}${calc.maximumHR ? `; HRmax=${calc.maximumHR}` : ''} · ${calc.formula}`);
+    renderZoneTable(b, zones, `${zones.length} ${getCurrentLanguage() === 'es' ? 'zonas' : 'zones'}`,
+      zones.some(z => z.power_min != null || z.power_max != null || z.power_label),
+      zones.some(z => z.pace_min || z.pace_max), zones.some(z => z.rpe_min != null || z.rpe_max != null), data.test?.sport ?? data.athlete.sport);
+  };
+  // Native/manual methods are not convertible by row index. Always export exactly the saved prescription.
+  if (selected?.length) render(selected);
+  else if (data.physiologyResults?.zones_data) {
+    const sets = data.physiologyResults.zones_data;
+    if (mode === '5' || mode === 'both') render(sets.zones5);
+    if (mode === '7' || mode === 'both') render(sets.zones7);
+  } else if (saved?.length) render(saved);
+  else b.paragraph('No training zones available.');
   b.spacer(4);
 }
 

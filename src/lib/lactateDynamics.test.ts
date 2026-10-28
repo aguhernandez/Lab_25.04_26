@@ -38,7 +38,11 @@ describe('dynamic lactate model', () => {
     const shortEffort = evaluateConstantLoadTrials([{ id: 'short', load: 250, durationMinutes: 25, samples: [{ timeMinutes: 10, lactateMmol: 3 }, { timeMinutes: 30, lactateMmol: 4 }] }]);
     const decline = evaluateConstantLoadTrials([{ id: 'decline', load: 250, durationMinutes: 30, loadConstantVerified: true, samples: [{ timeMinutes: 10, lactateMmol: 5 }, { timeMinutes: 30, lactateMmol: 3 }] }]);
     const unstableLoad = evaluateConstantLoadTrials([{ id: 'variable', load: 250, durationMinutes: 30, loadConstantVerified: true, actualLoadValues: [250, 270], maxLoadDeviationPercent: 3, samples: [{ timeMinutes: 10, lactateMmol: 3 }, { timeMinutes: 30, lactateMmol: 4 }] }]);
-    expect(exactLimit.trials[0].stability).toBe('unstable');
+    expect(exactLimit.trials[0].stability).toBe('stable');
+    for (const [lactate30Mmol, expected] of [[4.199, 'stable'], [4.201, 'unstable'], [4.204, 'unstable']] as const) {
+      const result = evaluateConstantLoadTrials([{ id: 'boundary', load: 250, loadConstantVerified: true, lactate10Mmol: 3.2, lactate30Mmol }]);
+      expect(result.trials[0].stability).toBe(expected);
+    }
     expect(missingSample.trials[0].stability).toBe('inconclusive');
     expect(shortEffort.trials[0].stability).toBe('invalid');
     expect(decline.trials[0].qualityFlags).toContain('unexpected_lactate_decline');

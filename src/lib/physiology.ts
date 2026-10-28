@@ -1,5 +1,5 @@
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
-import { buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
+import { paceToKmh, buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import { analyzeLactate, type LactateAnalysisResult } from './lactateAnalysis';
 import { calculateMovementEconomy } from './movementEconomy';
@@ -242,6 +242,9 @@ export function calculatePhysiology(
 
   const thresholdSource: 'ventilatory' | 'lactate' = valid_lactate_for_thresholds ? 'lactate' : 'ventilatory';
   const zoneOptions: ZoneCalculationOptions = {
+    lt1_power, lt2_power,
+    lt1_speed_kmh: lt1_pace ? paceToKmh(lt1_pace, athlete.sport) : null,
+    lt2_speed_kmh: lt2_pace ? paceToKmh(lt2_pace, athlete.sport) : null,
     vam_kmh,
     pam_watts,
     threshold_source: thresholdSource,

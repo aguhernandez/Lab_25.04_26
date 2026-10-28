@@ -63,7 +63,14 @@ describe('physiological scenario model', () => {
       vlamaxMmolLSecond: 0.45,
       economyImprovementPercent: 10,
     });
-    expect(result?.scenarioModel.input.maxLoad).toBe(330);
+    expect(result?.scenarioModel.input.maxLoad).toBeCloseTo(333.333333);
+    expect(result!.scenarioModel.input.maxLoad * 0.9).toBeCloseTo(base.maxLoad);
+    const worse = buildPhysiologicalScenario(base, { bodyMassKg: 70, absoluteVo2maxLMin: 4.2, vlamaxMmolLSecond: 0.45, economyImprovementPercent: -10 });
+    expect(worse!.scenarioModel.input.maxLoad * 1.1).toBeCloseTo(base.maxLoad);
+    for (const invalidValue of [NaN, Infinity, 0, -1]) {
+      expect(buildPhysiologicalScenario(base, { bodyMassKg: invalidValue, absoluteVo2maxLMin: 4.2, vlamaxMmolLSecond: 0.45 })).toBeNull();
+      expect(buildPhysiologicalScenario({ ...base, distributionVolumeLPerKg: invalidValue }, { bodyMassKg: 70, absoluteVo2maxLMin: 4.2, vlamaxMmolLSecond: 0.45 })).toBeNull();
+    }
     expect(findLactateBalanceLoad(result!.baselineModel, 4)).toBeGreaterThan(0);
   });
 });

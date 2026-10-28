@@ -91,14 +91,17 @@ export const DEFAULT_LACTATE_CONFIG: LactateThresholdConfig = {
 
 export function parseSpeedKmh(value: string | null | undefined): number | null {
   if (!value) return null;
-  const pace = value.trim().match(/^(\d+):([0-5]\d)\s*(?:\/\s*km)?$/i);
+  const text = value.trim();
+  const pace = text.match(/^(\d+):([0-5]\d(?:[.,]\d+)?)\s*(?:\/\s*(km|100\s*m))?$/i);
   if (pace) {
-    const minutes = Number(pace[1]) + Number(pace[2]) / 60;
-    return minutes > 0 ? 60 / minutes : null;
+    const minutes = Number(pace[1]) + Number(pace[2].replace(',', '.')) / 60;
+    const distanceKm = pace[3]?.replace(/\s/g, '').toLowerCase() === '100m' ? 0.1 : 1;
+    return minutes > 0 ? 60 * distanceKm / minutes : null;
   }
-  const numeric = value.match(/-?\d+(?:[.,]\d+)?/);
+  // Do not interpret an unrecognised pace (e.g. 5:99/km) as a numeric speed.
+  const numeric = text.match(/^(\d+(?:[.,]\d+)?)\s*(?:km\/h|kmh|kph)?$/i);
   if (!numeric) return null;
-  const speed = Number(numeric[0].replace(',', '.'));
+  const speed = Number(numeric[1].replace(',', '.'));
   return Number.isFinite(speed) && speed > 0 ? speed : null;
 }
 
@@ -187,6 +190,7 @@ function interpolateThreshold(a: LactateCurvePoint, b: LactateCurvePoint, target
 }
 
 function thresholdAtTarget(curve: LactateCurvePoint[], target: number, method: LactateThresholdResult['method']): LactateThresholdResult | null {
+  if (!curve.length || !Number.isFinite(target) || target < curve[0].smoothed || target > curve[curve.length - 1].smoothed) return null;
   const crossing = curve.findIndex(point => point.smoothed >= target);
   if (crossing < 0) return null;
   if (crossing === 0) return interpolateThreshold(curve[0], curve[0], target, method);
@@ -211,13 +215,14 @@ function dmax(curve: LactateCurvePoint[]): LactateThresholdResult | null {
 }
 
 function calculateFuelProfile(points: TestDataPoint[], weightKg?: number | null): FuelStageResult[] {
-  if (!weightKg || weightKg <= 0) return [];
+  if (!weightKg || !Number.isFinite(weightKg) || weightKg <= 0) return [];
   return points.flatMap(point => {
     const vo2 = point.vo2_ml_kg_min != null ? Number(point.vo2_ml_kg_min) : null;
     const vco2 = point.vco2_ml_kg_min != null ? Number(point.vco2_ml_kg_min) : null;
-    if (!vo2 || !vco2 || vo2 <= 0 || vco2 <= 0) return [];
+    if (!vo2 || !vco2 || !Number.isFinite(vo2) || !Number.isFinite(vco2) || vo2 <= 0 || vco2 <= 0) return [];
     const rer = vco2 / vo2;
-    if (rer < 0.65 || rer > 1.15) return [];
+    // Outside the non-protein oxidation range, expired CO2 cannot quantify fuel use.
+    if (rer < 0.7 || rer > 1) return [];
     const vo2L = vo2 * weightKg / 1000;
     const vco2L = vco2 * weightKg / 1000;
     const fat = Math.max(0, 1.695 * vo2L - 1.701 * vco2L);

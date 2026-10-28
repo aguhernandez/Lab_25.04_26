@@ -266,7 +266,7 @@ export function estimateRecoveryMinutes(
   return recovered ? round(recovered.timeSeconds / 60, 1) : null;
 }
 
-/** Evaluates direct constant-load confirmation trials. Equality at 1.0 is unstable. */
+/** Evaluates the MLSS criterion: rise of no more than the limit from minute 10 to 30. */
 export function evaluateConstantLoadTrials(trials: ConstantLoadLactateTrial[]): MeasuredMLSSResult {
   const evaluated = trials.map(trial => {
     const flags = [...(trial.qualityFlags ?? [])];
@@ -294,9 +294,12 @@ export function evaluateConstantLoadTrials(trials: ConstantLoadLactateTrial[]): 
     if (flags.includes('invalid_protocol_or_measurement') || flags.includes('load_not_constant')) stability = 'invalid';
     else if (at10 == null || at30 == null) flags.push('missing_required_10_or_30_min_sample');
     else {
-      drift = round(at30 - at10, 2);
-      if (drift < -1) flags.push('unexpected_lactate_decline');
-      else if (trial.loadConstantVerified === true) stability = drift < limit ? 'stable' : 'unstable';
+      const rawDrift = at30 - at10;
+      drift = round(rawDrift, 2);
+      // Compare unrounded measurements; tolerate only floating-point representation noise.
+      const tolerance = 8 * Number.EPSILON * Math.max(1, Math.abs(at10), Math.abs(at30), limit);
+      if (rawDrift < -1 - tolerance) flags.push('unexpected_lactate_decline');
+      else if (trial.loadConstantVerified === true) stability = rawDrift <= limit + tolerance ? 'stable' : 'unstable';
     }
     return {
       ...trial,

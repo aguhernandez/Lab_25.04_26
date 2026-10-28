@@ -45,7 +45,10 @@ export function buildPhysiologicalScenario(
   if (
     !(baseMass > 0) || !(targetMass > 0) || !(baseAbsoluteVo2 > 0) ||
     !(targetAbsoluteVo2 > 0) || !(targets.vlamaxMmolLSecond > 0) ||
-    !(baseline.vlamaxMmolLSecond > 0) || !Number.isFinite(economyChange) ||
+    !(baseline.vlamaxMmolLSecond > 0) ||
+    ![baseMass, targetMass, baseAbsoluteVo2, targetAbsoluteVo2, targets.vlamaxMmolLSecond,
+      baseline.vlamaxMmolLSecond, baseline.maxLoad, baseline.distributionVolumeLPerKg].every(value => Number.isFinite(value) && value > 0) ||
+    !Number.isFinite(economyChange) ||
     economyChange <= -50 || economyChange > 50
   ) return null;
 
@@ -53,7 +56,8 @@ export function buildPhysiologicalScenario(
   const scenarioRelativeVo2 = targetAbsoluteVo2 * 1000 / targetMass;
   const distributionPerKg = baseline.distributionVolumeLPerKg;
   const targetDistributionVolume = targetMass * distributionPerKg;
-  const economyLoadFactor = 1 + economyChange / 100;
+  // A cost reduction c means the same oxygen budget supports 1 / (1 - c) times the load.
+  const economyLoadFactor = 1 / (1 - economyChange / 100);
   const scenarioInput: LactateDynamicsInput = {
     ...baseline,
     bodyMassKg: targetMass,

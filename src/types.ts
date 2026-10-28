@@ -141,6 +141,14 @@ export interface TrainingZone {
   rpe_max?: number | null;
   description: string;
   confidence?: ZoneConfidence;
+  hr_label?: string | null;
+  speed_min_kmh?: number | null;
+  speed_max_kmh?: number | null;
+  zone_label?: string;
+  power_label?: string;
+  pace_label?: string;
+  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; formula: string; source?: string; custom?: boolean };
+
 }
 
 export interface TestResults {

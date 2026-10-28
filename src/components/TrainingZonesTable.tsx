@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
-import { Sport } from '../types';
-import { ZoneDefinition, ZoneDisplayMode, TrainingZonesData, getZoneColor, getZoneTextColor, convertTo5Zones, calculateZones7, Language } from '../lib/trainingZones';
+import type { Sport } from '../types';
+import { type ZoneDefinition, type ZoneDisplayMode, type TrainingZonesData, getZoneColor, getZoneTextColor, calculateZones7, convertTo5Zones, paceToKmh } from '../lib/trainingZones';
+import { calculateMethodZones, formatZonePace, ZONE_METHODS, type ZoneMethodId } from '../lib/zoneMethods';
 import { updateTrainingZonesManual } from '../lib/physiologyProfile';
-import { TrainingZone } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface TrainingZonesTableProps {
@@ -11,406 +11,157 @@ interface TrainingZonesTableProps {
   zonesData?: TrainingZonesData | null;
   sport: Sport;
   defaultMode?: ZoneDisplayMode;
-  lt1_hr?: number | null;
-  lt2_hr?: number | null;
-  hrmax?: number | null;
-  vam_kmh?: number | null;
-  pam_watts?: number | null;
+  lt1_hr?: number | null; lt2_hr?: number | null; hrmax?: number | null;
+  lt1_power?: number | null; lt2_power?: number | null;
+  lt1_pace?: string | null; lt2_pace?: string | null;
+  vam_kmh?: number | null; pam_watts?: number | null;
   thresholdSource?: 'ventilatory' | 'lactate';
-  isLocked?: boolean;
-  athleteId?: string;
-  modifiedBy?: 'coach' | 'athlete';
+  isLocked?: boolean; athleteId?: string; modifiedBy?: 'coach' | 'athlete';
   onSaved?: (zones: ZoneDefinition[]) => void;
 }
+type EditField = 'hr_min' | 'hr_max' | 'power_min' | 'power_max' | 'pace_min' | 'pace_max' | 'rpe_min' | 'rpe_max';
+const FIELDS: EditField[] = ['hr_min', 'hr_max', 'power_min', 'power_max', 'pace_min', 'pace_max', 'rpe_min', 'rpe_max'];
+const fieldClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white';
+const range = (low: number | null | undefined, high: number | null | undefined, unit: string) => low != null && high != null ? `${low} – ${high} ${unit}` : low != null ? `≥ ${low} ${unit}` : high != null ? `≤ ${high} ${unit}` : '—';
 
-interface EditRow {
-  hr_min: string;
-  hr_max: string;
-  pace_min: string;
-  pace_max: string;
-  rpe_min: string;
-  rpe_max: string;
-}
-
-export default function TrainingZonesTable({
-  zones,
-  zonesData,
-  sport,
-  defaultMode,
-  lt1_hr,
-  lt2_hr,
-  hrmax,
-  vam_kmh,
-  pam_watts,
-  thresholdSource = 'lactate',
-  isLocked = false,
-  athleteId,
-  modifiedBy = 'coach',
-  onSaved,
-}: TrainingZonesTableProps) {
+export default function TrainingZonesTable(props: TrainingZonesTableProps) {
+  const { zones, zonesData, sport, lt1_hr, lt2_hr, hrmax, lt1_power, lt2_power, lt1_pace, lt2_pace, vam_kmh, pam_watts, thresholdSource = 'lactate', isLocked = false, athleteId, modifiedBy = 'coach', onSaved } = props;
   const { language } = useLanguage();
-  const lang: Language = language;
-  const inferredDefault: ZoneDisplayMode = defaultMode ?? zonesData?.defaultDisplay ?? '5';
-  const [mode, setMode] = useState<ZoneDisplayMode>(inferredDefault);
+  const en = language === 'en';
+  const savedMethod = zones?.[0]?.calculation?.method;
+  const initialMethod: ZoneMethodId = ZONE_METHODS.some(m => m.id === savedMethod) ? savedMethod as ZoneMethodId : 'physiological';
+  const [methodId, setMethodId] = useState<ZoneMethodId>(initialMethod);
+  const [mode, setMode] = useState<ZoneDisplayMode>(zones?.[0]?.calculation && (zones[0].calculation.custom || savedMethod !== 'LT1_LT2_physiological') ? (zones.length === 7 ? '7' : '5') : props.defaultMode ?? zonesData?.defaultDisplay ?? '5');
+  const [reference, setReference] = useState(String(zones?.[0]?.calculation?.reference ?? ''));
+  const [resting, setResting] = useState(String(zones?.[0]?.calculation?.restingHR ?? ''));
+  const [localZones, setLocalZones] = useState<ZoneDefinition[] | null>(null);
   const [editing, setEditing] = useState(false);
-  const [editRows, setEditRows] = useState<Record<number, EditRow>>({});
+  const [edited, setEdited] = useState<Record<number, Record<EditField, string>>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [localZones, setLocalZones] = useState<ZoneDefinition[] | null>(null);
-
-  const resolveZones = (): ZoneDefinition[] => {
-    if (localZones) {
-      // Use manually-saved zones. Convert between 5/7 if needed, preserving edits.
-      if (mode === '7' && localZones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
-        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts, threshold_source: thresholdSource, language: lang });
-        // Preserve manually-edited HR, RPE, pace from the 5-zone version
-        localZones.forEach((z5, i) => {
-          if (i < z7.length) {
-            z7[i].hr_min = z5.hr_min;
-            z7[i].hr_max = z5.hr_max;
-            z7[i].rpe_min = z5.rpe_min;
-            z7[i].rpe_max = z5.rpe_max;
-            z7[i].pace_min = z5.pace_min;
-            z7[i].pace_max = z5.pace_max;
-          }
-        });
-        return z7;
-      }
-      if (mode === '5' && localZones.length === 7) {
-        return convertTo5Zones(localZones, sport, lang);
-      }
-      return localZones;
+  const [saved, setSaved] = useState(false);
+  const [preview, setPreview] = useState(false);
+  // Parent keys isolate athletes/tests. Saved props may arrive after the initial render.
+  useEffect(() => {
+    if (preview || localZones) return;
+    if (savedMethod && ZONE_METHODS.some(m => m.id === savedMethod)) {
+      setMethodId(savedMethod as ZoneMethodId);
+      setReference(String(zones?.[0]?.calculation?.reference ?? ''));
+      setResting(String(zones?.[0]?.calculation?.restingHR ?? ''));
+      setMode(zones?.length === 7 ? '7' : '5');
     }
-    if (zones && zones.length > 0) {
-      if (mode === '7' && zones.length <= 5 && lt1_hr != null && lt2_hr != null && hrmax != null) {
-        const z7 = calculateZones7(lt1_hr, lt2_hr, hrmax, sport, undefined, { vam_kmh, pam_watts, threshold_source: thresholdSource, language: lang });
-        const hasPower = zones.some(z => z.power_min != null);
-        if (hasPower) {
-          z7.forEach((z, i) => {
-            z.power_min = zones[Math.min(i, zones.length - 1)].power_min;
-            z.power_max = zones[Math.min(i, zones.length - 1)].power_max;
-          });
-        }
-        return z7;
-      }
-      if (mode === '5' && zones.length === 7) {
-        return convertTo5Zones(zones as ZoneDefinition[], sport, lang);
-      }
-      return zones as ZoneDefinition[];
-    }
-    if (zonesData) {
-      return mode === '7' ? zonesData.zones7 : zonesData.zones5;
-    }
-    return [];
+  }, [zones, savedMethod, preview, localZones]);
+  const method = ZONE_METHODS.find(m => m.id === methodId)!;
+  const methods = ZONE_METHODS.filter(m => !m.sports || m.sports.includes(sport));
+  const count = method.count === 'both' ? Number(mode) : method.count;
+  const fresh7 = calculateZones7(lt1_hr ?? null, lt2_hr ?? null, hrmax ?? 0, sport, undefined, {
+    lt1_power, lt2_power,
+    lt1_speed_kmh: lt1_pace ? paceToKmh(lt1_pace, sport) : null,
+    lt2_speed_kmh: lt2_pace ? paceToKmh(lt2_pace, sport) : null,
+    vam_kmh, pam_watts, threshold_source: thresholdSource, language,
+  });
+  const physiology = mode === '7' ? fresh7 : convertTo5Zones(fresh7, sport, language);
+  const calculated = methodId === 'physiological' ? { zones: physiology, error: physiology.length ? null : (en ? 'Valid LT1 < LT2 < maximum HR is required.' : 'Se necesita LT1 < LT2 < FC máxima válidos.') }
+    : calculateMethodZones(methodId, { reference: Number(reference), restingHR: Number(resting), hrmax, sport, language });
+  // Saved sets retain their exact native count. Never expand 5 edited zones by index into 7.
+  const savedSet = !preview && zones?.length === count && (zones[0]?.calculation || !zonesData) ? zones : null;
+  const dataSet = methodId === 'physiological' && !preview && !savedMethod && !physiology.length ? (mode === '7' ? zonesData?.zones7 : zonesData?.zones5) : null;
+  const displayZones = localZones ?? savedSet ?? dataSet ?? calculated.zones;
+  const error = displayZones.length ? null : calculated.error;
+  const hasHR = method.metric === 'combined' || method.metric === 'hr';
+  const hasPower = method.metric === 'power' || displayZones.some(z => z.power_min != null || z.power_max != null);
+  const hasPace = method.metric === 'speed' || displayZones.some(z => z.pace_min || z.pace_max);
+  const hasRPE = displayZones.some(z => z.rpe_min != null || z.rpe_max != null);
+  const change = (id: ZoneMethodId) => {
+    setMethodId(id); setLocalZones(null); setEditing(false); setSaveError(null); setSaved(false); setPreview(true);
+    const next = ZONE_METHODS.find(m => m.id === id)!;
+    setReference(next.metric === 'hr' && ['hrmax', 'karvonen'].includes(id) ? String(hrmax ?? '') : '');
   };
-
-  const displayZones = resolveZones();
-  if (displayZones.length === 0) return null;
-
-  const totalZones = displayZones.length as 5 | 7;
-  const hasPower = displayZones.some(z => z.power_min != null);
-  const hasPace = displayZones.some(z => z.pace_min != null || z.pace_max != null);
-
   const startEditing = () => {
-    const rows: Record<number, EditRow> = {};
-    displayZones.forEach(z => {
-      rows[z.zone] = {
-        hr_min: z.hr_min != null ? String(z.hr_min) : '',
-        hr_max: z.hr_max != null ? String(z.hr_max) : '',
-        pace_min: z.pace_min ?? '',
-        pace_max: z.pace_max ?? '',
-        rpe_min: z.rpe_min != null ? String(z.rpe_min) : '',
-        rpe_max: z.rpe_max != null ? String(z.rpe_max) : '',
-      };
-    });
-    setEditRows(rows);
-    setSaveError(null);
-    setEditing(true);
+    setEdited(Object.fromEntries(displayZones.map(z => [z.zone, Object.fromEntries(FIELDS.map(f => [f, z[f] == null ? '' : String(z[f])]))])) as Record<number, Record<EditField, string>>);
+    setEditing(true); setSaveError(null); setSaved(false);
   };
-
-  const cancelEditing = () => {
-    setEditing(false);
-    setEditRows({});
-    setSaveError(null);
-  };
-
-  const updateRow = (zoneNum: number, field: keyof EditRow, value: string) => {
-    setEditRows(prev => ({ ...prev, [zoneNum]: { ...prev[zoneNum], [field]: value } }));
-  };
-
-  const handleSave = async () => {
-    const updatedZones: ZoneDefinition[] = displayZones.map(z => {
-      const row = editRows[z.zone];
-      if (!row) return z;
-      return {
-        ...z,
-        hr_min: row.hr_min ? parseInt(row.hr_min) : (z.hr_min ?? 0),
-        hr_max: row.hr_max ? parseInt(row.hr_max) : (z.hr_max ?? 0),
-        pace_min: row.pace_min || null,
-        pace_max: row.pace_max || null,
-        rpe_min: row.rpe_min ? parseInt(row.rpe_min) : null,
-        rpe_max: row.rpe_max ? parseInt(row.rpe_max) : null,
-      };
-    });
-
-    if (athleteId) {
-      setSaving(true);
-      setSaveError(null);
-      const ok = await updateTrainingZonesManual(athleteId, updatedZones as TrainingZone[], modifiedBy);
-      setSaving(false);
-      if (!ok) {
-        setSaveError('Failed to save. Please try again.');
-        return;
+  const persist = async () => {
+    let updated = displayZones.map(z => ({ ...z }));
+    if (editing) {
+      updated = updated.map(z => {
+        const row = edited[z.zone];
+        const item = { ...z };
+        FIELDS.forEach(f => { (item as unknown as Record<string, unknown>)[f] = f.startsWith('pace') ? row[f] || null : row[f] === '' ? null : Number(row[f]); });
+        // Manually edited pace supersedes cached speed endpoints.
+        item.speed_min_kmh = undefined; item.speed_max_kmh = undefined;
+        if (item.hr_min != null || item.hr_max != null) item.hr_label = null;
+        item.calculation = { ...(z.calculation ?? { method: methodId, version: '1.0.0', metric: method.metric, reference: Number(reference) || null, formula: method.formula }), custom: true };
+        return item;
+      });
+      for (const z of updated) {
+        for (const [low, high] of [['hr_min', 'hr_max'], ['power_min', 'power_max'], ['rpe_min', 'rpe_max']] as const) {
+          const a = z[low], b = z[high];
+          if ([a, b].some(v => v != null && (!Number.isFinite(v) || v < 0 || !Number.isInteger(v))) || (a != null && b != null && a > b)
+            || (low === 'hr_min' && hrmax != null && hrmax > 0 && [a, b].some(v => v != null && v > hrmax))
+            || (low === 'rpe_min' && [a, b].some(v => v != null && (v < 1 || v > 10)))) {
+            setSaveError(en ? 'Check integer limits, HR maximum and RPE 1–10.' : 'Revisa límites enteros, FC máxima y RPE entre 1 y 10.'); return;
+          }
+        }
+        if ((z.pace_min && !paceToKmh(z.pace_min, sport)) || (z.pace_max && !paceToKmh(z.pace_max, sport))
+          || (z.pace_min && z.pace_max && paceToKmh(z.pace_min, sport)! < paceToKmh(z.pace_max, sport)!)) {
+          setSaveError(en ? 'Enter valid pace limits: faster first, slower second.' : 'Introduce ritmos válidos: primero el más rápido, después el más lento.'); return;
+        }
+      }
+      const paceZones = updated.filter(z => z.pace_min || z.pace_max);
+      if (paceZones.some((z, i) => i > 0 && (!paceZones[i - 1].pace_min || !z.pace_max || paceToKmh(z.pace_max, sport)! < paceToKmh(paceZones[i - 1].pace_min!, sport)!))) {
+        setSaveError(en ? 'Pace zones must increase in speed without overlap.' : 'Las zonas de ritmo deben aumentar en velocidad sin solaparse.'); return;
+      }
+      for (const [low, high] of [['hr_min', 'hr_max'], ['power_min', 'power_max']] as const) {
+        const applicable = updated.filter(z => z[low] != null || z[high] != null);
+        if (applicable.some((z, i) => i > 0 && (applicable[i - 1][high] == null || z[low] == null || z[low]! <= applicable[i - 1][high]!))) {
+          setSaveError(en ? 'Adjacent zones must not overlap.' : 'Las zonas consecutivas no deben solaparse.'); return;
+        }
       }
     }
-
-    setLocalZones(updatedZones);
-    onSaved?.(updatedZones);
-    setEditing(false);
-    setEditRows({});
+    setSaving(true); setSaveError(null);
+    try {
+      if (athleteId && !await updateTrainingZonesManual(athleteId, updated, modifiedBy)) throw new Error('save');
+      setLocalZones(updated); onSaved?.(updated); setEditing(false); setSaved(true);
+    } catch { setSaveError(en ? 'Could not save the zones. Please retry.' : 'No se pudieron guardar las zonas. Inténtalo de nuevo.'); }
+    finally { setSaving(false); }
   };
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-      <div className="bg-gradient-to-r from-gray-800 to-gray-700 dark:from-gray-900 dark:to-gray-800 px-6 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/20 rounded-lg p-2">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-white">Training Zones</h3>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {editing ? (
-              <>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-400 disabled:opacity-60 text-white rounded-lg text-sm font-semibold transition-colors"
-                >
-                  <Check className="w-4 h-4" />
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  onClick={cancelEditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-semibold transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                  Cancel
-                </button>
-              </>
-            ) : (
-              !isLocked && (
-                <button
-                  onClick={startEditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-semibold transition-colors"
-                  title="Edit zones"
-                >
-                  <Pencil className="w-4 h-4" />
-                  Edit
-                </button>
-              )
-            )}
-
-            <div className="flex items-center bg-white/10 rounded-xl p-1 gap-1">
-              <button
-                onClick={() => { setMode('5'); setEditing(false); }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                  mode === '5'
-                    ? 'bg-white text-gray-800 shadow'
-                    : 'text-white/70 hover:text-white'
-                }`}
-              >
-                5 zones
-              </button>
-              <button
-                onClick={() => { setMode('7'); setEditing(false); }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                  mode === '7'
-                    ? 'bg-white text-gray-800 shadow'
-                    : 'text-white/70 hover:text-white'
-                }`}
-              >
-                7 zones
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-6">
-        {saveError && (
-          <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-sm text-red-700 dark:text-red-400">
-            {saveError}
-          </div>
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Zone</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Name</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Heart Rate</th>
-                {hasPower && <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Power</th>}
-                {hasPace && <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Pace / Speed</th>}
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">RPE</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Purpose</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayZones.map((zone) => {
-                const row = editRows[zone.zone];
-                return (
-                  <tr
-                    key={zone.zone}
-                    className="border-b border-gray-100 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                  >
-                    <td className="py-4 px-4">
-                      <div className={`inline-flex items-center justify-center w-10 h-10 rounded-full border-2 font-bold text-sm ${getZoneColor(zone.zone, totalZones)} ${getZoneTextColor(zone.zone, totalZones)}`}>
-                        {zone.zone}
-                      </div>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="font-semibold text-gray-900 dark:text-white">{zone.name}</span>
-                    </td>
-                    <td className="py-4 px-4">
-                      {editing && row ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            value={row.hr_min}
-                            onChange={e => updateRow(zone.zone, 'hr_min', e.target.value)}
-                            className="w-16 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <span className="text-gray-400 text-xs">–</span>
-                          <input
-                            type="number"
-                            value={row.hr_max}
-                            onChange={e => updateRow(zone.zone, 'hr_max', e.target.value)}
-                            className="w-16 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <span className="text-xs text-gray-400">bpm</span>
-                        </div>
-                      ) : (
-                        <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
-                          {zone.hr_min != null && zone.hr_max != null
-                            ? `${zone.hr_min} – ${zone.hr_max} bpm`
-                            : zone.hr_label
-                              ? zone.hr_label
-                              : zone.hr_min != null
-                                ? `${zone.hr_min}+ bpm`
-                                : '—'}
-                        </span>
-                      )}
-                    </td>
-                    {hasPower && (
-                      <td className="py-4 px-4">
-                        {zone.power_min != null && zone.power_max != null ? (
-                          <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
-                            {zone.power_min} – {zone.power_max} W
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 dark:text-gray-500">—</span>
-                        )}
-                      </td>
-                    )}
-                    {hasPace && (
-                      <td className="py-4 px-4">
-                        {editing && row ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              value={row.pace_min}
-                              onChange={e => updateRow(zone.zone, 'pace_min', e.target.value)}
-                              placeholder="min"
-                              className="w-16 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-400 text-xs">–</span>
-                            <input
-                              type="text"
-                              value={row.pace_max}
-                              onChange={e => updateRow(zone.zone, 'pace_max', e.target.value)}
-                              placeholder="max"
-                              className="w-16 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        ) : (
-                          zone.pace_min || zone.pace_max ? (
-                            <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
-                              {zone.pace_min && zone.pace_max
-                                ? `${zone.pace_min} – ${zone.pace_max}`
-                                : (zone.pace_min ?? zone.pace_max)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400 dark:text-gray-500">—</span>
-                          )
-                        )}
-                      </td>
-                    )}
-                    <td className="py-4 px-4">
-                      {editing && row ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={1}
-                            max={10}
-                            value={row.rpe_min}
-                            onChange={e => updateRow(zone.zone, 'rpe_min', e.target.value)}
-                            placeholder="1"
-                            className="w-12 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <span className="text-gray-400 text-xs">–</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={10}
-                            value={row.rpe_max}
-                            onChange={e => updateRow(zone.zone, 'rpe_max', e.target.value)}
-                            placeholder="10"
-                            className="w-12 px-2 py-1 text-sm font-mono rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                      ) : (
-                        zone.rpe_min != null || zone.rpe_max != null ? (
-                          <span className="font-mono text-sm text-gray-700 dark:text-gray-300">
-                            {zone.rpe_min != null && zone.rpe_max != null
-                              ? `${zone.rpe_min} – ${zone.rpe_max}`
-                              : (zone.rpe_min ?? zone.rpe_max)}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 dark:text-gray-500">—</span>
-                        )
-                      )}
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">
-                        {zone.description}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-5 flex items-start gap-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-700">
-          <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-sm text-blue-900 dark:text-blue-100">
-            <strong>Base method:</strong> LT1/LT2 physiological thresholds.
-            {mode === '7'
-              ? ' 7-zone model provides granular physiological precision.'
-              : ' 5-zone model groups zones for practical training application.'}
-            {' '}Adjust based on athlete response.
-          </p>
-        </div>
-      </div>
+  const inputPair = (z: ZoneDefinition, low: EditField, high: EditField) => <div className="flex gap-1">
+    {[low, high].map(f => <input key={f} aria-label={`${z.name} ${f}`} className={`${fieldClass} w-24`} type={f.startsWith('pace') ? 'text' : 'number'} value={edited[z.zone]?.[f] ?? ''} onChange={e => setEdited(prev => ({ ...prev, [z.zone]: { ...prev[z.zone], [f]: e.target.value } }))} />)}
+  </div>;
+  return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+      <div><h3 className="text-lg font-semibold text-gray-900 dark:text-white">{en ? 'Training zones' : 'Zonas de entrenamiento'}</h3><p className="text-xs text-gray-500">{en ? 'Select a method and its reference. Preview before applying.' : 'Elige método y referencia. Compara antes de aplicar.'}</p></div>
+      {method.count === 'both' ? <div className="flex gap-1">{(['5', '7'] as const).map(n => <button key={n} disabled={saving} onClick={() => { setMode(n); setLocalZones(null); setEditing(false); setPreview(true); setSaved(false); }} className={`rounded-lg px-4 py-2 text-sm ${mode === n ? 'bg-[#5A4E6B] text-white' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-white'}`}>{n} {en ? 'zones' : 'zonas'}</button>)}</div> : <span className="rounded-lg bg-[#5A4E6B]/10 px-3 py-2 text-sm font-semibold text-[#5A4E6B] dark:text-purple-200">{count} {en ? 'zones · native method' : 'zonas · método original'}</span>}
     </div>
-  );
+    <div className="space-y-4 p-6">
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{en ? 'Calculation method' : 'Método de cálculo'}<select aria-label={en ? 'Calculation method' : 'Método de cálculo'} disabled={saving} className={`${fieldClass} mt-1`} value={methodId} onChange={e => change(e.target.value as ZoneMethodId)}>{methods.map(m => <option key={m.id} value={m.id}>{m.name} · {m.count === 'both' ? '5/7' : m.count}</option>)}</select></label>
+        {methodId !== 'physiological' && <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{method.referenceLabel}<input className={`${fieldClass} mt-1`} type="number" min="1" step="any" disabled={saving} value={reference} onChange={e => { setReference(e.target.value); setLocalZones(null); setPreview(true); setSaved(false); setEditing(false); }} /></label>}
+        {methodId === 'karvonen' && <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{en ? 'Resting HR (bpm)' : 'FC reposo (bpm)'}<input className={`${fieldClass} mt-1`} type="number" min="1" disabled={saving} value={resting} onChange={e => { setResting(e.target.value); setLocalZones(null); setPreview(true); setSaved(false); setEditing(false); }} /></label>}
+      </div>
+      <div className="border-l-4 border-[#5A4E6B] bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-900/40 dark:text-gray-300"><p>{method.formula}</p>
+        <p className="mt-1 text-xs">{en ? 'Calculated estimates. Metric-specific methods do not infer equivalent HR, power or pace zones.' : 'Estimaciones calculadas. Los métodos por métrica no inventan equivalencias de FC, potencia o ritmo.'} {method.source && <a className="underline" href={method.source} target="_blank" rel="noreferrer">{en ? 'Method reference' : 'Referencia del método'}</a>}</p>
+        {methodId !== 'physiological' && <p className="mt-1 text-xs">{en ? 'Enter the reference for this sport. Laboratory LT2 is not automatically FTP or field-test LTHR.' : 'Introduce la referencia de este deporte. LT2 de laboratorio no se convierte automáticamente en FTP ni LTHR de campo.'}</p>}
+        {displayZones.some(z => z.calculation?.custom) && <p className="mt-1 font-semibold">{en ? 'Custom limits edited from this method.' : 'Límites personalizados a partir de este método.'}</p>}
+      </div>
+      {(error || saveError) && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{saveError ?? error}</p>}
+      {!!displayZones.length && <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-gray-200 text-xs text-gray-500 dark:border-gray-700">
+        <th className="p-3">{en ? 'Zone' : 'Zona'}</th><th className="p-3">{en ? 'Name' : 'Nombre'}</th>{hasHR && <th className="p-3">FC · bpm</th>}{hasPower && <th className="p-3">{en ? 'Power · W' : 'Potencia · W'}</th>}{hasPace && <th className="p-3">{en ? 'Pace (fast → slow)' : 'Ritmo (rápido → lento)'}</th>}{hasRPE && <th className="p-3">RPE · 1–10</th>}
+      </tr></thead><tbody>{displayZones.map(z => <tr key={z.zone} className="border-b border-gray-100 dark:border-gray-700">
+        <td className="p-3"><span className={`inline-flex h-10 min-w-10 items-center justify-center rounded-full border-2 font-bold ${getZoneColor(z.zone, count as 5 | 7)} ${getZoneTextColor(z.zone, count as 5 | 7)}`}>{z.zone_label ?? z.zone}</span></td><td className="p-3 font-semibold text-gray-900 dark:text-white">{z.name}</td>
+        {hasHR && <td className="whitespace-nowrap p-3 font-mono text-gray-700 dark:text-gray-200">{editing ? inputPair(z, 'hr_min', 'hr_max') : z.hr_label || range(z.hr_min, z.hr_max, 'bpm')}</td>}
+        {hasPower && <td className="whitespace-nowrap p-3 font-mono text-gray-700 dark:text-gray-200">{editing && !z.power_label ? inputPair(z, 'power_min', 'power_max') : z.power_label || range(z.power_min, z.power_max, 'W')}</td>}
+        {hasPace && <td className="whitespace-nowrap p-3 font-mono text-gray-700 dark:text-gray-200">{editing ? inputPair(z, 'pace_min', 'pace_max') : formatZonePace(z, sport)}</td>}
+        {hasRPE && <td className="p-3 text-gray-700 dark:text-gray-200">{editing ? inputPair(z, 'rpe_min', 'rpe_max') : range(z.rpe_min, z.rpe_max, '')}</td>}
+      </tr>)}</tbody></table></div>}
+      {!isLocked && !!displayZones.length && <div className="flex flex-wrap items-center gap-2">
+        {!editing && <button disabled={saving} onClick={startEditing} className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:text-white"><Pencil size={15} />{en ? 'Edit limits' : 'Editar límites'}</button>}
+        <button disabled={saving} onClick={persist} className="flex items-center gap-1 rounded-lg bg-[#5A4E6B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={15} />{saving ? (en ? 'Saving…' : 'Guardando…') : (en ? 'Apply and save zones' : 'Aplicar y guardar zonas')}</button>
+        {editing && <button disabled={saving} onClick={() => { setEditing(false); setSaveError(null); }} className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"><X size={15} />{en ? 'Cancel' : 'Cancelar'}</button>}
+        {saved && <span role="status" className="text-sm text-green-700 dark:text-green-300">{en ? 'Zones saved' : 'Zonas guardadas'}</span>}
+      </div>}
+      <p className="text-xs text-gray-500">{en ? 'Open-ended ranges have no artificial ceiling. Rounded pace is for display; exact speed boundaries determine continuous zones. HR does not distinguish short anaerobic and sprint efforts.' : 'Los rangos abiertos no tienen techo artificial. El ritmo se redondea para mostrarlo; los límites exactos se conservan en velocidad. La FC no discrimina esfuerzos anaeróbicos cortos ni sprints.'}</p>
+    </div>
+  </section>;
 }

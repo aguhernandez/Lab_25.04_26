@@ -415,7 +415,9 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
     if (trainingZones) {
       setTrainingZones({
         ...trainingZones,
-        heart_rate_zones: updatedZones as any,
+        ...(updatedZones.some(z => z.hr_min != null || z.hr_max != null) ? { heart_rate_zones: updatedZones as any } : {}),
+        ...(updatedZones.some(z => z.power_min != null || z.power_max != null || z.power_label) ? { power_zones: updatedZones as any } : {}),
+        ...(updatedZones.some(z => z.pace_min || z.pace_max) ? { pace_zones: updatedZones as any } : {}),
         mode: 'manual_override',
         last_modified_by: 'coach',
         last_modified_at: new Date().toISOString(),
@@ -428,8 +430,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         training_zones: updatedZones as any,
         zones_data: {
           ...results.zones_data,
-          zones5: updatedZones,
-          defaultDisplay: '5',
+          ...(updatedZones.length === 7 ? { zones7: updatedZones } : { zones5: updatedZones }),
+          defaultDisplay: updatedZones.length === 7 ? '7' : '5',
         },
       });
     }
@@ -502,7 +504,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           data={reportData}
           defaultType="lab"
           onClose={() => setShowReportBuilder(false)}
-          manualTrainingZones={trainingZones?.heart_rate_zones}
+          manualTrainingZones={results?.training_zones?.[0]?.calculation ? results.training_zones : trainingZones?.heart_rate_zones}
         />
       </div>
     );
@@ -653,7 +655,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'LT1, LT2, OBLA, IAT y MLSS describen criterios distintos. El MLSS solo aparece como medido cuando hay pruebas constantes de confirmación.' : 'LT1, LT2, OBLA, IAT and MLSS use different criteria. MLSS is labelled measured only when constant-load confirmation trials exist.'}</p>
           </div>
           <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
-          <TrainingZonesTable zonesData={results.zones_data} zones={results.training_zones} sport={test.sport} defaultMode="5" lt1_hr={results.lt1_hr} lt2_hr={results.lt2_hr} hrmax={results.hrmax} thresholdSource={results.threshold_source} athleteId={athlete.id} onSaved={handleZonesSaved} />
+          <TrainingZonesTable key={`${test.id}-${athlete.id}`} lt1_power={results.lt1_power} lt2_power={results.lt2_power} lt1_pace={results.lt1_pace} lt2_pace={results.lt2_pace} vam_kmh={results.vam_kmh} pam_watts={results.pam_watts} zonesData={results.zones_data} zones={results.training_zones} sport={test.sport} defaultMode="5" lt1_hr={results.lt1_hr} lt2_hr={results.lt2_hr} hrmax={results.hrmax} thresholdSource={results.threshold_source} athleteId={athlete.id} onSaved={handleZonesSaved} />
         </section>
       )}
 
