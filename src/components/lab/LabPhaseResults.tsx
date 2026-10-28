@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { LabSession, ManualResults } from '../../lib/labSession';
-import { PhysiologyResults, type TimelineHRSample } from '../../lib/physiology';
+import { calculatePhysiology, PhysiologyResults, type TimelineHRSample } from '../../lib/physiology';
 import { supabase } from '../../lib/supabase';
 import { TrainingZone } from '../../types';
 import { buildTrainingZonesData } from '../../lib/trainingZones';
 import MetabolicProfile from '../MetabolicProfile';
 import TrainingZonesTable from '../TrainingZonesTable';
+import ObjectiveZoneBuilder from '../ObjectiveZoneBuilder';
+import ScientificModelPanel from '../ScientificModelPanel';
 import AdvancedData from '../AdvancedData';
 import CoachNotes from '../CoachNotes';
 import { useLanguage, getCurrentLanguage } from '../../contexts/LanguageContext';
@@ -126,7 +128,7 @@ function buildPhysiologyFromManual(m: ManualResults, athlete: NonNullable<LabSes
 }
 
 export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { results, advancedMetrics, dataPoints, test, athlete } = session;
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [timelineSamples, setTimelineSamples] = useState<TimelineHRSample[] | null>(null);
@@ -336,6 +338,9 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
               ...(updatedZones.some(z => z.pace_min || z.pace_max) ? { pace_zones: updatedZones } : {}),
             } as any })}
           />
+
+          <ObjectiveZoneBuilder points={dataPoints} sport={test?.sport ?? 'cycling'} results={activeResults} language={language} />
+          {dataPoints.length > 0 && <ScientificModelPanel results={activeResults} points={dataPoints} language={language} savedAlgorithmVersion={null} saved={false} sport={test?.sport ?? 'cycling'} calculate={points => calculatePhysiology(athlete, points, test?.anthropometry_snapshot?.threshold_overrides)} />}
 
           {(dataPoints.length > 0 || advancedMetrics) && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">

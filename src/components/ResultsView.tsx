@@ -22,6 +22,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { createModelResultProvenance, type ModelResultProvenance } from '../lib/scientificValidation';
 import MetabolicFingerprint from './MetabolicFingerprint';
 import ScientificModelPanel from './ScientificModelPanel';
+import ObjectiveZoneBuilder from './ObjectiveZoneBuilder';
 
 interface ResultsViewProps {
   testId: string;
@@ -656,6 +657,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           </div>
           <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
           <TrainingZonesTable key={`${test.id}-${athlete.id}`} lt1_power={results.lt1_power} lt2_power={results.lt2_power} lt1_pace={results.lt1_pace} lt2_pace={results.lt2_pace} vam_kmh={results.vam_kmh} pam_watts={results.pam_watts} zonesData={results.zones_data} zones={results.training_zones} sport={test.sport} defaultMode="5" lt1_hr={results.lt1_hr} lt2_hr={results.lt2_hr} hrmax={results.hrmax} thresholdSource={results.threshold_source} athleteId={athlete.id} onSaved={handleZonesSaved} />
+          <ObjectiveZoneBuilder points={dataPoints} sport={test.sport} results={results} language={language} />
         </section>
       )}
 

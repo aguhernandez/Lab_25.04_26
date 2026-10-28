@@ -1,0 +1,46 @@
+import { useState } from 'react';
+import type { Sport, TestDataPoint } from '../types';
+import type { PhysiologyResults } from '../lib/physiology';
+import { calculateObjectiveZone, type ObjectiveKind, type ObjectiveTemplate } from '../lib/objectiveZones';
+import { kmhToPace } from '../lib/trainingZones';
+
+const KEY = 'lab.objective-zone-templates.v1';
+const cls = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white';
+function readTemplates(): ObjectiveTemplate[] {
+  try { const v = JSON.parse(localStorage.getItem(KEY) ?? '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x.name === 'string' && ['vo2_percent', 'lactate'].includes(x.kind) && [x.minimum, x.maximum, x.durationSeconds].every(Number.isFinite)) : []; } catch { return []; }
+}
+
+export default function ObjectiveZoneBuilder({ points, sport, results, language }: { points: TestDataPoint[]; sport: Sport; results: PhysiologyResults; language: string }) {
+  const en = language === 'en';
+  const [kind, setKind] = useState<ObjectiveKind>('vo2_percent');
+  const [min, setMin] = useState('90'); const [max, setMax] = useState('90');
+  const [duration, setDuration] = useState('180'); const [name, setName] = useState('');
+  const [templates, setTemplates] = useState<ObjectiveTemplate[]>(readTemplates);
+  const [message, setMessage] = useState('');
+  const template: ObjectiveTemplate = { name: name.trim(), kind, minimum: Number(min), maximum: Number(max), durationSeconds: Number(duration) };
+  const result = calculateObjectiveZone(points, sport, results.vo2max, results.has_vo2 && results.vo2max_confidence === 'measured', template);
+  const errors: Record<string, string> = en ? {
+    invalid_target: 'Enter a positive ordered target range and duration.', measured_vo2_required: 'Measured VO₂max and VO₂ stages are required.', insufficient_stages: 'At least two measured stages with the objective and load are required.', ambiguous_curve: 'The measured curve is not strictly increasing; a unique load cannot be determined.', outside_observed_range: 'The target is outside the measured stage range; no extrapolation is made.',
+  } : {
+    invalid_target: 'Introduce un rango positivo ordenado y una duración válida.', measured_vo2_required: 'Se necesitan VO₂máx y etapas de VO₂ medidos.', insufficient_stages: 'Se necesitan al menos dos etapas con el objetivo y la carga medidos.', ambiguous_curve: 'La curva medida no crece de forma estricta; no se puede determinar una carga única.', outside_observed_range: 'El objetivo está fuera de las etapas medidas; no se extrapola.',
+  };
+  const save = () => {
+    if (!template.name || ![template.minimum, template.maximum, template.durationSeconds].every(Number.isFinite) || template.minimum <= 0 || template.maximum < template.minimum || template.durationSeconds <= 0) { setMessage(en ? 'Enter a name and a valid target.' : 'Indica un nombre y un objetivo válido.'); return; }
+    const next = [...templates.filter(t => t.name !== template.name), template];
+    try { localStorage.setItem(KEY, JSON.stringify(next)); setTemplates(next); setMessage(en ? 'Template saved in this browser.' : 'Plantilla guardada en este navegador.'); } catch { setMessage(en ? 'Could not save this template in the browser.' : 'No se pudo guardar la plantilla en este navegador.'); }
+  };
+  return <section className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+    <h3 className="text-lg font-semibold dark:text-white">{en ? 'Physiological objective builder' : 'Constructor por objetivo fisiológico'}</h3>
+    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{en ? 'Select a target range and effort duration. The load is interpolated within this test’s measured stages.' : 'Elige un rango y la duración del esfuerzo. La carga se interpola entre las etapas medidas de este test.'}</p>
+    <div className="mt-4 grid gap-3 sm:grid-cols-4">
+      <label className="text-xs font-semibold dark:text-gray-200">{en ? 'Objective' : 'Objetivo'}<select className={`${cls} mt-1`} value={kind} onChange={e => { const k = e.target.value as ObjectiveKind; setKind(k); setMin(k === 'vo2_percent' ? '90' : '2'); setMax(k === 'vo2_percent' ? '90' : '2'); }}><option value="vo2_percent">% VO₂máx</option><option value="lactate">{en ? 'Lactate · mmol/L' : 'Lactato · mmol/L'}</option></select></label>
+      <label className="text-xs font-semibold dark:text-gray-200">{en ? 'From' : 'Desde'}<input className={`${cls} mt-1`} type="number" min="0" step="any" value={min} onChange={e => setMin(e.target.value)} /></label>
+      <label className="text-xs font-semibold dark:text-gray-200">{en ? 'To' : 'Hasta'}<input className={`${cls} mt-1`} type="number" min="0" step="any" value={max} onChange={e => setMax(e.target.value)} /></label>
+      <label className="text-xs font-semibold dark:text-gray-200">{en ? 'Duration · seconds' : 'Duración · segundos'}<input className={`${cls} mt-1`} type="number" min="1" value={duration} onChange={e => setDuration(e.target.value)} /></label>
+    </div>
+    {'error' in result ? <p role="status" className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{errors[result.error]}</p> : <div className="mt-4 rounded-lg bg-purple-50 p-4 text-sm text-gray-900 dark:bg-purple-900/30 dark:text-white"><strong>{result.minLoad.toFixed(1)}–{result.maxLoad.toFixed(1)} {result.unit}</strong>{result.unit === 'km/h' && <span> · {kmhToPace(result.maxLoad, sport)}–{kmhToPace(result.minLoad, sport)} {sport === 'swimming' ? '/100 m' : '/km'}</span>}<p className="mt-1">{en ? 'Interpolated from measured stages.' : 'Interpolado a partir de etapas medidas.'}</p></div>}
+    <p className="mt-3 text-xs text-gray-600 dark:text-gray-300">{en ? 'Duration is prescribed, not a prediction of how quickly VO₂ or lactate reaches the target. This estimate does not establish that the effort is sustainable.' : 'La duración es prescrita: no predice cuánto tarda el VO₂ o el lactato en alcanzar el objetivo ni demuestra que el esfuerzo sea sostenible.'}</p>
+    <div className="mt-4 flex flex-wrap items-end gap-2"><label className="text-xs dark:text-gray-200">{en ? 'Template name' : 'Nombre de plantilla'}<input className={`${cls} mt-1`} value={name} onChange={e => setName(e.target.value)} /></label><button type="button" className="rounded-lg bg-[#5A4E6B] px-4 py-2 text-sm text-white" onClick={save}>{en ? 'Save template' : 'Guardar plantilla'}</button><select aria-label={en ? 'Load template' : 'Cargar plantilla'} className={`${cls} max-w-64`} value="" onChange={e => { const t = templates[Number(e.target.value)]; if (!t) return; setName(t.name); setKind(t.kind); setMin(String(t.minimum)); setMax(String(t.maximum)); setDuration(String(t.durationSeconds)); setMessage(''); }}><option value="">{en ? 'Load template…' : 'Cargar plantilla…'}</option>{templates.map((t, i) => <option key={`${t.name}-${i}`} value={i}>{t.name}</option>)}</select><button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:text-white" onClick={() => { const next = templates.filter(t => t.name !== name); try { localStorage.setItem(KEY, JSON.stringify(next)); setTemplates(next); setMessage(en ? 'Template removed.' : 'Plantilla eliminada.'); } catch { setMessage(en ? 'Could not remove template.' : 'No se pudo eliminar la plantilla.'); } }}>{en ? 'Delete named template' : 'Eliminar plantilla indicada'}</button></div>
+    <p className="mt-2 text-xs text-gray-500">{message || (en ? 'Templates are stored on this browser, without athlete data.' : 'Las plantillas se guardan en este navegador, sin datos del atleta.')}</p>
+  </section>;
+}
