@@ -3,6 +3,7 @@ import { paceToKmh, buildTrainingZonesData, calculateZones7, convertTo5Zones, Tr
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import { analyzeLactate, type LactateAnalysisResult } from './lactateAnalysis';
 import { calculateMovementEconomy } from './movementEconomy';
+import { fuelFromGasExchange, estimatedRerFromVo2Percent } from './metabolicFuel';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
 
@@ -21,6 +22,7 @@ export interface EnergyMix {
   carb_percent: number;
   fat_grams_per_min: number;
   carb_grams_per_min: number;
+  source: 'measured_vco2' | 'estimated_rer';
 }
 
 export interface StageAnalysis extends TestDataPoint {
@@ -1149,8 +1151,12 @@ function generateStageAnalysis(
     let energy_mix: EnergyMix | null = null;
     if (hasVO2 && point.vo2_ml_kg_min && weightKg) {
       const vo2_l_min = convertVO2ToAbsolute(point.vo2_ml_kg_min, weightKg);
-      const estimatedRER = estimateRERFromVO2Percent(vo2_percent_max || 0);
-      energy_mix = calculateEnergyMix(estimatedRER, vo2_l_min);
+      const vco2 = point.vco2_ml_kg_min;
+      const measured = vco2 != null && vco2 > 0
+        ? fuelFromGasExchange(vo2_l_min, convertVO2ToAbsolute(vco2, weightKg)) : null;
+      const estimatedRER = vo2_percent_max != null ? estimatedRerFromVo2Percent(vo2_percent_max) : null;
+      const fuel = measured ?? (vco2 == null && estimatedRER != null ? fuelFromGasExchange(vo2_l_min, vo2_l_min * estimatedRER) : null);
+      energy_mix = fuel ? toEnergyMix(fuel, measured ? 'measured_vco2' : 'estimated_rer') : null;
     }
 
     return {
@@ -1162,28 +1168,14 @@ function generateStageAnalysis(
   });
 }
 
-function calculateEnergyMix(rer: number, vo2_L_min: number): EnergyMix {
-  const clampedRER = Math.max(0.70, Math.min(1.0, rer));
-
-  const fat_percent = Math.max(0, Math.min(100, ((1.0 - clampedRER) / (1.0 - 0.70)) * 100));
-  const carb_percent = 100 - fat_percent;
-
-  const fat_grams_per_min = (1.695 * vo2_L_min) - (1.701 * vo2_L_min * clampedRER);
-  const carb_grams_per_min = (4.585 * vo2_L_min * clampedRER) - (3.226 * vo2_L_min);
-
+function toEnergyMix(fuel: NonNullable<ReturnType<typeof fuelFromGasExchange>>, source: EnergyMix['source']): EnergyMix {
   return {
-    fat_percent: Math.round(fat_percent * 10) / 10,
-    carb_percent: Math.round(carb_percent * 10) / 10,
-    fat_grams_per_min: Math.max(0, Math.round(fat_grams_per_min * 100) / 100),
-    carb_grams_per_min: Math.max(0, Math.round(carb_grams_per_min * 100) / 100)
+    fat_percent: Math.round(fuel.fatPercent * 10) / 10,
+    carb_percent: Math.round(fuel.carbohydratePercent * 10) / 10,
+    fat_grams_per_min: Math.round(fuel.fatGramsPerMin * 100) / 100,
+    carb_grams_per_min: Math.round(fuel.carbohydrateGramsPerMin * 100) / 100,
+    source,
   };
-}
-
-function estimateRERFromVO2Percent(vo2Percent: number): number {
-  if (vo2Percent < 50) return 0.75;
-  if (vo2Percent < 70) return 0.80 + (vo2Percent - 50) * 0.003;
-  if (vo2Percent < 85) return 0.85 + (vo2Percent - 70) * 0.004;
-  return 0.95 + (vo2Percent - 85) * 0.003;
 }
 
 export function calculateAdvancedMetrics(
@@ -1200,16 +1192,24 @@ export function calculateAdvancedMetrics(
   const vo2max = results.vo2max;
 
   const rer_vs_stage = sorted.map(p => {
-    if (!p.vo2_ml_kg_min || !vo2max) return null;
-    const pct = (p.vo2_ml_kg_min / vo2max) * 100;
-    return Math.round(estimateRERFromVO2Percent(pct) * 1000) / 1000;
+    if (!p.vo2_ml_kg_min) return null;
+    const measured = p.vco2_ml_kg_min && p.vco2_ml_kg_min > 0
+      ? fuelFromGasExchange(p.vo2_ml_kg_min, p.vco2_ml_kg_min) : null;
+    if (measured) return Math.round(measured.rer * 1000) / 1000;
+    if (p.vco2_ml_kg_min != null) return null;
+    const estimated = vo2max ? estimatedRerFromVo2Percent(p.vo2_ml_kg_min / vo2max * 100) : null;
+    return estimated != null ? Math.round(estimated * 1000) / 1000 : null;
   });
 
   const energy_mixes = sorted.map((p, i) => {
-    const rer = rer_vs_stage[i];
-    if (!rer || !p.vo2_ml_kg_min || !weight) return null;
+    if (rer_vs_stage[i] == null || !p.vo2_ml_kg_min || !weight) return null;
     const vo2_l = convertVO2ToAbsolute(p.vo2_ml_kg_min, weight);
-    return calculateEnergyMix(rer, vo2_l);
+    const actualVco2 = p.vco2_ml_kg_min;
+    const estimated = vo2max ? estimatedRerFromVo2Percent(p.vo2_ml_kg_min / vo2max * 100) : null;
+    const fuel = actualVco2 != null
+      ? fuelFromGasExchange(vo2_l, convertVO2ToAbsolute(actualVco2, weight))
+      : estimated != null ? fuelFromGasExchange(vo2_l, vo2_l * estimated) : null;
+    return fuel ? toEnergyMix(fuel, p.vco2_ml_kg_min == null ? 'estimated_rer' : 'measured_vco2') : null;
   });
 
   const percent_fat_vs_stage = energy_mixes.map(m => m ? Math.round(m.fat_percent) : null);
@@ -1242,6 +1242,7 @@ export function calculateAdvancedMetrics(
     movementEconomy,
     energyProfile: {
       rer_vs_stage,
+      rer_source_vs_stage: energy_mixes.map(m => m?.source ?? null),
       percent_fat_vs_stage,
       percent_carb_vs_stage
     },

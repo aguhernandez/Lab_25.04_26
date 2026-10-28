@@ -2275,14 +2275,14 @@ function renderEnergySubstrate(b: PDFBuilder, data: ReportData) {
   const sorted = [...dp].sort((a, b) => a.stage_number - b.stage_number);
   const ep = adv.energyProfile;
 
-  b.paragraph('Estimated distribution of fat and carbohydrate as energy sources per stage, based on Respiratory Exchange Ratio (RER).');
+  b.paragraph('Fuel oxidation from measured VO2/VCO2 where available; stages without VCO2 use estimated RER from VO2 intensity. Estimates are not direct measurements.');
   b.spacer(2);
 
   const cols = [
     { label: 'STAGE', width: 16 },
     { label: 'HR (bpm)', width: 22 },
     { label: 'VO2 (ml/kg/min)', width: 30 },
-    { label: 'RER', width: 20 },
+    { label: 'RER*', width: 20 },
     { label: '% FAT', width: 24 },
     { label: '% CARB', width: 24 },
     { label: 'VISUAL', width: 44 },
@@ -2299,7 +2299,7 @@ function renderEnergySubstrate(b: PDFBuilder, data: ReportData) {
       { value: String(point.stage_number), width: 16 },
       { value: String(point.heart_rate), width: 22 },
       { value: point.vo2_ml_kg_min != null ? point.vo2_ml_kg_min.toFixed(1) : '\u2014', width: 30 },
-      { value: rer.toFixed(3), width: 20 },
+      { value: `${rer.toFixed(3)}${(ep.rer_source_vs_stage?.[i] ?? (point.vco2_ml_kg_min == null ? 'estimated_rer' : 'measured_vco2')) === 'estimated_rer' ? 'e' : ''}`, width: 20 },
       { value: fatPct != null ? `${fatPct.toFixed(0)}%` : '\u2014', width: 24 },
       { value: carbPct != null ? `${carbPct.toFixed(0)}%` : '\u2014', width: 24 },
       { value: '', width: 44 },
@@ -2334,7 +2334,7 @@ function renderEnergySubstrate(b: PDFBuilder, data: ReportData) {
   b.doc.text('Carbohydrate', b.ml + 38, b.y);
   b.y += 6;
 
-  b.paragraph('RER 0.70 = 100% fat oxidation. RER 1.0 = 100% carbohydrate oxidation. Crossover at RER 0.85.');
+  b.paragraph('RER with e = estimated from VO2 intensity; otherwise measured from VCO2. Values outside 0.70–1.00 are excluded from substrate calculation.');
   b.spacer(4);
 }
 

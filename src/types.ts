@@ -219,6 +219,7 @@ export interface MovementEconomy {
 
 export interface EnergyProfile {
   rer_vs_stage: (number | null)[];
+  rer_source_vs_stage?: ('measured_vco2' | 'estimated_rer' | null)[];
   percent_fat_vs_stage: (number | null)[];
   percent_carb_vs_stage: (number | null)[];
 }

@@ -1,4 +1,5 @@
 import type { LactateThresholdConfig, TestDataPoint } from '../types';
+import { fuelFromGasExchange } from './metabolicFuel';
 
 export type LactateIssueSeverity = 'error' | 'warning' | 'info';
 
@@ -220,23 +221,17 @@ function calculateFuelProfile(points: TestDataPoint[], weightKg?: number | null)
     const vo2 = point.vo2_ml_kg_min != null ? Number(point.vo2_ml_kg_min) : null;
     const vco2 = point.vco2_ml_kg_min != null ? Number(point.vco2_ml_kg_min) : null;
     if (!vo2 || !vco2 || !Number.isFinite(vo2) || !Number.isFinite(vco2) || vo2 <= 0 || vco2 <= 0) return [];
-    const rer = vco2 / vo2;
-    // Outside the non-protein oxidation range, expired CO2 cannot quantify fuel use.
-    if (rer < 0.7 || rer > 1) return [];
     const vo2L = vo2 * weightKg / 1000;
     const vco2L = vco2 * weightKg / 1000;
-    const fat = Math.max(0, 1.695 * vo2L - 1.701 * vco2L);
-    const carbohydrate = Math.max(0, 4.585 * vco2L - 3.226 * vo2L);
-    const fatKcal = fat * 9;
-    const carbohydrateKcal = carbohydrate * 4;
-    const total = fatKcal + carbohydrateKcal;
+    const fuel = fuelFromGasExchange(vo2L, vco2L);
+    if (!fuel) return [];
     return [{
       stage: Number(point.stage_number),
-      rer: Math.round(rer * 1000) / 1000,
-      fatGramsPerMin: Math.round(fat * 1000) / 1000,
-      carbohydrateGramsPerMin: Math.round(carbohydrate * 1000) / 1000,
-      fatPercent: total > 0 ? Math.round((fatKcal / total) * 1000) / 10 : 0,
-      carbohydratePercent: total > 0 ? Math.round((carbohydrateKcal / total) * 1000) / 10 : 0,
+      rer: Math.round(fuel.rer * 1000) / 1000,
+      fatGramsPerMin: Math.round(fuel.fatGramsPerMin * 1000) / 1000,
+      carbohydrateGramsPerMin: Math.round(fuel.carbohydrateGramsPerMin * 1000) / 1000,
+      fatPercent: Math.round(fuel.fatPercent * 10) / 10,
+      carbohydratePercent: Math.round(fuel.carbohydratePercent * 10) / 10,
       source: 'measured_vco2' as const,
     }];
   });

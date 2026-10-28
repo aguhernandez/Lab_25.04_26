@@ -1,4 +1,5 @@
 import { tGlobal } from '../contexts/LanguageContext';
+import { estimatedRerFromVo2Percent, fuelFromGasExchange } from './metabolicFuel';
 
 export interface AthletePhysioProfile {
   vo2max: number;
@@ -176,10 +177,14 @@ export function simulateRace(profile: AthletePhysioProfile, scenario: RaceScenar
     (percentVO2max / 100) * 0.85 * estimatedHRmax + estimatedHRmax * 0.15
   );
 
-  const energyCost_kcal = weight_kg * scenario.distance_km * 1.05;
-  const fatPercent = percentVO2max < 65 ? 0.5 : percentVO2max < 80 ? 0.35 : 0.15;
-  const carbsUsed_g = (energyCost_kcal * (1 - fatPercent)) / 4;
-  const fatsUsed_g = (energyCost_kcal * fatPercent) / 9;
+  // Same gas-exchange equations as the test. With no race VCO2 this is an
+  // estimated steady-state RER, so these are scenario estimates only.
+  const estimatedRer = estimatedRerFromVo2Percent(percentVO2max);
+  const vo2LMin = vo2_ml_kg_min * weight_kg / 1000;
+  const fuel = estimatedRer != null ? fuelFromGasExchange(vo2LMin, vo2LMin * estimatedRer) : null;
+  const carbsUsed_g = (fuel?.carbohydrateGramsPerMin ?? 0) * predictedTime_min;
+  const fatsUsed_g = (fuel?.fatGramsPerMin ?? 0) * predictedTime_min;
+  const energyCost_kcal = carbsUsed_g * 4 + fatsUsed_g * 9;
 
   const glycogenStores_g = weight_kg * 0.5 * 0.015 * 1000 + 100;
   const carbsPerKm = carbsUsed_g / scenario.distance_km;
