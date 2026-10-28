@@ -13,6 +13,7 @@ import {
   POPULATION_CATEGORY_LABELS,
   getVO2References,
   getVO2ReferencesByCategory,
+  getReferenceStudyContext,
 } from '../lib/referencePopulations';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -24,6 +25,7 @@ interface VO2ReferenceComparisonProps {
   lactateAtLT2?: number | null;
   sex: Sex;
   defaultSport?: Sport;
+  athleteAge?: number;
   inline?: boolean;
 }
 
@@ -61,6 +63,7 @@ export default function VO2ReferenceComparison({
   lactateAtLT2,
   sex,
   defaultSport,
+  athleteAge,
   inline = false,
 }: VO2ReferenceComparisonProps) {
   const { t, language } = useLanguage();
@@ -69,6 +72,8 @@ export default function VO2ReferenceComparison({
   const [selectedCategory, setSelectedCategory] = useState<PopulationCategory | 'all'>('all');
   const [compareTab, setCompareTab] = useState<CompareTab>('vo2');
   const [refs, setRefs] = useState<VO2Reference[]>([]);
+  const [requireAgeMatch, setRequireAgeMatch] = useState(false);
+  const [selectedSpecialty, setSelectedSpecialty] = useState('all');
   const [showCitations, setShowCitations] = useState(false);
 
   const sportName = (sport: Sport) => english ? ({
@@ -129,17 +134,77 @@ export default function VO2ReferenceComparison({
 
   const sports = [...new Set(VO2_REFERENCES.map(r => r.sport))] as Sport[];
 
-  const refsWithLactate = refs.filter(r => r.lactate_lt1_vo2_percent != null || r.lactate_lt2_vo2_percent != null);
+  const specialtyOptions = [...new Set(refs.map(ref => getReferenceStudyContext(ref).specialty).filter((value): value is string => Boolean(value)))].sort();
+  const ageRangeReferenceCount = refs.filter(ref => {
+    const context = getReferenceStudyContext(ref);
+    return context.ageMin != null && context.ageMax != null;
+  }).length;
+  const comparisonRefs = refs.filter(ref => {
+    const context = getReferenceStudyContext(ref);
+    const agePass = !requireAgeMatch || (athleteAge != null && context.ageMin != null && context.ageMax != null && athleteAge >= context.ageMin && athleteAge <= context.ageMax);
+    const specialtyPass = selectedSpecialty === 'all' || context.specialty === selectedSpecialty;
+    return agePass && specialtyPass;
+  });
+  const refsWithLactate = comparisonRefs.filter(r => r.lactate_lt1_vo2_percent != null || r.lactate_lt2_vo2_percent != null);
+
+  const referenceFilters = (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+      {athleteAge != null && ageRangeReferenceCount > 0 && (
+        <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input className="mt-0.5 accent-blue-600" type="checkbox" checked={requireAgeMatch} onChange={event => setRequireAgeMatch(event.target.checked)} />
+          <span>{english ? `Limit to reported age ranges (athlete: ${athleteAge})` : `Filtrar por rangos de edad publicados (atleta: ${athleteAge})`}</span>
+        </label>
+      )}
+      {athleteAge != null && ageRangeReferenceCount === 0 && (
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          {english ? 'No reference has a reported age range; age matching is unavailable.' : 'Ninguna referencia declara un rango de edad; no se puede filtrar por edad.'}
+        </p>
+      )}
+      {specialtyOptions.length > 0 && (
+        <label className="min-w-44 text-xs text-gray-600 dark:text-gray-300">
+          {english ? 'Specialty' : 'Especialidad'}
+          <select value={selectedSpecialty} onChange={event => setSelectedSpecialty(event.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+            <option value="all">{english ? 'All / not specified' : 'Todas / no especificada'}</option>
+            {specialtyOptions.map(specialty => <option key={specialty} value={specialty}>{specialty}</option>)}
+          </select>
+        </label>
+      )}
+      {(requireAgeMatch || selectedSpecialty !== 'all') && (
+        <button type="button" onClick={() => { setRequireAgeMatch(false); setSelectedSpecialty('all'); }} className="text-xs font-medium text-blue-700 underline dark:text-blue-300">
+          {english ? 'Clear study filters' : 'Quitar filtros de estudio'}
+        </button>
+      )}
+    </div>
+  );
 
   if (refs.length === 0) {
     return (
       <div className="bg-gray-50 dark:bg-gray-700/40 rounded-xl p-4">
-        <p className="text-sm text-gray-500 dark:text-gray-400">{t('vo2ref.noData')} {sportName(selectedSport)} ({sex}).</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {refs.length === 0
+            ? `${t('vo2ref.noData')} ${sportName(selectedSport)} (${sex}).`
+            : english
+              ? 'No population reference matches the selected age range and specialty. Clear the filters or add a reference with these study details.'
+              : 'No hay una referencia poblacional que coincida con la edad y especialidad seleccionadas. Quita los filtros o añade una referencia con esos datos.'}
+        </p>
       </div>
     );
   }
 
-  const vo2values = refs.map(r => r.vo2max_min).concat(refs.map(r => r.vo2max_max));
+  if (comparisonRefs.length === 0) {
+    return (
+      <div className="space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-700/40">
+        {referenceFilters}
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {english
+            ? 'No reference matches these study filters. Clear one or both filters, or add references with the relevant age range or specialty.'
+            : 'Ninguna referencia coincide con estos filtros. Quita uno o ambos filtros o añade referencias con la edad o especialidad correspondiente.'}
+        </p>
+      </div>
+    );
+  }
+
+  const vo2values = comparisonRefs.map(r => r.vo2max_min).concat(comparisonRefs.map(r => r.vo2max_max));
   const scaleMin = Math.min(...vo2values, vo2max) - 3;
   const scaleMax = Math.max(...vo2values, vo2max) + 3;
   const scaleRange = scaleMax - scaleMin;
@@ -147,12 +212,13 @@ export default function VO2ReferenceComparison({
   const toX = (v: number) => Math.max(0, Math.min(100, ((v - scaleMin) / scaleRange) * 100));
   const athleteX = toX(vo2max);
 
-  const closestRef = refs.reduce((best, r) => {
+  const closestRef = comparisonRefs.reduce((best, r) => {
     return Math.abs(vo2max - r.vo2max_mean) < Math.abs(vo2max - best.vo2max_mean) ? r : best;
-  }, refs[0]);
+  }, comparisonRefs[0]);
 
   const diff = Math.round((vo2max - closestRef.vo2max_mean) * 10) / 10;
   const diffLabel = diff > 0 ? `+${diff}` : `${diff}`;
+  const closestContext = getReferenceStudyContext(closestRef);
 
   const lt1VO2 = lactateAtLT1 != null ? lactateAtLT1 : null;
   const lt2VO2 = lactateAtLT2 != null ? lactateAtLT2 : null;
@@ -177,6 +243,13 @@ export default function VO2ReferenceComparison({
 
       <div className={inline ? '' : 'p-6'}>
         <div className="space-y-5">
+
+          <div className="border-l-4 border-blue-400 bg-blue-50 px-3 py-2 text-[11px] leading-4 text-blue-900 dark:bg-blue-900/20 dark:text-blue-100">
+            {english
+              ? 'Study means and ranges are descriptive context, not a validated percentile or diagnostic category. Age, specialty, sample size and protocol are shown only when recorded in the source.'
+              : 'Las medias y rangos publicados son contexto descriptivo, no un percentil validado ni una categoría diagnóstica. Edad, especialidad, tamaño muestral y protocolo solo se muestran cuando constan en la fuente.'}
+            {athleteAge != null && <span> {english ? `Athlete age: ${athleteAge}.` : `Edad del atleta: ${athleteAge}.`}</span>}
+          </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex-1 min-w-40">
@@ -219,6 +292,8 @@ export default function VO2ReferenceComparison({
             </div>
           </div>
 
+          {referenceFilters}
+
           {refsWithLactate.length > 0 && (
             <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden self-start">
               <button
@@ -236,14 +311,28 @@ export default function VO2ReferenceComparison({
             </div>
           )}
 
+          {compareTab === 'lactate' && (
+            <p className="border-l-4 border-amber-400 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+              {english
+                ? 'Exploratory context only: threshold definitions and protocols vary between studies. These percentages are not a validated reference interval for an individual athlete.'
+                : 'Solo contexto exploratorio: las definiciones de umbral y los protocolos varían entre estudios. Estos porcentajes no son un intervalo de referencia validado para un atleta.'}
+            </p>
+          )}
+
           {compareTab === 'vo2' && (
             <>
               <div className={`rounded-xl px-4 py-3 ${LEVEL_BG[closestRef.level]}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider opacity-60 mb-0.5">{t('vo2ref.closestLevel')}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider opacity-60 mb-0.5">{english ? 'Closest study mean · not a percentile' : 'Media publicada más cercana · no es percentil'}</p>
                     <p className="text-base font-bold">{levelName(closestRef.level, closestRef.level_label)}</p>
                     <p className="text-xs mt-0.5 opacity-80">{sportName(closestRef.sport)} · {descriptor(closestRef.population)}</p>
+                    <p className="mt-1 text-[10px] opacity-75">
+                      {closestContext.sampleSize != null ? `n=${closestContext.sampleSize}` : (english ? 'n not reported' : 'n no informado')}
+                      {' · '}{closestContext.ageDescription ?? (english ? 'age not reported' : 'edad no informada')}
+                      {' · '}{closestContext.specialty ?? (english ? 'specialty not reported' : 'especialidad no informada')}
+                    </p>
+                    <p className="text-[10px] font-medium opacity-75">{closestContext.evidenceLabel}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-xs font-medium opacity-60">{t('vo2ref.vsMean')} ({closestRef.vo2max_mean})</p>
@@ -257,7 +346,7 @@ export default function VO2ReferenceComparison({
                 <div className="relative h-16 mb-8">
                   <div className="absolute inset-x-0 top-4 h-2 bg-gray-200 dark:bg-gray-700 rounded-full" />
 
-                  {refs.map((ref) => {
+                  {comparisonRefs.map((ref) => {
                     const xMin = toX(ref.vo2max_min);
                     const xMax = toX(ref.vo2max_max);
                     const xMid = toX(ref.vo2max_mean);
@@ -289,7 +378,7 @@ export default function VO2ReferenceComparison({
 
                 <div className="flex flex-wrap gap-2">
                   {LEVEL_ORDER.map(level => {
-                    if (!refs.some(r => r.level === level)) return null;
+                    if (!comparisonRefs.some(r => r.level === level)) return null;
                     return (
                       <span key={level} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium text-white" style={{ backgroundColor: LEVEL_COLORS[level] }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-white/70" />
@@ -306,8 +395,9 @@ export default function VO2ReferenceComparison({
 
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('vo2ref.valuesPerLevel')}</p>
-                {refs.map((ref) => {
+                {comparisonRefs.map((ref) => {
                   const inRange = vo2max >= ref.vo2max_min && vo2max <= ref.vo2max_max;
+                  const context = getReferenceStudyContext(ref);
                   return (
                     <div
                       key={ref.id}
@@ -325,6 +415,13 @@ export default function VO2ReferenceComparison({
                           {inRange && <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ backgroundColor: LEVEL_COLORS[ref.level] + '20', color: LEVEL_COLORS[ref.level] }}>{t('vo2ref.yourRange')}</span>}
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{descriptor(ref.population)} · {ref.citation_short} ({ref.year})</p>
+                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                          {context.sampleSize != null ? `n=${context.sampleSize}` : (english ? 'n not reported' : 'n no informado')}
+                          {' · '}{context.ageDescription ?? (english ? 'age not reported' : 'edad no informada')}
+                          {' · '}{context.specialty ?? (english ? 'specialty not reported' : 'especialidad no informada')}
+                          {' · '}{context.protocol ?? (english ? 'protocol not reported' : 'protocolo no informado')}
+                        </p>
+                        <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300">{context.evidenceLabel}</p>
                         {(ref.lactate_lt1_vo2_percent || ref.lactate_lt2_vo2_percent) && (
                           <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">
                             {ref.lactate_lt1_vo2_percent && `LT1: ${ref.lactate_lt1_vo2_percent}% VO2max`}
@@ -435,12 +532,12 @@ export default function VO2ReferenceComparison({
             <svg className={`w-3.5 h-3.5 transition-transform ${showCitations ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
-            {showCitations ? t('vo2ref.hideRefs') : t('vo2ref.showRefs')} ({refs.length})
+            {showCitations ? t('vo2ref.hideRefs') : t('vo2ref.showRefs')} ({comparisonRefs.length})
           </button>
 
           {showCitations && (
             <div className="space-y-2 bg-gray-50 dark:bg-gray-700/40 rounded-xl p-4">
-              {refs.map((ref) => (
+              {comparisonRefs.map((ref) => (
                 <div key={ref.id} className="text-xs text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-600 last:border-0 pb-2 last:pb-0">
                   <span className="inline-block w-2 h-2 rounded-full mr-2 mb-0.5 align-middle" style={{ backgroundColor: LEVEL_COLORS[ref.level] }} />
                   <strong>{levelName(ref.level, ref.level_label)}</strong> · {ref.citation}

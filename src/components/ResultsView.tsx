@@ -19,6 +19,9 @@ import VO2ReferenceComparison from './VO2ReferenceComparison';
 import EditDataModal from './EditDataModal';
 import { RefreshCw, Save, FileDown, Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { createModelResultProvenance, type ModelResultProvenance } from '../lib/scientificValidation';
+import MetabolicFingerprint from './MetabolicFingerprint';
+import ScientificModelPanel from './ScientificModelPanel';
 
 interface ResultsViewProps {
   testId: string;
@@ -34,6 +37,7 @@ interface SavedSnapshot {
   results: PhysiologyResults;
   advancedMetrics: AdvancedMetrics | null;
   savedAt: string;
+  modelProvenance?: ModelResultProvenance;
 }
 
 export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps) {
@@ -197,7 +201,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           : recalculatedAdvanced;
         setResults(snapshot.results);
         setAdvancedMetrics(loadedAdvanced);
-        setSavedSnapshot({ results: snapshot.results, advancedMetrics: loadedAdvanced, savedAt: savedAt ?? '' });
+        setSavedSnapshot({ results: snapshot.results, advancedMetrics: loadedAdvanced, savedAt: savedAt ?? '', modelProvenance: snapshot.modelProvenance });
         setHasSavedResults(true);
         setIsSaved(true);
         setIsDirty(false);
@@ -251,6 +255,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             results: mergedResults,
             advancedMetrics: loadedAdvanced,
             savedAt: savedAt ?? '',
+            modelProvenance: snapshot?.modelProvenance,
           });
           regenerateJSON(athleteData, testData, dataPointsData || [], mergedResults, loadedAdvanced);
         }
@@ -336,7 +341,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   };
 
   const handleSave = async () => {
-    if (!test || !results) return;
+    if (!test || !results || !athlete) return;
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -344,6 +349,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         results,
         advancedMetrics: advancedMetrics ?? null,
         savedAt: now,
+        modelProvenance: createModelResultProvenance(test, athlete, dataPoints, now),
       };
 
       const { error } = await supabase
@@ -534,6 +540,31 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         </div>
       )}
 
+      <ScientificModelPanel
+        results={results}
+        points={dataPoints}
+        language={language}
+        savedAlgorithmVersion={savedSnapshot?.modelProvenance?.algorithm.version ?? null}
+        saved={isSaved && !isDirty}
+        sport={test.sport}
+        calculate={(points) => {
+          if (!athlete || !test) return results;
+          const athleteForSensitivity = { ...athlete, sport: test.sport };
+          if (test.anthropometry_snapshot) {
+            athleteForSensitivity.weight_kg = test.anthropometry_snapshot.weight_kg;
+            athleteForSensitivity.height_cm = test.anthropometry_snapshot.height_cm;
+            athleteForSensitivity.sex = test.anthropometry_snapshot.sex;
+            athleteForSensitivity.body_fat_percent = test.anthropometry_snapshot.bodyFatPercent;
+            athleteForSensitivity.lean_body_mass_kg = test.anthropometry_snapshot.leanBodyMassKg;
+          }
+          return calculatePhysiology(athleteForSensitivity, points, test.anthropometry_snapshot?.threshold_overrides);
+        }}
+      />
+
+      {results && test && (
+        <MetabolicFingerprint testId={test.id} sport={test.sport} results={results} advanced={advancedMetrics} language={language} />
+      )}
+
       {results.vo2max && (
         <section aria-label="VO2max reference comparison" className="border-t border-gray-200 pt-5 dark:border-gray-700">
           <h2 className="mb-4 text-base font-bold text-gray-900 dark:text-white">
@@ -542,6 +573,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           <VO2ReferenceComparison
             vo2max={results.vo2max}
             sex={(athlete.sex === 'male' || athlete.sex === 'female') ? athlete.sex : 'male'}
+            defaultSport={test.sport === 'cycling' ? 'cycling_road' : test.sport === 'running' ? 'running_road' : test.sport === 'swimming' ? 'swimming' : undefined}
+            athleteAge={test.anthropometry_snapshot?.age}
             inline
           />
         </section>

@@ -39,7 +39,6 @@ export default function InverseSimulation() {
   const [targetSeconds, setTargetSeconds] = useState(0);
 
   const [terrain, setTerrain] = useState<RaceScenario['terrain']>('flat');
-  const [altitude, setAltitude] = useState(0);
 
   const [result, setResult] = useState<ReturnType<typeof simulateInverse> | null>(null);
 
@@ -79,7 +78,7 @@ export default function InverseSimulation() {
       terrain,
       temperature_c: 18,
       humidity_percent: 55,
-      altitude_m: altitude,
+      altitude_m: 0,
       strategy: 'even',
     };
     setResult(simulateInverse(targetTime_min, scenario, currentVO2max, 70));
@@ -201,11 +200,6 @@ export default function InverseSimulation() {
               </div>
             </div>
 
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">{language === 'es' ? 'Altitud' : 'Altitude'}: {altitude}m</label>
-              <input type="range" min={0} max={4000} step={100} value={altitude}
-                onChange={e => setAltitude(+e.target.value)} className="w-full" />
-            </div>
           </div>
 
           <button onClick={runInverse} disabled={targetTime_min <= 0}

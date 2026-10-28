@@ -2,8 +2,20 @@ export type CompetitiveLevel = 'recreational' | 'national' | 'international' | '
 export type Sex = 'male' | 'female';
 export type Sport = 'cycling_road' | 'cycling_mtb' | 'cycling_track' | 'running_road' | 'running_track' | 'trail_running' | 'swimming' | 'triathlon_olympic' | 'triathlon_ironman' | 'triathlon_long';
 export type PopulationCategory = 'active' | 'amateur' | 'professional';
+export type ReferenceEvidenceDesign = 'cohort' | 'review' | 'case_report' | 'estimated' | 'custom' | 'unknown';
 
-export interface VO2Reference {
+interface ReferenceStudyMetadata {
+  sample_size?: number | null;
+  age_min?: number | null;
+  age_max?: number | null;
+  age_mean?: number | null;
+  age_sd?: number | null;
+  specialty?: string | null;
+  evidence_design?: ReferenceEvidenceDesign;
+  measurement_protocol?: string | null;
+}
+
+export interface VO2Reference extends ReferenceStudyMetadata {
   id: string;
   sport: Sport;
   sport_label: string;
@@ -29,7 +41,7 @@ export interface VO2Reference {
   is_custom?: boolean;
 }
 
-export interface AnthropometryReference {
+export interface AnthropometryReference extends ReferenceStudyMetadata {
   id: string;
   sport: Sport;
   sport_label: string;
@@ -113,6 +125,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'cyc_road_nat_m',
     sport: 'cycling_road', sport_label: 'Ciclismo en Ruta', level: 'national', level_label: 'Nivel Nacional', population_category: 'amateur',
     sex: 'male', vo2max_mean: 65.0, vo2max_sd: 5.4, vo2max_min: 58, vo2max_max: 72,
+    sample_size: 12, evidence_design: 'cohort', measurement_protocol: 'Cycle ergometer',
     lactate_lt1_vo2_percent: 62, lactate_lt2_vo2_percent: 82,
     population: 'Europeo (Español)',
     citation: 'Lucia A, et al. (1998). Physiological differences between professional and elite road cyclists. Int J Sports Med 19:342–348. PMID: 9721058.',
@@ -133,6 +146,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'cyc_road_pro_m',
     sport: 'cycling_road', sport_label: 'Ciclismo en Ruta', level: 'professional', level_label: 'Profesional (World Tour)', population_category: 'professional',
     sex: 'male', vo2max_mean: 72.7, vo2max_sd: 6.0, vo2max_min: 70, vo2max_max: 82,
+    sample_size: 11, evidence_design: 'cohort', measurement_protocol: 'Cycle ergometer',
     lactate_lt1_vo2_percent: 68, lactate_lt2_vo2_percent: 88,
     population: 'Europeo (Español)',
     citation: 'Lucia A, et al. (2002). Kinetics of VO2 in professional cyclists. Med Sci Sports Exerc 34:320–325. PMID: 12471312.',
@@ -143,6 +157,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'cyc_road_wc_m',
     sport: 'cycling_road', sport_label: 'Ciclismo en Ruta', level: 'world_class', level_label: 'Élite Mundial (GC)', population_category: 'professional',
     sex: 'male', vo2max_mean: 84.6, vo2max_sd: null, vo2max_min: 82, vo2max_max: 96,
+    sample_size: 1, evidence_design: 'case_report', measurement_protocol: 'Reported athlete case',
     lactate_lt1_vo2_percent: 72, lactate_lt2_vo2_percent: 91,
     population: 'Europeo',
     citation: 'Bell PG, et al. (2017). The physiological profile of a multiple Tour de France winning cyclist. Int J Sports Physiol Perform 12:1246–1252. PMID: 27508883.',
@@ -195,6 +210,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'cyc_mtb_elite_m',
     sport: 'cycling_mtb', sport_label: 'Mountain Bike (XCO)', level: 'international', level_label: 'Élite (Olímpico/Mundial)', population_category: 'professional',
     sex: 'male', vo2max_mean: 74.5, vo2max_sd: 5.0, vo2max_min: 66, vo2max_max: 78,
+    sample_size: 12, age_mean: 25, age_sd: 3, evidence_design: 'cohort', measurement_protocol: 'Cycle ergometer',
     lactate_lt1_vo2_percent: 64, lactate_lt2_vo2_percent: 84,
     population: 'Europeo (Español/Italiano/Suizo)',
     citation: 'Impellizzeri FM & Marcora SM (2007). The physiology of mountain biking. Sports Med 37:59–71. PMID: 17190536. Mirizio GG et al. (2021). IJERPH 18:5535. PMC8196776.',
@@ -249,6 +265,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'run_road_rec_m',
     sport: 'running_road', sport_label: 'Running / Maratón', level: 'recreational', level_label: 'Recreativo', population_category: 'active',
     sex: 'male', vo2max_mean: 53.9, vo2max_sd: 7.4, vo2max_min: 39, vo2max_max: 65,
+    sample_size: 82, evidence_design: 'cohort', measurement_protocol: 'Treadmill / graded exercise test',
     lactate_lt1_vo2_percent: 52, lactate_lt2_vo2_percent: 72,
     population: 'Europeo (Reino Unido)',
     citation: 'Gordon D, et al. (2017). Physiological and training characteristics of recreational marathon runners. Open Access J Sports Med 8:231–243. PMC5703178.',
@@ -507,6 +524,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'tri_oly_elite_m',
     sport: 'triathlon_olympic', sport_label: 'Triatlón (Olímpico)', level: 'international', level_label: 'Élite (Campeonato del Mundo)', population_category: 'professional',
     sex: 'male', vo2max_mean: 74.3, vo2max_sd: 4.4, vo2max_min: 68, vo2max_max: 80,
+    sample_size: 9, evidence_design: 'cohort', measurement_protocol: 'Cycle ergometer',
     lactate_lt1_vo2_percent: 65, lactate_lt2_vo2_percent: 84,
     population: 'Europeo (Selección nacional francesa)',
     citation: 'Millet GP, Dreano P, Bentley DJ (2003). Physiological characteristics of elite short- and long-distance triathletes. Eur J Appl Physiol 88:427–430.',
@@ -517,6 +535,7 @@ export const VO2_REFERENCES: VO2Reference[] = [
     id: 'tri_oly_elite_f',
     sport: 'triathlon_olympic', sport_label: 'Triatlón (Olímpico)', level: 'international', level_label: 'Élite Femenina', population_category: 'professional',
     sex: 'female', vo2max_mean: 65.6, vo2max_sd: 6.0, vo2max_min: 58, vo2max_max: 72,
+    evidence_design: 'cohort',
     lactate_lt1_vo2_percent: 63, lactate_lt2_vo2_percent: 82,
     population: 'Mixto (Australiano/Europeo)',
     citation: 'Zhou S, et al. (1997). Physiological characteristics of elite and club level female triathletes. Int J Sports Med. PMID: 8300272.',
@@ -1056,6 +1075,52 @@ export const ANTHRO_REFERENCES: AnthropometryReference[] = [
 export function getVO2References(sport: Sport, sex: Sex): VO2Reference[] {
   return VO2_REFERENCES.filter(r => r.sport === sport && r.sex === sex)
     .sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+}
+
+export interface ReferenceStudyContext {
+  sampleSize: number | null;
+  ageDescription: string | null;
+  ageMin: number | null;
+  ageMax: number | null;
+  specialty: string | null;
+  protocol: string | null;
+  evidenceLabel: string;
+}
+
+/** Returns only source-recorded study details; it never fills missing demographics by inference. */
+export function getReferenceStudyContext(reference: VO2Reference | AnthropometryReference): ReferenceStudyContext {
+  const notes = reference.notes ?? '';
+  const citation = reference.citation ?? '';
+  const text = `${notes} ${citation}`;
+  const sampleFromText = text.match(/\bn\s*[=:]\s*(\d+)/i);
+  const sampleSize = reference.sample_size ?? (sampleFromText ? Number(sampleFromText[1]) : null);
+  let ageDescription: string | null = null;
+  let ageMin = reference.age_min ?? null;
+  let ageMax = reference.age_max ?? null;
+  if (ageMin != null && ageMax != null) ageDescription = `${ageMin}–${ageMax} years`;
+  else if (reference.age_mean != null) ageDescription = `${reference.age_mean}${reference.age_sd != null ? ` ± ${reference.age_sd}` : ''} years (mean${reference.age_sd != null ? ' ± SD' : ''})`;
+  else {
+    const range = text.match(/(?:rango\s+de\s+edad|age\s+range|edad|age)\s*[:=]?\s*(\d{1,2})\s*[-–]\s*(\d{1,2})\s*(?:años|years)?/i);
+    const age = text.match(/(?:edad|age)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*±\s*(\d+(?:\.\d+)?)/i);
+    if (range) {
+      ageMin = Number(range[1]);
+      ageMax = Number(range[2]);
+      ageDescription = `${ageMin}–${ageMax} years`;
+    } else if (age) ageDescription = `${age[1]} ± ${age[2]} years (mean ± SD)`;
+  }
+  const specialtyMatch = notes.match(/(?:especialidad|specialty)\s*[:=]\s*([^.;\n]+)/i);
+  const specialty = reference.specialty ?? specialtyMatch?.[1]?.trim() ?? null;
+  const protocol = reference.measurement_protocol ?? (/ergómetro de ciclo|cycle ergometer/i.test(text) ? 'Cycle ergometer' : /treadmill|cinta rodante/i.test(text) ? 'Treadmill' : null);
+
+  let evidenceLabel: string;
+  if (reference.is_custom) evidenceLabel = 'Custom reference · source should be reviewed';
+  else if (reference.evidence_design === 'case_report' || sampleSize === 1 || /sujeto único|single subject|case report/i.test(text)) evidenceLabel = 'Single-athlete case; not a population norm';
+  else if (reference.evidence_design === 'estimated' || /estimad|extrapol|modelad|recomendado/i.test(text)) evidenceLabel = 'Estimated / extrapolated value';
+  else if (reference.evidence_design === 'review') evidenceLabel = 'Review / secondary summary';
+  else if (sampleSize != null) evidenceLabel = `Published group · n=${sampleSize}`;
+  else evidenceLabel = 'Study sample size not recorded';
+
+  return { sampleSize, ageDescription, ageMin, ageMax, specialty, protocol, evidenceLabel };
 }
 
 export function getVO2ReferencesByCategory(sport: Sport, sex: Sex, category: PopulationCategory): VO2Reference[] {

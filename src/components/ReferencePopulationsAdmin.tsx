@@ -86,7 +86,7 @@ const EMPTY_ANTHRO: Omit<CustomAnthro, 'id'> = {
   body_fat_max: null,
   muscle_mass_percent_mean: null,
   muscle_mass_percent_sd: null,
-  measurement_protocol: 'ISAK',
+  measurement_protocol: '',
   sum_6_skinfolds_mean: null,
   sum_6_skinfolds_sd: null,
   sum_6_skinfolds_min: null,
@@ -146,8 +146,8 @@ export default function ReferencePopulationsAdmin() {
 
   const handleSubmitVO2 = async () => {
     setError('');
-    if (!formVO2.sport || !formVO2.level || !formVO2.vo2max_mean || !formVO2.population) {
-      setError('Sport, level, VO2max mean, and population are required.');
+    if (!formVO2.sport || !formVO2.level || !formVO2.vo2max_mean || !formVO2.population || !formVO2.citation.trim()) {
+      setError('Sport, level, VO2max mean, population, and source citation are required.');
       return;
     }
     setSaving(true);
@@ -170,8 +170,12 @@ export default function ReferencePopulationsAdmin() {
 
   const handleSubmitAnthro = async () => {
     setError('');
-    if (!formAnthro.sport || !formAnthro.level || !formAnthro.population) {
-      setError('Sport, level, and population are required.');
+    if (!formAnthro.sport || !formAnthro.level || !formAnthro.population || !formAnthro.citation.trim()) {
+      setError('Sport, level, population, and source citation are required.');
+      return;
+    }
+    if (formAnthro.body_fat_mean != null && !formAnthro.measurement_protocol?.trim()) {
+      setError('Select the body-composition method before saving a body-fat reference.');
       return;
     }
     setSaving(true);
@@ -488,13 +492,14 @@ export default function ReferencePopulationsAdmin() {
                     <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-3">Composición Corporal</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Protocolo</label>
-                        <select value={formAnthro.measurement_protocol || 'ISAK'} onChange={e => setFormAnthro(f => ({ ...f, measurement_protocol: e.target.value }))} className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Método / técnica</label>
+                        <select value={formAnthro.measurement_protocol || ''} onChange={e => setFormAnthro(f => ({ ...f, measurement_protocol: e.target.value }))} className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                          <option value="">Seleccionar método</option>
                           <option value="ISAK">ISAK</option>
+                          <option value="Skinfold equation">Ecuación de pliegues (especificar)</option>
                           <option value="DEXA">DEXA</option>
                           <option value="Bioimpedance">Bioimpedancia</option>
                           <option value="Hidrostático">Pesaje Hidrostático</option>
-                          <option value="ISAK / DEXA">ISAK / DEXA</option>
                         </select>
                       </div>
                       <div>
@@ -578,7 +583,7 @@ export default function ReferencePopulationsAdmin() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notas</label>
-                  <input type="text" placeholder="Tamaño muestral, método, limitaciones..." value={tab === 'vo2' ? (formVO2.notes ?? '') : (formAnthro.notes ?? '')} onChange={e => { const notes = e.target.value || null; if (tab === 'vo2') setFormVO2(f => ({ ...f, notes })); else setFormAnthro(f => ({ ...f, notes })); }} className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input type="text" placeholder="n=24; Edad: 20-35; Especialidad: fondo; protocolo; Ecuación: Jackson-Pollock 7 sitios; limitaciones" value={tab === 'vo2' ? (formVO2.notes ?? '') : (formAnthro.notes ?? '')} onChange={e => { const notes = e.target.value || null; if (tab === 'vo2') setFormVO2(f => ({ ...f, notes })); else setFormAnthro(f => ({ ...f, notes })); }} className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
 

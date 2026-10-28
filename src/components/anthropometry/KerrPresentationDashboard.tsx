@@ -16,7 +16,7 @@ interface KerrPresentationDashboardProps {
 type Tab = 'conclusiones' | 'resultados' | 'objetivos';
 
 export default function KerrPresentationDashboard({ results, athleteName, sum6Skinfolds, stature, showObjectives = true }: KerrPresentationDashboardProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<Tab>('conclusiones');
 
   const allTabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -59,6 +59,16 @@ export default function KerrPresentationDashboard({ results, athleteName, sum6Sk
       </div>
 
       <div className="p-6">
+        <div className="mb-5 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 dark:bg-amber-900/20">
+          <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+            {language === 'en' ? 'Method: Kerr–Ross anatomical 5-component fractionation' : 'Método: fraccionamiento anatómico Kerr–Ross de 5 componentes'}
+          </p>
+          <p className="mt-1 text-xs text-amber-900 dark:text-amber-200">
+            {language === 'en'
+              ? 'Adipose tissue (%) is not the same quantity as body-fat percentage. Do not compare or substitute it for DEXA, bioimpedance, hydrostatic weighing, or an equation-based body-fat estimate.'
+              : 'La masa adiposa (%) no equivale al porcentaje de grasa corporal. No debe compararse ni sustituirse directamente por DEXA, bioimpedancia, pesaje hidrostático o una ecuación de grasa corporal.'}
+          </p>
+        </div>
         {activeTab === 'conclusiones' && (
           <div className="space-y-6">
             <BodyCompositionPieChart results={results} sum6Skinfolds={sum6Skinfolds} />

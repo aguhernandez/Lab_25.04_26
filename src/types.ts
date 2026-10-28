@@ -88,6 +88,7 @@ export interface AnthropometryData {
   sex: Sex;
   bodyFatPercent?: number;
   leanBodyMassKg?: number;
+  bodyCompositionMethod?: 'kerr_5_component' | 'bioimpedance' | 'skinfold_equation' | 'dexa' | 'hydrostatic' | 'unknown';
   source: AnthropometrySource;
   threshold_overrides?: ThresholdOverrides;
 }

@@ -12,6 +12,7 @@ import {
   POPULATION_CATEGORY_LABELS,
   getAnthroReferences,
   getAnthroReferencesByCategory,
+  getReferenceStudyContext,
 } from '../lib/referencePopulations';
 
 type AnthroMetric = 'body_fat' | 'sum_6_skinfolds' | 'muscle_mass' | 'muscle_bone_ratio';
@@ -22,12 +23,13 @@ interface AnthropometryComparisonProps {
   muscleMassPercent?: number | null;
   muscleBoneRatio?: number | null;
   sex: Sex;
+  athleteAge?: number;
   defaultSport?: Sport;
   inline?: boolean;
 }
 
 const METRIC_LABELS: Record<AnthroMetric, string> = {
-  body_fat: '% Graso',
+  body_fat: '% Grasa corporal (método-dependiente)',
   sum_6_skinfolds: 'Σ6 Pliegues (mm)',
   muscle_mass: '% Muscular',
   muscle_bone_ratio: 'Índice Músculo-Óseo',
@@ -74,12 +76,15 @@ export default function AnthropometryComparison({
   muscleMassPercent,
   muscleBoneRatio,
   sex,
+  athleteAge,
   defaultSport,
   inline = false,
 }: AnthropometryComparisonProps) {
   const [selectedSport, setSelectedSport] = useState<Sport>(defaultSport ?? 'cycling_road');
   const [selectedCategory, setSelectedCategory] = useState<PopulationCategory | 'all'>('all');
   const [refs, setRefs] = useState<AnthropometryReference[]>([]);
+  const [requireAgeMatch, setRequireAgeMatch] = useState(false);
+  const [selectedSpecialty, setSelectedSpecialty] = useState('all');
   const [showCitations, setShowCitations] = useState(false);
   const [activeMetric, setActiveMetric] = useState<AnthroMetric>(() => {
     if (sum6Skinfolds != null) return 'sum_6_skinfolds';
@@ -122,6 +127,38 @@ export default function AnthropometryComparison({
   };
 
   const sports = [...new Set(ANTHRO_REFERENCES.map(r => r.sport))] as Sport[];
+  const specialtyOptions = [...new Set(refs.map(ref => getReferenceStudyContext(ref).specialty).filter((value): value is string => Boolean(value)))].sort();
+  const ageRangeReferenceCount = refs.filter(ref => {
+    const context = getReferenceStudyContext(ref);
+    return context.ageMin != null && context.ageMax != null;
+  }).length;
+  const filteredRefs = refs.filter(ref => {
+    const context = getReferenceStudyContext(ref);
+    const agePass = !requireAgeMatch || (athleteAge != null && context.ageMin != null && context.ageMax != null && athleteAge >= context.ageMin && athleteAge <= context.ageMax);
+    const specialtyPass = selectedSpecialty === 'all' || context.specialty === selectedSpecialty;
+    return agePass && specialtyPass;
+  });
+  const referenceFilters = (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+      {athleteAge != null && ageRangeReferenceCount > 0 && (
+        <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input className="mt-0.5 accent-emerald-600" type="checkbox" checked={requireAgeMatch} onChange={event => setRequireAgeMatch(event.target.checked)} />
+          <span>Filtrar por rangos de edad publicados (atleta: {athleteAge})</span>
+        </label>
+      )}
+      {athleteAge != null && ageRangeReferenceCount === 0 && <p className="text-[11px] text-gray-500 dark:text-gray-400">Ninguna referencia declara un rango de edad; no se puede filtrar por edad.</p>}
+      {specialtyOptions.length > 0 && (
+        <label className="min-w-44 text-xs text-gray-600 dark:text-gray-300">
+          Especialidad
+          <select value={selectedSpecialty} onChange={event => setSelectedSpecialty(event.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white">
+            <option value="all">Todas / no especificada</option>
+            {specialtyOptions.map(specialty => <option key={specialty} value={specialty}>{specialty}</option>)}
+          </select>
+        </label>
+      )}
+      {(requireAgeMatch || selectedSpecialty !== 'all') && <button type="button" onClick={() => { setRequireAgeMatch(false); setSelectedSpecialty('all'); }} className="text-xs font-medium text-emerald-700 underline dark:text-emerald-300">Quitar filtros de estudio</button>}
+    </div>
+  );
 
   const getMetricValue = (metric: AnthroMetric): number | null | undefined => {
     if (metric === 'body_fat') return bodyFatPercent;
@@ -155,7 +192,7 @@ export default function AnthropometryComparison({
     return 0;
   };
 
-  const refsWithMetric = (metric: AnthroMetric) => refs.filter(r => {
+  const refsWithMetric = (metric: AnthroMetric) => filteredRefs.filter(r => {
     if (metric === 'body_fat') return r.body_fat_mean != null;
     if (metric === 'sum_6_skinfolds') return r.sum_6_skinfolds_mean != null;
     if (metric === 'muscle_mass') return r.muscle_mass_percent_mean != null;
@@ -172,9 +209,19 @@ export default function AnthropometryComparison({
   const currentValue = getMetricValue(activeMetric);
   const unit = METRIC_UNITS[activeMetric];
 
+  if (refs.length > 0 && filteredRefs.length === 0) {
+    return (
+      <div className="space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-700/40">
+        {referenceFilters}
+        <p className="text-sm text-gray-500 dark:text-gray-400">Ninguna referencia coincide. Quita los filtros o añade edad/especialidad documentadas en la fuente.</p>
+      </div>
+    );
+  }
+
   if (availableMetrics.length === 0 || currentValue == null || currentRefs.length === 0) {
     return (
-      <div className="bg-gray-50 dark:bg-gray-700/40 rounded-xl p-4">
+      <div className="space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-gray-700/40">
+        {refs.length > 0 && referenceFilters}
         <p className="text-sm text-gray-500 dark:text-gray-400">No hay datos antropométricos o referencias disponibles para esta selección.</p>
       </div>
     );
@@ -193,6 +240,13 @@ export default function AnthropometryComparison({
 
   const diff = Math.round((currentValue - getRefMean(closestRef, activeMetric)) * 10) / 10;
   const diffLabel = diff > 0 ? `+${diff}` : `${diff}`;
+  const bodyFatMethod = (reference: AnthropometryReference) => {
+    const sourceMethod = reference.measurement_protocol?.trim();
+    const equation = reference.notes?.match(/(?:ecuaci[oó]n|equation|modelo|model)\s*[:=]\s*([^.;]+)/i)?.[1]?.trim();
+    if (!sourceMethod) return 'Método de composición corporal no informado';
+    if (/\bisak\b/i.test(sourceMethod) && !equation) return 'ISAK (protocolo de pliegues); ecuación de grasa no informada';
+    return equation ? `${sourceMethod} · ecuación/modelo: ${equation}` : sourceMethod;
+  };
 
   return (
     <div className={inline ? '' : 'bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden'}>
@@ -251,6 +305,8 @@ export default function AnthropometryComparison({
             </div>
           </div>
 
+          {referenceFilters}
+
           {availableMetrics.length > 1 && (
             <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Variable de Comparación</label>
@@ -265,6 +321,13 @@ export default function AnthropometryComparison({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {activeMetric === 'body_fat' && (
+            <div className="border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-950 dark:bg-amber-900/20 dark:text-amber-100">
+              <p className="font-semibold">El porcentaje depende del método de composición corporal.</p>
+              <p>Comprueba la técnica y la ecuación de cada referencia antes de compararla. La masa adiposa del fraccionamiento Kerr–Ross de 5 componentes no es equivalente al % de grasa corporal y no se introduce en esta comparación.</p>
             </div>
           )}
 
@@ -283,6 +346,7 @@ export default function AnthropometryComparison({
               <p className="text-xs opacity-80">
                 {diffLabel} {unit} vs. media ({getRefMean(closestRef, activeMetric).toFixed(activeMetric === 'muscle_bone_ratio' ? 2 : 1)})
               </p>
+              {activeMetric === 'body_fat' && <p className="mt-1 text-[10px] opacity-75">Método de la referencia: {bodyFatMethod(closestRef)}</p>}
             </div>
           </div>
 
@@ -353,7 +417,16 @@ export default function AnthropometryComparison({
                       {inRange && <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ backgroundColor: LEVEL_COLORS[ref.level] + '20', color: LEVEL_COLORS[ref.level] }}>Tu rango</span>}
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{ref.population} · {ref.citation_short} ({ref.year})</p>
-                    {ref.measurement_protocol && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Protocolo: {ref.measurement_protocol}</p>}
+                    {(() => {
+                      const context = getReferenceStudyContext(ref);
+                      return (
+                        <>
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">n={context.sampleSize ?? 'no informado'} · {context.ageDescription ?? 'edad no informada'} · {context.specialty ?? 'especialidad no informada'}</p>
+                          <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300">{context.evidenceLabel}</p>
+                        </>
+                      );
+                    })()}
+                    {(ref.measurement_protocol || activeMetric === 'body_fat') && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{activeMetric === 'body_fat' ? `Método / ecuación: ${bodyFatMethod(ref)}` : `Protocolo: ${ref.measurement_protocol}`}</p>}
                     {ref.notes && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 italic">{ref.notes}</p>}
                   </div>
                   <div className="text-right flex-shrink-0">

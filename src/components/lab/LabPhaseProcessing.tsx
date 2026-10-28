@@ -9,6 +9,8 @@ import { updateAthletePhysiologyProfile, fetchAthleteTrainingZones } from '../..
 import { PhysiologyResults } from '../../lib/physiology';
 import { AdvancedMetrics } from '../../types';
 import { AthleteTrainingZones } from '../../lib/physiologyProfile';
+import { createModelResultProvenance } from '../../lib/scientificValidation';
+import type { Test } from '../../types';
 
 interface Props {
   session: LabSession;
@@ -179,6 +181,10 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         imports: Array.isArray(protocolMetadata.imports) ? protocolMetadata.imports : [],
         breathData: session.breathImportMetadata ?? null,
       };
+      const savedAt = new Date().toISOString();
+      const modelProvenance = testData
+        ? createModelResultProvenance(testData as Test, athleteForCalc, dataPoints, savedAt)
+        : null;
       const { error: resultError } = await supabase.from('test_results').upsert({
         test_id: testId,
         vo2max: results.vo2max,
@@ -198,6 +204,12 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         breath_data: session.breathData,
         device_profile_id: session.deviceProfile?.id && isUuid(session.deviceProfile.id) ? session.deviceProfile.id : null,
         import_metadata: importMetadata,
+        results_snapshot: modelProvenance ? {
+          results,
+          advancedMetrics: advanced,
+          savedAt,
+          modelProvenance,
+        } : null,
       }, { onConflict: 'test_id' });
       if (resultError) throw resultError;
 

@@ -60,7 +60,6 @@ export default function RaceSimulation() {
   const [terrain, setTerrain] = useState<RaceScenario['terrain']>('flat');
   const [temperature, setTemperature] = useState(18);
   const [humidity, setHumidity] = useState(55);
-  const [altitude, setAltitude] = useState(0);
   const [strategy, setStrategy] = useState<RaceScenario['strategy']>('even');
 
   const [result, setResult] = useState<RaceSimResult | null>(null);
@@ -117,7 +116,7 @@ export default function RaceSimulation() {
       terrain,
       temperature_c: temperature,
       humidity_percent: humidity,
-      altitude_m: altitude,
+      altitude_m: 0,
       strategy,
     };
     const r = simulateRace(physioProfile, scenario);
@@ -157,7 +156,7 @@ export default function RaceSimulation() {
       athlete_id: selectedAthleteId || null,
       simulation_type: 'race',
       label,
-      input_params: { distanceKm, targetPaceStr, terrain, temperature, humidity, altitude, strategy, vo2max: physioProfile?.vo2max },
+      input_params: { distanceKm, targetPaceStr, terrain, temperature, humidity, strategy, vo2max: physioProfile?.vo2max },
       result_summary: {
         predictedTime_min: result.predictedTime_min,
         percentVO2max: result.percentVO2max,
@@ -313,11 +312,6 @@ export default function RaceSimulation() {
               <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>10%</span><span>100%</span></div>
             </div>
 
-            <div className="col-span-2">
-              <label className="text-xs text-gray-500 block mb-1">{t('sim.altitude')}: {altitude}m</label>
-              <input type="range" min={0} max={5000} step={100} value={altitude} onChange={e => setAltitude(+e.target.value)} className="w-full" />
-              <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>0m</span><span>5000m</span></div>
-            </div>
           </div>
 
           <button onClick={runSimulation} disabled={!physioProfile}

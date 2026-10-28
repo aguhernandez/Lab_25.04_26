@@ -454,7 +454,6 @@ export default function AnthropometryPage({ initialAthlete, lockAthlete = false,
           .upsert({
             athlete_id: selectedAthlete.id,
             measurement_id: selectedMeasurement.id,
-            body_fat_percent: currentResults.adipose_mass_pct,
             muscle_mass_kg: currentResults.muscle_mass_kg,
             bone_mass_kg: currentResults.bone_mass_kg,
             adipose_mass_kg: currentResults.adipose_mass_kg,
@@ -472,7 +471,6 @@ export default function AnthropometryPage({ initialAthlete, lockAthlete = false,
         supabase
           .from('athletes')
           .update({
-            body_fat_percent: currentResults.adipose_mass_pct,
             weight_kg: selectedMeasurement.body_mass_kg,
             height_cm: selectedMeasurement.stature_cm,
             updated_at: new Date().toISOString(),
@@ -831,8 +829,7 @@ export default function AnthropometryPage({ initialAthlete, lockAthlete = false,
           />
           {currentResults && (
             <AnthropometryComparison
-              bodyFatPercent={currentResults.adipose_mass_pct}
-              muscleMassPercent={currentResults.muscle_mass_pct}
+              athleteAge={selectedMeasurement?.age_years ?? measurements.age_years}
               sex={(measurements.sex === 'male' || measurements.sex === 'female') ? measurements.sex : ((selectedAthlete as Athlete & { sex?: string })?.sex === 'male' || (selectedAthlete as Athlete & { sex?: string })?.sex === 'female' ? (selectedAthlete as Athlete & { sex?: string }).sex as 'male' | 'female' : 'male')}
             />
           )}
