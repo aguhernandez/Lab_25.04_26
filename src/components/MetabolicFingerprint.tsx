@@ -89,54 +89,63 @@ export default function MetabolicFingerprint({ testId, sport, results, advanced,
     {
       label: 'VO₂max',
       value: results.vo2max_ml_kg_min == null ? null : `${results.vo2max_ml_kg_min.toFixed(1)} ml/kg/min`,
+      status: results.vo2max_ml_kg_min == null ? 'unavailable' : results.vo2max_confidence === 'measured' ? 'measured' : 'estimated',
       source: results.vo2max_confidence === 'measured' ? (en ? 'Measured in test' : 'Medido en el test') : (en ? 'Estimated by model' : 'Estimado por modelo'),
       benchmark: en ? 'Group references by sex and sport exist; age and specialty are often missing.' : 'Hay referencias por sexo y deporte; a menudo faltan edad y especialidad.',
     },
     {
       label: vlamax?.label === 'vLapeak_blood' ? 'vLapeak' : 'VLamax',
       value: vlamax?.netRateMmolLSecond == null ? null : `${vlamax.netRateMmolLSecond.toFixed(3)} mmol/L/s`,
+      status: vlamax?.netRateMmolLSecond == null ? 'unavailable' : 'estimated',
       source: vlamax ? `${en ? 'Sprint assessment' : 'Test de sprint'} · ${vlamax.confidence ?? '—'}` : (en ? 'No sprint assessment saved' : 'Sin test de sprint guardado'),
       benchmark: en ? 'No matched population cohort yet.' : 'Aún sin cohorte poblacional comparable.',
     },
     {
       label: 'MLSS',
       value: mlssValue,
+      status: mlssValue ? 'measured' : 'unavailable',
       source: mlssValue ? (en ? 'Confirmed by constant-load trials' : 'Confirmado con tests constantes') : (en ? 'No measured confirmation' : 'Sin confirmación medida'),
       benchmark: en ? 'No matched population cohort yet.' : 'Aún sin cohorte poblacional comparable.',
     },
     {
       label: 'LT1',
       value: formatLoad(results, sport, 'lt1'),
+      status: formatLoad(results, sport, 'lt1') ? 'estimated' : 'unavailable',
       source: `${en ? 'Threshold method' : 'Método de umbral'} · ${results.lt1_confidence}`,
       benchmark: en ? 'Available thresholds in literature use different definitions and protocols.' : 'Las referencias publicadas usan definiciones y protocolos distintos.',
     },
     {
       label: 'FatMax',
       value: formatLoad(results, sport, 'fatmax'),
+      status: formatLoad(results, sport, 'fatmax') ? 'estimated' : 'unavailable',
       source: `${results.fatmax_method} · ${results.fatmax_confidence}`,
       benchmark: en ? 'No protocol-matched population reference.' : 'Sin referencia poblacional con protocolo equivalente.',
     },
     {
       label: 'CarbMax',
       value: null,
+      status: 'unavailable',
       source: en ? 'Carbohydrate share by stage is not an oxidation rate (g/min).' : 'El porcentaje de carbohidratos por estadio no es una tasa de oxidación (g/min).',
       benchmark: en ? 'Not available for comparison.' : 'No disponible para comparar.',
     },
     {
       label: en ? 'Economy' : 'Economía',
       value: economyValue,
+      status: economyValue ? 'estimated' : 'unavailable',
       source: economyValue ? (en ? 'Sport-specific estimate from this test' : 'Estimación específica del deporte en este test') : (en ? 'Insufficient measurements' : 'Mediciones insuficientes'),
       benchmark: en ? 'No method-matched population reference.' : 'Sin referencia poblacional con el mismo método.',
     },
     {
       label: en ? 'Glycogen' : 'Glucógeno',
       value: null,
+      status: 'unavailable',
       source: en ? 'Not measured in this test' : 'No medido en este test',
       benchmark: en ? 'No matched population cohort yet.' : 'Aún sin cohorte poblacional comparable.',
     },
     {
       label: en ? 'Durability' : 'Durabilidad',
       value: results.hr_drift_percent == null ? null : `${results.hr_drift_percent.toFixed(1)}% HR drift`,
+      status: results.hr_drift_percent == null ? 'unavailable' : 'estimated',
       source: results.hr_drift_percent == null ? (en ? 'No long-duration drift measurement' : 'Sin medición de deriva en esfuerzo prolongado') : (en ? 'Heart-rate drift proxy; not a direct durability test' : 'Proxy de deriva cardíaca; no es un test directo de durabilidad'),
       benchmark: en ? 'No protocol-matched population reference.' : 'Sin referencia poblacional con el mismo protocolo.',
     },
@@ -152,12 +161,18 @@ export default function MetabolicFingerprint({ testId, sport, results, advanced,
             : 'Vista conjunta de nueve métricas. Solo se indica comparación poblacional cuando la métrica y el protocolo son suficientemente comparables; donde falta referencia, queda indicado.'}
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 xl:grid-cols-3">
         {metrics.map(metric => (
-          <div key={metric.label} className="grid grid-cols-[minmax(90px,0.65fr)_minmax(110px,0.8fr)_minmax(160px,1.5fr)] items-start gap-3 border-b border-gray-100 py-2.5 dark:border-gray-800">
-            <strong className="text-sm text-gray-800 dark:text-gray-100">{metric.label}</strong>
-            <span className={`text-sm font-semibold ${metric.value ? 'text-[#5A4E6B] dark:text-violet-300' : 'text-gray-400'}`}>{metric.value ?? '—'}</span>
-            <span className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">{metric.source}<br />{metric.benchmark}</span>
+          <div key={metric.label} className="min-w-0 border-b border-gray-200 py-4 dark:border-gray-700">
+            <div className="flex items-center justify-between gap-3">
+              <strong className="text-sm text-gray-800 dark:text-gray-100">{metric.label}</strong>
+              <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${metric.status === 'measured' ? 'text-green-700 dark:text-green-300' : metric.status === 'estimated' ? 'text-[#5A4E6B] dark:text-violet-300' : 'text-gray-400 dark:text-gray-500'}`}>
+                {metric.status === 'measured' ? (en ? 'Measured' : 'Medido') : metric.status === 'estimated' ? (en ? 'Estimated' : 'Estimado') : (en ? 'Unavailable' : 'No disponible')}
+              </span>
+            </div>
+            <p className={`mt-1 text-xl font-semibold tabular-nums ${metric.value ? 'text-[#5A4E6B] dark:text-violet-300' : 'text-gray-400 dark:text-gray-500'}`}>{metric.value ?? '—'}</p>
+            <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">{metric.source}</p>
+            <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">{metric.benchmark}</p>
           </div>
         ))}
       </div>

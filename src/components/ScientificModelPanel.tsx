@@ -117,8 +117,8 @@ export default function ScientificModelPanel({ results, points, language, savedA
         {en ? 'Algorithm version:' : 'Versión del algoritmo:'} <strong>{versionLabel}</strong>
       </p>
 
-      <div className="mt-4 border-t border-amber-200 pt-3 dark:border-amber-800">
-        <h3 className="text-xs font-bold text-gray-800 dark:text-gray-100">{en ? 'Sensitivity to measurement error' : 'Sensibilidad al error de medición'}</h3>
+      <details className="mt-4 border-t border-amber-200 pt-3 dark:border-amber-800">
+        <summary className="cursor-pointer text-xs font-bold text-gray-800 dark:text-gray-100">{en ? 'Explore measurement-error sensitivity' : 'Explorar sensibilidad al error de medición'}</summary>
         <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
           {en
             ? 'Enter the accuracy from the device specification or calibration. The resulting range is a scenario sensitivity band, not a confidence interval.'
@@ -145,7 +145,7 @@ export default function ScientificModelPanel({ results, points, language, savedA
             </div>
           ) : <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{en ? 'No non-zero sensitivity range for the supplied error assumptions.' : 'Con los errores introducidos no aparece un rango de sensibilidad distinto de cero.'}</p>
         )}
-      </div>
+      </details>
     </section>
   );
 }

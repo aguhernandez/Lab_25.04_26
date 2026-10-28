@@ -17,7 +17,7 @@ import ConfirmDialog from './ConfirmDialog';
 import Toast from './Toast';
 import VO2ReferenceComparison from './VO2ReferenceComparison';
 import EditDataModal from './EditDataModal';
-import { RefreshCw, Save, FileDown, Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, Save, FileDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { createModelResultProvenance, type ModelResultProvenance } from '../lib/scientificValidation';
 import MetabolicFingerprint from './MetabolicFingerprint';
@@ -48,8 +48,8 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [results, setResults] = useState<PhysiologyResults | null>(null);
   const [advancedMetrics, setAdvancedMetrics] = useState<AdvancedMetrics | null>(null);
   const [completeJSON, setCompleteJSON] = useState<MetabolicLabJSON | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [showJSONSummary, setShowJSONSummary] = useState(false);
+  const [activeSection, setActiveSection] = useState<'overview' | 'curves' | 'thresholds' | 'quality'>('overview');
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -393,10 +393,6 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
     }
   };
 
-  const handleViewJSONSummary = () => {
-    setShowJSONSummary(!showJSONSummary);
-  };
-
   const handleApplyPhysiologyToProfile = async () => {
     if (!athlete || !test || !results) return;
     setSyncingProfile(true);
@@ -513,495 +509,260 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   }
 
   return (
-    <div className="space-y-8">
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+    <div className="space-y-6">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* Unsaved changes indicator */}
       {isDirty && !isSaved && (
         <div className="flex items-center gap-2 border-l-4 border-amber-500 bg-amber-50 px-4 py-2.5 dark:bg-amber-900/20">
-          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-          <span className="text-sm text-amber-700 dark:text-amber-300 font-medium">
-            {hasSavedResults ? 'You have unsaved changes. Click "Save" to persist them.' : 'New test — results calculated but not yet saved. Click "Save" to persist.'}
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="text-sm font-medium text-amber-800 dark:text-amber-200">
+            {hasSavedResults
+              ? (language === 'es' ? 'Hay cambios sin guardar. Guarda para conservarlos.' : 'You have unsaved changes. Save to keep them.')
+              : (language === 'es' ? 'Test nuevo: los resultados están calculados, pero aún no se guardaron.' : 'New test: results are calculated but have not been saved yet.')}
           </span>
         </div>
       )}
       {isSaved && !isDirty && (
         <div className="flex items-center gap-2 border-l-4 border-green-500 bg-green-50 px-4 py-2.5 dark:bg-green-900/20">
-          <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-          <span className="text-sm text-green-700 dark:text-green-300 font-medium">
-            Results saved{savedSnapshot?.savedAt ? ` · ${new Date(savedSnapshot.savedAt).toLocaleString()}` : ''}
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+          <span className="text-sm font-medium text-green-800 dark:text-green-200">
+            {language === 'es' ? 'Resultados guardados' : 'Results saved'}
+            {savedSnapshot?.savedAt ? ` · ${new Date(savedSnapshot.savedAt).toLocaleString()}` : ''}
           </span>
         </div>
       )}
 
-      <ScientificModelPanel
-        results={results}
-        points={dataPoints}
-        language={language}
-        savedAlgorithmVersion={savedSnapshot?.modelProvenance?.algorithm.version ?? null}
-        saved={isSaved && !isDirty}
-        sport={test.sport}
-        calculate={(points) => {
-          if (!athlete || !test) return results;
-          const athleteForSensitivity = { ...athlete, sport: test.sport };
-          if (test.anthropometry_snapshot) {
-            athleteForSensitivity.weight_kg = test.anthropometry_snapshot.weight_kg;
-            athleteForSensitivity.height_cm = test.anthropometry_snapshot.height_cm;
-            athleteForSensitivity.sex = test.anthropometry_snapshot.sex;
-            athleteForSensitivity.body_fat_percent = test.anthropometry_snapshot.bodyFatPercent;
-            athleteForSensitivity.lean_body_mass_kg = test.anthropometry_snapshot.leanBodyMassKg;
-          }
-          return calculatePhysiology(athleteForSensitivity, points, test.anthropometry_snapshot?.threshold_overrides);
-        }}
-      />
+      <header className="border-y border-gray-200 py-5 dark:border-gray-700">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="flex min-w-0 items-center gap-4">
+            <img src="/logo_transp.png" alt="Asciende" className="h-11 w-auto object-contain" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6B5D7B] dark:text-violet-300">
+                {language === 'es' ? 'Laboratorio metabólico' : 'Metabolic lab'}
+              </p>
+              <h1 className="mt-0.5 truncate text-2xl font-semibold text-gray-900 dark:text-white">
+                {language === 'es' ? 'Resultados fisiológicos' : 'Physiology results'}
+              </h1>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium text-gray-800 dark:text-gray-200">{athlete.name}</span>
+                {' · '}{new Date(test.test_date).toLocaleDateString(language === 'es' ? 'es' : 'en')}
+                {' · '}{test.sport.replace('_', ' ')}
+                {' · '}{test.test_type.replace('_', ' ')}
+              </p>
+            </div>
+          </div>
 
-      {results && test && (
-        <MetabolicFingerprint testId={test.id} sport={test.sport} results={results} advanced={advancedMetrics} language={language} />
-      )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={handleRecalculate} disabled={recalculating} className="inline-flex items-center gap-2 border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">
+              <RefreshCw className={`h-4 w-4 ${recalculating ? 'animate-spin' : ''}`} />
+              {language === 'es' ? 'Recalcular' : 'Recalculate'}
+            </button>
+            <button onClick={handleSave} disabled={saving || (!isDirty && isSaved)} className="inline-flex items-center gap-2 bg-[#5A4E6B] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#493e58] disabled:opacity-50">
+              <Save className="h-4 w-4" />
+              {saving ? (language === 'es' ? 'Guardando…' : 'Saving…') : (language === 'es' ? 'Guardar' : 'Save')}
+            </button>
+            <button onClick={() => setShowReportBuilder(true)} className="inline-flex items-center gap-2 bg-[#fdda36] px-4 py-2 text-sm font-semibold text-[#514163] transition-colors hover:bg-[#fdda36]/90">
+              <FileDown className="h-4 w-4" />
+              {language === 'es' ? 'Exportar informe' : 'Export report'}
+            </button>
+            <details className="relative">
+              <summary className="cursor-pointer list-none border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">
+                {language === 'es' ? 'Más acciones' : 'More actions'}
+              </summary>
+              <div className="absolute right-0 z-20 mt-1 flex min-w-56 flex-col border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                <button onClick={handleApplyPhysiologyToProfile} disabled={syncingProfile} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-700">
+                  {syncingProfile ? (language === 'es' ? 'Aplicando…' : 'Applying…') : (language === 'es' ? 'Aplicar zonas al perfil' : 'Apply zones to profile')}
+                </button>
+                <button onClick={() => setShowEditData(true)} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700">{language === 'es' ? 'Editar datos del test' : 'Edit test data'}</button>
+                <button onClick={() => { if (showJSONSummary) setShowJSONSummary(false); else { setActiveSection('quality'); setShowJSONSummary(true); } }} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700">{showJSONSummary ? (language === 'es' ? 'Ocultar resumen JSON' : 'Hide JSON summary') : (language === 'es' ? 'Ver resumen JSON' : 'View JSON summary')}</button>
+                <button onClick={handleExportJSON} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700">{language === 'es' ? 'Exportar datos JSON' : 'Export JSON data'}</button>
+                <button onClick={handleDeleteTest} className="px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">{language === 'es' ? 'Eliminar test' : 'Delete test'}</button>
+              </div>
+            </details>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-200 pt-3 text-xs dark:border-gray-700">
+          <span className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-300">
+            <span className={`h-2 w-2 rounded-full ${profileSynced ? 'bg-green-500' : 'bg-amber-500'}`} />
+            {profileSynced ? (language === 'es' ? 'Perfil fisiológico actualizado' : 'Physiology profile updated') : (language === 'es' ? 'Perfil aún sin sincronizar' : 'Profile not yet synced')}
+          </span>
+          {trainingZones && <span className="text-gray-500 dark:text-gray-400">{language === 'es' ? 'Zonas' : 'Zones'}: {trainingZones.mode === 'manual_override' ? (language === 'es' ? 'ajuste manual' : 'coach adjusted') : (language === 'es' ? 'basadas en fisiología' : 'physiology based')}</span>}
+          <span className="text-gray-500 dark:text-gray-400">{language === 'es' ? 'Interpretación estimada por nuestro modelo' : 'Interpretation estimated by our model'}</span>
+        </div>
+      </header>
 
-      {results.vo2max && (
-        <section aria-label="VO2max reference comparison" className="border-t border-gray-200 pt-5 dark:border-gray-700">
-          <h2 className="mb-4 text-base font-bold text-gray-900 dark:text-white">
-            {language === 'es' ? 'Comparativa VO₂máx por deporte y disciplina' : 'VO₂max comparison by sport and discipline'}
-          </h2>
-          <VO2ReferenceComparison
-            vo2max={results.vo2max}
-            sex={(athlete.sex === 'male' || athlete.sex === 'female') ? athlete.sex : 'male'}
-            defaultSport={test.sport === 'cycling' ? 'cycling_road' : test.sport === 'running' ? 'running_road' : test.sport === 'swimming' ? 'swimming' : undefined}
-            athleteAge={test.anthropometry_snapshot?.age}
-            inline
-          />
+      <nav role="tablist" aria-label={language === 'es' ? 'Secciones de resultados' : 'Result sections'} className="-mx-1 flex gap-1 overflow-x-auto border-b border-gray-200 px-1 dark:border-gray-700">
+        {([
+          ['overview', language === 'es' ? 'Resumen' : 'Overview'],
+          ['curves', language === 'es' ? 'Perfil metabólico' : 'Metabolic profile'],
+          ['thresholds', language === 'es' ? 'Umbrales y zonas' : 'Thresholds & zones'],
+          ['quality', language === 'es' ? 'Calidad y método' : 'Quality & method'],
+        ] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={activeSection === id} onClick={() => setActiveSection(id)} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${activeSection === id ? 'border-[#5A4E6B] text-[#5A4E6B] dark:border-violet-300 dark:text-violet-200' : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}`}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {activeSection === 'overview' && (
+        <section role="tabpanel" className="space-y-6">
+          <div className="grid grid-cols-2 border-y border-gray-200 py-4 sm:grid-cols-3 lg:grid-cols-5 dark:border-gray-700">
+            {[
+              { label: 'VO₂max', value: results.vo2max_ml_kg_min == null ? '—' : results.vo2max_ml_kg_min.toFixed(1), unit: 'ml/kg/min' },
+              { label: 'LT1', value: results.lt1_power != null ? `${Math.round(results.lt1_power)} W` : results.lt1_pace ?? (results.lt1_hr != null ? `${results.lt1_hr} bpm` : '—'), unit: '' },
+              { label: 'LT2', value: results.lt2_power != null ? `${Math.round(results.lt2_power)} W` : results.lt2_pace ?? (results.lt2_hr != null ? `${results.lt2_hr} bpm` : '—'), unit: '' },
+              { label: 'FatMax', value: results.fatmax_power != null ? `${Math.round(results.fatmax_power)} W` : results.fatmax_pace ?? (results.fatmax_hr != null ? `${results.fatmax_hr} bpm` : '—'), unit: '' },
+              { label: language === 'es' ? 'Muestras' : 'Samples', value: String(dataPoints.length), unit: language === 'es' ? 'estadios' : 'stages' },
+            ].map((metric, index) => (
+              <div key={metric.label} className={`px-4 py-2 ${index > 0 ? 'border-l border-gray-200 dark:border-gray-700' : ''}`}>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{metric.label}</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{metric.value}</p>
+                {metric.unit && <p className="text-[11px] text-gray-500 dark:text-gray-400">{metric.unit}</p>}
+              </div>
+            ))}
+          </div>
+
+          <MetabolicFingerprint testId={test.id} sport={test.sport} results={results} advanced={advancedMetrics} language={language} />
+
+          {results.vo2max && (
+            <section aria-label="VO2max reference comparison" className="border-t border-gray-200 pt-5 dark:border-gray-700">
+              <h2 className="mb-1 text-base font-bold text-gray-900 dark:text-white">
+                {language === 'es' ? 'Referencia de VO₂máx' : 'VO₂max reference'}
+              </h2>
+              <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'Compara con grupos disponibles por deporte y disciplina; no se muestran percentiles si el grupo no es compatible.' : 'Compare against available sport and discipline groups; percentiles are withheld when the cohort is not comparable.'}</p>
+              <VO2ReferenceComparison vo2max={results.vo2max} sex={(athlete.sex === 'male' || athlete.sex === 'female') ? athlete.sex : 'male'} defaultSport={test.sport === 'cycling' ? 'cycling_road' : test.sport === 'running' ? 'running_road' : test.sport === 'swimming' ? 'swimming' : undefined} athleteAge={test.anthropometry_snapshot?.age} inline />
+            </section>
+          )}
         </section>
       )}
 
-      <section className="border-y border-gray-200 dark:border-gray-700">
-        <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
-          <div className="flex items-center gap-3">
-            <img src="/logo_transp.png" alt="Asciende" className="h-10 w-auto rounded-md bg-white/90 px-1.5 py-1 object-contain" />
-            <div className="bg-white/20 rounded-lg p-2">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h1 className="text-2xl font-semibold text-white">Test Results</h1>
-              <p className="text-sm text-white/80">
-                {new Date(test.test_date).toLocaleDateString()} · {test.test_type.replace('_', ' ').toUpperCase()}
-              </p>
-            </div>
+      {activeSection === 'curves' && (
+        <section role="tabpanel" className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Perfil metabólico' : 'Metabolic profile'}</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'Explora las respuestas por carga. Al seleccionar una muestra, se sincroniza la lectura entre gráficos.' : 'Explore responses by workload. Selecting a sample synchronizes the readout across charts.'}</p>
           </div>
-        </div>
+          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg ?? athlete.lean_body_mass_kg} sport={test.sport} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
+        </section>
+      )}
 
-        <div className="py-6 space-y-4">
-          <div className="flex flex-wrap gap-3">
-            {/* Recalculate */}
-            <button
-              onClick={handleRecalculate}
-              disabled={recalculating}
-              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-60"
-            >
-              <RefreshCw className={`w-4 h-4 ${recalculating ? 'animate-spin' : ''}`} />
-              Recalculate
-            </button>
+      {activeSection === 'thresholds' && (
+        <section role="tabpanel" className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Umbrales y prescripción' : 'Thresholds & prescription'}</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'LT1, LT2, OBLA, IAT y MLSS describen criterios distintos. El MLSS solo aparece como medido cuando hay pruebas constantes de confirmación.' : 'LT1, LT2, OBLA, IAT and MLSS use different criteria. MLSS is labelled measured only when constant-load confirmation trials exist.'}</p>
+          </div>
+          <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
+          <TrainingZonesTable zonesData={results.zones_data} zones={results.training_zones} sport={test.sport} defaultMode="5" lt1_hr={results.lt1_hr} lt2_hr={results.lt2_hr} hrmax={results.hrmax} thresholdSource={results.threshold_source} athleteId={athlete.id} onSaved={handleZonesSaved} />
+        </section>
+      )}
 
-            {/* Save */}
-            <button
-              onClick={handleSave}
-              disabled={saving || (!isDirty && isSaved)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" />
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-
-            {/* Export PDF */}
-            <button
-              onClick={() => setShowReportBuilder(true)}
-              className="px-4 py-2 bg-[#fdda36] text-[#514163] rounded-lg font-semibold hover:bg-[#fdda36]/90 transition-colors shadow-md flex items-center gap-1.5"
-            >
-              <FileDown className="w-4 h-4" />
-              Export PDF
-            </button>
-
-            {/* Apply Zones */}
-            <button
-              onClick={handleApplyPhysiologyToProfile}
-              disabled={syncingProfile}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-60"
-            >
-              <Upload className="w-4 h-4" />
-              {syncingProfile ? 'Applying...' : 'Apply Zones to Profile'}
-            </button>
-
-            {/* Secondary actions */}
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm"
-            >
-              {showAdvanced ? 'Hide Advanced Data' : 'View Advanced Data'}
-            </button>
-            <button
-              onClick={() => setShowEditData(true)}
-              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm flex items-center gap-1.5"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Edit Data
-            </button>
-            <button
-              onClick={handleViewJSONSummary}
-              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm"
-            >
-              {showJSONSummary ? 'Hide JSON Summary' : 'View JSON Summary'}
-            </button>
-            <button
-              onClick={handleExportJSON}
-              className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-sm"
-            >
-              Export JSON
-            </button>
-            <button
-              onClick={handleDeleteTest}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-md"
-            >
-              Delete Test
-            </button>
+      {activeSection === 'quality' && (
+        <section role="tabpanel" className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Calidad, método y trazabilidad' : 'Quality, method & provenance'}</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'Revisa qué datos sostienen la interpretación y qué limitaciones conserva el resultado.' : 'Review the data supporting the interpretation and the limitations attached to this result.'}</p>
           </div>
 
-          <div className="border-y border-gray-200 bg-gray-50 py-4 dark:border-gray-600 dark:bg-gray-700/40">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full ${profileSynced ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                    Athlete Physiology Profile
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {profileSynced
-                      ? `Profile updated — zones applied from ${new Date(test.test_date).toLocaleDateString()}`
-                      : 'Profile not yet synced with this test'}
-                  </p>
-                  {trainingZones && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                      Zones: {trainingZones.mode === 'manual_override' ? 'Manual override by coach' : 'Based on lab physiology'}
-
-                    </p>
-                  )}
-                </div>
+          <section className="border-y border-gray-200 py-5 dark:border-gray-700">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Calidad de muestras' : 'Sample quality'}</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? `${dataPoints.length} estadios · protocolo ${test.test_type.replace('_', ' ')} · ${test.sport.replace('_', ' ')}` : `${dataPoints.length} stages · ${test.test_type.replace('_', ' ')} protocol · ${test.sport.replace('_', ' ')}`}</p>
               </div>
-
+              <span className={`px-3 py-1 text-xs font-semibold ${results.data_quality.includes('Excellent') ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : results.data_quality.includes('Good') ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'}`}>{results.data_quality}</span>
             </div>
-            {trainingZones && (
-              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Physiological reference — LT1: {trainingZones.physiology_reference?.lt1_hr ?? '—'} bpm
-                  {trainingZones.physiology_reference?.lt1_power ? ` / ${trainingZones.physiology_reference.lt1_power}W` : ''}
-                  {trainingZones.physiology_reference?.lt1_pace ? ` / ${trainingZones.physiology_reference.lt1_pace}` : ''}
-                  {' · '}
-                  LT2: {trainingZones.physiology_reference?.lt2_hr ?? '—'} bpm
-                  {trainingZones.physiology_reference?.lt2_power ? ` / ${trainingZones.physiology_reference.lt2_power}W` : ''}
-                  {trainingZones.physiology_reference?.lt2_pace ? ` / ${trainingZones.physiology_reference.lt2_pace}` : ''}
-                  {trainingZones.physiology_reference?.vam_kmh ? ` · VAM: ${trainingZones.physiology_reference.vam_kmh} km/h` : ''}
-                  {trainingZones.physiology_reference?.pam_watts ? ` · PAM: ${trainingZones.physiology_reference.pam_watts}W` : ''}
-                </p>
+            <div className="mt-4 grid grid-cols-2 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
+              {[
+                ['Potencia', results.has_power], ['Lactato', results.has_lactate], ['VO₂', results.has_vo2], ['RER', results.has_rer],
+              ].map(([label, valid]) => <div key={String(label)} className="flex items-center gap-2 text-gray-700 dark:text-gray-300"><span className={`h-2 w-2 rounded-full ${valid ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />{language === 'es' ? label : ({ Potencia: 'Power', Lactato: 'Lactate', 'VO₂': 'VO₂', RER: 'RER' } as Record<string, string>)[String(label)]}</div>)}
+              <div className="text-gray-600 dark:text-gray-400">{language === 'es' ? 'VO₂máx' : 'VO₂max'}: {results.vo2max_confidence}</div>
+            </div>
+            {results.lactate_analysis && (
+              <div className="mt-4 border-t border-gray-200 pt-3 text-sm dark:border-gray-700">
+                <div className="flex flex-wrap gap-x-5 gap-y-2 text-gray-700 dark:text-gray-300">
+                  <span>{language === 'es' ? 'Lactato' : 'Lactate'}: <strong>{results.lactate_analysis.quality.sampleCount} {language === 'es' ? 'muestras' : 'samples'}</strong></span>
+                  <span>{language === 'es' ? 'Monotonicidad' : 'Monotonicity'}: <strong>{results.lactate_analysis.quality.monotonicityPercent}%</strong></span>
+                  <span>{language === 'es' ? 'Carga' : 'Load'}: <strong>{results.lactate_analysis.quality.loadMonotonic ? (language === 'es' ? 'ordenada' : 'ordered') : (language === 'es' ? 'revisar' : 'review')}</strong></span>
+                  <span>{language === 'es' ? 'Umbrales utilizables' : 'Threshold-ready'}: <strong>{results.lactate_analysis.quality.validForThresholds ? (language === 'es' ? 'sí' : 'yes') : (language === 'es' ? 'no' : 'no')}</strong></span>
+                </div>
+                {results.lactate_analysis.quality.issues.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-amber-800 dark:text-amber-300">{results.lactate_analysis.quality.issues.map(issue => <li key={`${issue.code}-${issue.stage ?? 'all'}`}>{issue.message}</li>)}</ul>}
               </div>
             )}
-          </div>
-        </div>
-      </section>
+          </section>
 
-      {test.anthropometry_snapshot && (
-        <div className={`border-l-4 rounded-lg p-4 ${
-          test.anthropometry_source === 'hub'
-            ? 'bg-green-50 dark:bg-green-900/20 border-green-500'
-            : test.anthropometry_source === 'mixed'
-            ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500'
-            : 'bg-gray-50 dark:bg-gray-700 border-gray-400'
-        }`}>
-          <div className="flex items-start gap-3">
-            <svg className={`w-5 h-5 mt-0.5 ${
-              test.anthropometry_source === 'hub'
-                ? 'text-green-600 dark:text-green-400'
-                : test.anthropometry_source === 'mixed'
-                ? 'text-yellow-600 dark:text-yellow-400'
-                : 'text-gray-600 dark:text-gray-400'
-            }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <h3 className={`font-semibold ${
-                  test.anthropometry_source === 'hub'
-                    ? 'text-green-900 dark:text-green-100'
-                    : test.anthropometry_source === 'mixed'
-                    ? 'text-yellow-900 dark:text-yellow-100'
-                    : 'text-gray-900 dark:text-gray-100'
-                }`}>
-                  Anthropometry Data
-                </h3>
-                {test.anthropometry_source === 'hub' && (
-                  <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-                    From HUB
-                  </span>
-                )}
-                {test.anthropometry_source === 'mixed' && (
-                  <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-full text-xs font-medium">
-                    Mixed Sources
-                  </span>
-                )}
-                {test.anthropometry_source === 'manual' && (
-                  <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
-                    Manual Entry
-                  </span>
-                )}
+          {test.anthropometry_snapshot ? (
+            <section className="border-l-4 border-[#5A4E6B] py-3 pl-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Antropometría usada en este test' : 'Anthropometry used for this test'}</h3>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{test.anthropometry_source === 'hub' ? 'HUB' : test.anthropometry_source === 'mixed' ? (language === 'es' ? 'Fuentes mixtas' : 'Mixed sources') : (language === 'es' ? 'Entrada manual' : 'Manual entry')}</span>
               </div>
-              <p className={`text-sm ${
-                test.anthropometry_source === 'hub'
-                  ? 'text-green-700 dark:text-green-300'
-                  : test.anthropometry_source === 'mixed'
-                  ? 'text-yellow-700 dark:text-yellow-300'
-                  : 'text-gray-600 dark:text-gray-400'
-              }`}>
-                Weight: {test.anthropometry_snapshot.weight_kg} kg • Height: {test.anthropometry_snapshot.height_cm} cm •
-                Age: {test.anthropometry_snapshot.age} • Sex: {test.anthropometry_snapshot.sex}
-                {test.anthropometry_snapshot.bodyFatPercent && ` • Body Fat: ${test.anthropometry_snapshot.bodyFatPercent}%`}
-                {test.anthropometry_snapshot.leanBodyMassKg && ` • LBM: ${test.anthropometry_snapshot.leanBodyMassKg.toFixed(1)} kg`}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{test.anthropometry_snapshot.weight_kg} kg · {test.anthropometry_snapshot.height_cm} cm · {language === 'es' ? 'edad' : 'age'} {test.anthropometry_snapshot.age} · {test.anthropometry_snapshot.sex}{test.anthropometry_snapshot.bodyFatPercent ? ` · ${language === 'es' ? 'grasa' : 'body fat'} ${test.anthropometry_snapshot.bodyFatPercent}%` : ''}{test.anthropometry_snapshot.leanBodyMassKg ? ` · LBM ${test.anthropometry_snapshot.leanBodyMassKg.toFixed(1)} kg` : ''}</p>
+            </section>
+          ) : (!athlete.weight_kg && <p className="border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{language === 'es' ? 'Falta el peso del atleta. VO₂ relativo, economía y algunas zonas pueden no estar disponibles. Edita los datos y recalcula.' : 'Athlete weight is missing. Relative VO₂, economy and some zones may be unavailable. Edit the data and recalculate.'}</p>)}
 
-      {showJSONSummary && completeJSON && (
-        <div className={`border-l-4 border-y border-gray-200 py-6 pl-4 dark:border-gray-700 ${
-          completeJSON.validation.isComplete
-            ? 'bg-green-50 dark:bg-green-900/10 border-green-500'
-            : 'bg-yellow-50 dark:bg-yellow-900/10 border-yellow-500'
-        }`}>
-          <div className="flex justify-between items-start mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              JSON Export Summary
-            </h3>
-            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-              completeJSON.validation.isComplete
-                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-            }`}>
-              {completeJSON.validation.isComplete ? 'Complete' : 'Incomplete'}
-            </span>
-          </div>
-          <pre className="text-sm leading-relaxed text-gray-700 dark:text-gray-300 bg-black/5 dark:bg-black/20 p-4 rounded-lg overflow-auto whitespace-pre-wrap">
-            {getJSONSummary(completeJSON)}
-          </pre>
-          {completeJSON.validation.warnings.length > 0 && (
-            <div className="mt-4 p-3 bg-yellow-100 dark:bg-yellow-900/20 rounded-lg">
-              <div className="font-semibold text-sm mb-2 text-yellow-800 dark:text-yellow-300">
-                Validation Warnings ({completeJSON.validation.warnings.length})
+          {showJSONSummary && completeJSON && (
+            <section className="border-y border-gray-200 py-5 dark:border-gray-700">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-gray-900 dark:text-white">JSON export summary</h3>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{completeJSON.validation.isComplete ? (language === 'es' ? 'Completo' : 'Complete') : (language === 'es' ? 'Incompleto' : 'Incomplete')}</span>
               </div>
-              <ul className="list-disc pl-6 text-sm text-yellow-700 dark:text-yellow-400">
-                {completeJSON.validation.warnings.map((warning, i) => (
-                  <li key={i}>{warning}</li>
-                ))}
-              </ul>
-            </div>
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap bg-gray-50 p-4 text-xs leading-relaxed text-gray-700 dark:bg-gray-800 dark:text-gray-300">{getJSONSummary(completeJSON)}</pre>
+              {completeJSON.validation.warnings.length > 0 && <ul className="mt-3 list-disc pl-5 text-xs text-amber-700 dark:text-amber-300">{completeJSON.validation.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>}
+              {completeJSON.validation.missingFields.length > 0 && <ul className="mt-2 list-disc pl-5 text-xs text-red-700 dark:text-red-300">{completeJSON.validation.missingFields.map((field, i) => <li key={i}>{field}</li>)}</ul>}
+            </section>
           )}
-          {completeJSON.validation.missingFields.length > 0 && (
-            <div className="mt-4 p-3 bg-red-100 dark:bg-red-900/20 rounded-lg">
-              <div className="font-semibold text-sm mb-2 text-red-800 dark:text-red-300">
-                Missing Required Fields ({completeJSON.validation.missingFields.length})
-              </div>
-              <ul className="list-disc pl-6 text-sm text-red-700 dark:text-red-400">
-                {completeJSON.validation.missingFields.map((field, i) => (
-                  <li key={i}>{field}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+
+          <ScientificModelPanel results={results} points={dataPoints} language={language} savedAlgorithmVersion={savedSnapshot?.modelProvenance?.algorithm.version ?? null} saved={isSaved && !isDirty} sport={test.sport} calculate={(points) => {
+            if (!athlete || !test) return results;
+            const athleteForSensitivity = { ...athlete, sport: test.sport };
+            if (test.anthropometry_snapshot) {
+              athleteForSensitivity.weight_kg = test.anthropometry_snapshot.weight_kg;
+              athleteForSensitivity.height_cm = test.anthropometry_snapshot.height_cm;
+              athleteForSensitivity.sex = test.anthropometry_snapshot.sex;
+              athleteForSensitivity.body_fat_percent = test.anthropometry_snapshot.bodyFatPercent;
+              athleteForSensitivity.lean_body_mass_kg = test.anthropometry_snapshot.leanBodyMassKg;
+            }
+            return calculatePhysiology(athleteForSensitivity, points, test.anthropometry_snapshot?.threshold_overrides);
+          }} />
+          <CoachNotes testId={test.id} />
+        </section>
       )}
 
-      {!test.anthropometry_snapshot?.weight_kg && !athlete.weight_kg && (
-        <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 flex items-start gap-3">
-          <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-          </svg>
-          <div className="flex-1">
-            <p className="font-semibold text-amber-800 dark:text-amber-300">Athlete weight missing</p>
-            <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
-              VO₂ calculations, energy profile, and training zones require body weight.
-              Click <strong>Edit Data</strong> above to enter the athlete's weight and recalculate.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <section className="border-y border-gray-200 py-6 dark:border-gray-700">
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Data Quality</h3>
-          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-            results.data_quality.includes('Excellent')
-              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-              : results.data_quality.includes('Good')
-              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-          }`}>
-            {results.data_quality}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <div>
-            <span className="text-gray-500 dark:text-gray-400">Data Points:</span>{' '}
-            <span className="text-gray-900 dark:text-white font-semibold">{dataPoints.length}</span>
-          </div>
-          {results.has_power && (
-            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-              Power ✓
-            </span>
-          )}
-          {results.has_lactate && (
-            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-              Lactate ✓
-            </span>
-          )}
-          {results.has_vo2 && (
-            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-              VO₂ ✓
-            </span>
-          )}
-          {results.has_rer && (
-            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-              RER ✓
-            </span>
-          )}
-          {results.vo2max_confidence !== 'measured' && (
-            <span className="px-3 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-full text-xs font-medium">
-              VO₂max {results.vo2max_confidence}
-            </span>
-          )}
-        </div>
-      </section>
-
-      <div className={showAdvanced ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-6'}>
-        <MetabolicProfile results={results} onEdit={() => setShowEditData(true)} />
-        {!showAdvanced && (
-          <TrainingZonesTable
-            zonesData={results.zones_data}
-            zones={results.training_zones}
-            sport={test.sport}
-            defaultMode="5"
-            lt1_hr={results.lt1_hr}
-            lt2_hr={results.lt2_hr}
-            hrmax={results.hrmax}
-            thresholdSource={results.threshold_source}
-            athleteId={athlete?.id}
-            onSaved={handleZonesSaved}
-          />
-        )}
-      </div>
-
-      {showAdvanced && (
-        <>
-          <TrainingZonesTable
-            zonesData={results.zones_data}
-            zones={results.training_zones}
-            sport={test.sport}
-            defaultMode="5"
-            lt1_hr={results.lt1_hr}
-            lt2_hr={results.lt2_hr}
-            hrmax={results.hrmax}
-            thresholdSource={results.threshold_source}
-            athleteId={athlete?.id}
-            onSaved={handleZonesSaved}
-          />
-          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg ?? athlete.lean_body_mass_kg} sport={test.sport} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
-        </>
-      )}
-
-      <CoachNotes testId={test.id} />
-
-      {/* Recalculate confirmation */}
-      <ConfirmDialog
-        isOpen={showRecalculateConfirm}
-        title="Confirm Recalculation"
-        message="This will replace the currently saved values with newly calculated values from the raw test data. Are you sure you want to continue? You can still cancel and revert to the saved version."
-        confirmLabel="Recalculate"
-        cancelLabel="Cancel"
-        onConfirm={confirmRecalculate}
-        onCancel={cancelRecalculate}
-        isDanger={false}
-      />
-
-      {/* Delete confirmation */}
-      <ConfirmDialog
-        isOpen={showDeleteConfirm}
-        title="Delete Test"
-        message="Are you sure you want to delete this test? This action cannot be undone and all test data will be permanently removed."
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        onConfirm={confirmDeleteTest}
-        onCancel={() => setShowDeleteConfirm(false)}
-        isDanger={true}
-      />
+      <ConfirmDialog isOpen={showRecalculateConfirm} title={language === 'es' ? 'Confirmar recálculo' : 'Confirm recalculation'} message={language === 'es' ? 'Esto reemplazará los valores guardados con nuevos cálculos hechos desde los datos originales. ¿Quieres continuar?' : 'This will replace saved values with newly calculated values from the raw test data. Continue?'} confirmLabel={language === 'es' ? 'Recalcular' : 'Recalculate'} cancelLabel={language === 'es' ? 'Cancelar' : 'Cancel'} onConfirm={confirmRecalculate} onCancel={cancelRecalculate} isDanger={false} />
+      <ConfirmDialog isOpen={showDeleteConfirm} title={language === 'es' ? 'Eliminar test' : 'Delete test'} message={language === 'es' ? '¿Eliminar este test y todos sus datos? Esta acción no se puede deshacer.' : 'Delete this test and all its data? This cannot be undone.'} confirmLabel={language === 'es' ? 'Eliminar' : 'Delete'} cancelLabel={language === 'es' ? 'Cancelar' : 'Cancel'} onConfirm={confirmDeleteTest} onCancel={() => setShowDeleteConfirm(false)} isDanger />
 
       {showEditData && athlete && test && (
-        <EditDataModal
-          testId={testId}
-          dataPoints={dataPoints}
-          athlete={athlete}
-          test={test}
-          onClose={() => setShowEditData(false)}
-          onRecalculate={async () => {
-            setShowEditData(false);
-            // Reload test + data points from DB so manual threshold overrides
-            // and edited raw data are included in the recalculation.
-            try {
-              const { data: freshTest } = await supabase
-                .from('tests')
-                .select('*')
-                .eq('id', testId)
-                .maybeSingle();
-              const { data: freshPoints } = await supabase
-                .from('test_data_points')
-                .select('*')
-                .eq('test_id', testId)
-                .order('stage_number', { ascending: true });
-
-              if (freshTest) setTest(freshTest as Test);
-              if (freshPoints) setDataPoints(freshPoints as TestDataPoint[]);
-
-              // Calculate inline with fresh data instead of stale doCalculation
-              if (freshTest && athlete && (freshPoints?.length ?? 0) > 0) {
-                const ft = freshTest as Test;
-                const athleteForCalc = { ...athlete };
-                if (ft.anthropometry_snapshot) {
-                  athleteForCalc.weight_kg = ft.anthropometry_snapshot.weight_kg;
-                  athleteForCalc.height_cm = ft.anthropometry_snapshot.height_cm;
-                  athleteForCalc.sex = ft.anthropometry_snapshot.sex;
-                  athleteForCalc.body_fat_percent = ft.anthropometry_snapshot.bodyFatPercent;
-                  athleteForCalc.lean_body_mass_kg = ft.anthropometry_snapshot.leanBodyMassKg;
-                  const birthYear = new Date().getFullYear() - ft.anthropometry_snapshot.age;
-                  athleteForCalc.date_of_birth = `${birthYear}-01-01`;
-                }
-                const overrides = ft.anthropometry_snapshot?.threshold_overrides;
-                const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], overrides);
-                const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults, undefined, ft.sport);
-                setPendingResults(calcResults);
-                setPendingAdvanced(calcAdvanced);
-                setShowRecalculateConfirm(true);
+        <EditDataModal testId={testId} dataPoints={dataPoints} athlete={athlete} test={test} onClose={() => setShowEditData(false)} onRecalculate={async () => {
+          setShowEditData(false);
+          try {
+            const { data: freshTest } = await supabase.from('tests').select('*').eq('id', testId).maybeSingle();
+            const { data: freshPoints } = await supabase.from('test_data_points').select('*').eq('test_id', testId).order('stage_number', { ascending: true });
+            if (freshTest) setTest(freshTest as Test);
+            if (freshPoints) setDataPoints(freshPoints as TestDataPoint[]);
+            if (freshTest && athlete && (freshPoints?.length ?? 0) > 0) {
+              const ft = freshTest as Test;
+              const athleteForCalc = { ...athlete };
+              if (ft.anthropometry_snapshot) {
+                athleteForCalc.weight_kg = ft.anthropometry_snapshot.weight_kg;
+                athleteForCalc.height_cm = ft.anthropometry_snapshot.height_cm;
+                athleteForCalc.sex = ft.anthropometry_snapshot.sex;
+                athleteForCalc.body_fat_percent = ft.anthropometry_snapshot.bodyFatPercent;
+                athleteForCalc.lean_body_mass_kg = ft.anthropometry_snapshot.leanBodyMassKg;
+                const birthYear = new Date().getFullYear() - ft.anthropometry_snapshot.age;
+                athleteForCalc.date_of_birth = `${birthYear}-01-01`;
               }
-            } catch (err) {
-              console.error('Failed to reload test data after edit:', err);
-              setToast({ message: 'Failed to reload edited data. Please try again.', type: 'error' });
+              const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], ft.anthropometry_snapshot?.threshold_overrides);
+              const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults, undefined, ft.sport);
+              setPendingResults(calcResults);
+              setPendingAdvanced(calcAdvanced);
+              setShowRecalculateConfirm(true);
             }
-          }}
-        />
+          } catch (err) {
+            console.error('Failed to reload test data after edit:', err);
+            setToast({ message: language === 'es' ? 'No se pudieron recargar los datos editados.' : 'Failed to reload edited data. Please try again.', type: 'error' });
+          }
+        }} />
       )}
     </div>
   );

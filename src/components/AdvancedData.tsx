@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 import { TestDataPoint, AdvancedMetrics, Sport } from '../types';
-import { PhysiologyResults, computeStageHRFromTimeline, interpolateHRAtLoad, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
+import { PhysiologyResults, computeStageHRFromTimeline, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
 import { calculateMovementEconomy } from '../lib/movementEconomy';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import VLamaxPanel from './VLamaxPanel';
 import LactateDynamicsPanel from './LactateDynamicsPanel';
+import { useLanguage } from '../contexts/LanguageContext';
 
 type AnalysisSurface = 'results' | 'dashboard';
 
@@ -24,14 +25,27 @@ interface AdvancedDataProps {
 }
 
 type Tab = 'charts' | 'energy' | 'economy' | 'recovery' | 'anaerobic' | 'rawdata';
+type OverlayKey = 'hr' | 'vo2' | 'lactate' | 'lactate_smoothed' | 'rer' | 'rpe' | 'fat_pct' | 'carb_pct';
+type OverlaySeries = { key: OverlayKey; en: string; es: string; unit: string; color: string; source?: string };
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'charts', label: 'Charts' },
-  { id: 'energy', label: 'Energy Profile' },
-  { id: 'economy', label: 'Economy' },
-  { id: 'recovery', label: 'Recovery' },
-  { id: 'anaerobic', label: 'Anaerobic Test' },
-  { id: 'rawdata', label: 'Raw Data' },
+const OVERLAY_SERIES: OverlaySeries[] = [
+  { key: 'lactate', en: 'Lactate', es: 'Lactato', unit: 'mmol/L', color: '#7c3aed' },
+  { key: 'lactate_smoothed', en: 'Lactate trend', es: 'Tendencia de lactato', unit: 'mmol/L', color: '#a78bfa' },
+  { key: 'hr', en: 'Heart rate', es: 'Frecuencia cardíaca', unit: 'bpm', color: '#ef4444' },
+  { key: 'vo2', en: 'VO₂', es: 'VO₂', unit: 'ml/kg/min', color: '#2563eb' },
+  { key: 'rer', en: 'RER', es: 'RER', unit: '', color: '#14b8a6' },
+  { key: 'rpe', en: 'RPE', es: 'RPE', unit: '/10', color: '#16a34a' },
+  { key: 'fat_pct', en: 'Fat energy share', es: 'Energía de grasas', unit: '%', color: '#f59e0b', source: 'estimate' },
+  { key: 'carb_pct', en: 'Carbohydrate energy share', es: 'Energía de carbohidratos', unit: '%', color: '#0891b2', source: 'estimate' },
+];
+
+const TABS: { id: Tab; en: string; es: string }[] = [
+  { id: 'charts', en: 'Curves', es: 'Curvas' },
+  { id: 'energy', en: 'Energy & fuels', es: 'Energía y sustratos' },
+  { id: 'economy', en: 'Economy', es: 'Economía' },
+  { id: 'recovery', en: 'Recovery', es: 'Recuperación' },
+  { id: 'anaerobic', en: 'Sprint / anaerobic', es: 'Sprint / anaeróbico' },
+  { id: 'rawdata', en: 'Samples', es: 'Muestras' },
 ];
 
 const tooltipStyle = {
@@ -113,8 +127,12 @@ function MetricTile({
 }
 
 export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
+  const { language } = useLanguage();
+  const en = language === 'en';
   const [activeTab, setActiveTab] = useState<Tab>('charts');
   const [selectedStage, setSelectedStage] = useState<number | null>(null);
+  const [overlayKeys, setOverlayKeys] = useState<OverlayKey[]>(['lactate', 'hr', 'vo2']);
+  const [overlayXAxis, setOverlayXAxis] = useState<'stage' | 'load'>('load');
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
 
   // Compute per-stage HR from timeline samples (last 30s window)
@@ -152,20 +170,6 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
   }, [sorted, effectiveHR, hasLoad, hasPower, loadUnit, sport]);
 
   // Interpolated HR at thresholds
-  const hrAtLT1 = useMemo(() => {
-    if (!hasPower || !results.lt1_power) return null;
-    const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
-    if (loads.length < 2) return null;
-    return interpolateHRAtLoad(loads, effectiveHR, results.lt1_power);
-  }, [sorted, effectiveHR, hasPower, results.lt1_power]);
-
-  const hrAtLT2 = useMemo(() => {
-    if (!hasPower || !results.lt2_power) return null;
-    const loads = sorted.map(p => p.power_watts ?? 0).filter(v => v > 0);
-    if (loads.length < 2) return null;
-    return interpolateHRAtLoad(loads, effectiveHR, results.lt2_power);
-  }, [sorted, effectiveHR, hasPower, results.lt2_power]);
-
   const hasTimelineHR = stageHR.length > 0 && stageHR.some(s => s.hr_last_window != null);
   const hasShortStages = stageHR.some(s => s.short_stage && s.hr_last_window != null);
 
@@ -176,12 +180,35 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
     power: p.power_watts ?? null,
     load: hasPower ? (p.power_watts ?? null) : parseSpeedKmh(p.speed_pace, sport),
     lactate: p.lactate ?? null,
+    lactate_smoothed: (() => {
+      const load = hasPower ? p.power_watts : parseSpeedKmh(p.speed_pace, sport);
+      const curve = results.lactate_analysis?.curve ?? [];
+      if (load == null || curve.length === 0) return null;
+      return curve.reduce((nearest, point) => Math.abs(point.load - load) < Math.abs(nearest.load - load) ? point : nearest, curve[0]).smoothed;
+    })(),
     vo2: p.vo2_ml_kg_min ?? null,
     rpe: p.rpe ?? null,
     rer: advancedMetrics?.energyProfile.rer_vs_stage[i] ?? null,
     fat_pct: advancedMetrics?.energyProfile.percent_fat_vs_stage[i] ?? null,
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
+  const availableOverlaySeries = OVERLAY_SERIES.filter(series => chartData.some(point => point[series.key] != null));
+  const selectedOverlaySeries = availableOverlaySeries.filter(series => overlayKeys.includes(series.key));
+  const overlayRanges = new Map<OverlayKey, { min: number; max: number }>(selectedOverlaySeries.map(series => {
+    const values = chartData.flatMap(point => point[series.key] == null ? [] : [Number(point[series.key])]).filter(Number.isFinite);
+    return [series.key, { min: Math.min(...values), max: Math.max(...values) }];
+  }));
+  const overlayData = chartData.map(point => {
+    const scaled: Record<string, number | null> = { stage: point.stage, load: point.load, original: point as any };
+    selectedOverlaySeries.forEach(series => {
+      const value = point[series.key];
+      const range = overlayRanges.get(series.key);
+      scaled[`${series.key}_scaled`] = value == null || !range
+        ? null
+        : range.max === range.min ? 50 : ((Number(value) - range.min) / (range.max - range.min)) * 100;
+    });
+    return scaled;
+  });
   const selectedPoint = selectedStage == null ? null : chartData.find(point => point.stage === selectedStage) ?? null;
   const selectChartPoint = (event: any) => {
     const point = event?.activePayload?.[0]?.payload;
@@ -241,62 +268,43 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
     },
   };
 
+  const lt1Load = hasPower ? results.lt1_power : parseSpeedKmh(results.lt1_pace, sport);
+  const lt2Load = hasPower ? results.lt2_power : parseSpeedKmh(results.lt2_pace, sport);
+
   const hrLoadSection = hasLoad ? (
-    <SectionCard title={`HR vs ${hasPower ? 'Power' : 'Speed'}`}>
+    <SectionCard title={`${en ? 'Heart rate vs' : 'Frecuencia cardíaca vs'} ${hasPower ? (en ? 'power' : 'potencia') : (en ? 'speed' : 'velocidad')}`}>
       {hasTimelineHR && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-          HR per stage uses the mean of the last {STAGE_HR_WINDOW_S}s of each stage (from timeline data).
-          {hasShortStages && ' Some stages were shorter than the window — full stage used.'}
+          {en ? `Heart rate uses the mean of the last ${STAGE_HR_WINDOW_S}s of each stage from timeline data.` : `La frecuencia cardíaca usa la media de los últimos ${STAGE_HR_WINDOW_S}s de cada estadio según la serie temporal.`}
+          {hasShortStages && (en ? ' Short stages use their full duration.' : ' Los estadios cortos usan toda su duración.')}
         </p>
       )}
       {!hasTimelineHR && (
         <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
-          Timeline samples are not available for this test, so HR uses the recorded value for each complete stage.
+          {en ? 'Timeline samples are unavailable; the graph uses the value recorded for each stage.' : 'No hay serie temporal; el gráfico usa el valor registrado en cada estadio.'}
         </p>
       )}
       {hrRegression && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          HR–Load slope: <strong className="text-gray-700 dark:text-gray-300">{hrRegression.slope} bpm/{hrRegression.unit}</strong>
+          {en ? 'HR–load slope: ' : 'Pendiente FC–carga: '}<strong className="text-gray-700 dark:text-gray-300">{hrRegression.slope} bpm/{hrRegression.unit}</strong>
           {' · R² = '}<strong className="text-gray-700 dark:text-gray-300">{hrRegression.r_squared}</strong>
         </p>
       )}
       <ResponsiveContainer width="100%" height={320}>
-        <LineChart data={chartData} onClick={selectChartPoint}>
+        <ScatterChart onClick={selectChartPoint}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="stage" stroke="#9ca3af" />
-          <YAxis stroke="#9ca3af" />
-          <Tooltip contentStyle={tooltipStyle} />
-          <Legend />
-          <Line type="monotone" dataKey="load" stroke="#f97316" strokeWidth={2} name={hasPower ? 'Power (W)' : 'Speed (km/h)'} dot={{ r: 4, fill: '#f97316' }} />
-          <Line type="monotone" dataKey="hr" stroke="#ef4444" strokeWidth={2} name="HR (bpm)" dot={{ r: 4, fill: '#ef4444' }} />
-          {hrAtLT1 != null && results.lt1_power != null && (
-            <ReferenceDot
-              x={sorted.findIndex(p => p.power_watts === results.lt1_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt1_power)].stage_number : sorted[0].stage_number}
-              y={hrAtLT1}
-              r={6}
-              fill="#f59e0b"
-              stroke="#fff"
-              strokeWidth={1.5}
-              label={{ value: 'LT1', fill: '#f59e0b', fontSize: 11, position: 'top' }}
-            />
-          )}
-          {hrAtLT2 != null && results.lt2_power != null && (
-            <ReferenceDot
-              x={sorted.findIndex(p => p.power_watts === results.lt2_power) >= 0 ? sorted[sorted.findIndex(p => p.power_watts === results.lt2_power)].stage_number : sorted[sorted.length - 1].stage_number}
-              y={hrAtLT2}
-              r={6}
-              fill="#dc2626"
-              stroke="#fff"
-              strokeWidth={1.5}
-              label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }}
-            />
-          )}
-          <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
-            label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
-        </LineChart>
+          <XAxis type="number" dataKey="load" name={hasPower ? (en ? 'Power' : 'Potencia') : (en ? 'Speed' : 'Velocidad')} unit={hasPower ? ' W' : ' km/h'} domain={['dataMin', 'dataMax']} label={{ value: hasPower ? (en ? 'Power (W)' : 'Potencia (W)') : (en ? 'Speed (km/h)' : 'Velocidad (km/h)'), position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
+          <YAxis type="number" dataKey="hr" name={en ? 'Heart rate' : 'Frecuencia cardíaca'} unit=" bpm" label={{ value: en ? 'Heart rate (bpm)' : 'Frecuencia cardíaca (bpm)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
+          <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
+          <Scatter data={chartData.filter(point => point.load != null && point.hr != null)} name={en ? 'Measured stages' : 'Estadios medidos'} fill="#5A4E6B" />
+          {lt1Load != null && <ReferenceLine x={lt1Load} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: 'LT1', fill: '#b45309', fontSize: 11, position: 'top' }} />}
+          {lt2Load != null && <ReferenceLine x={lt2Load} stroke="#dc2626" strokeDasharray="5 4" label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }} />}
+          {hrMax > 0 && <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4} label={{ value: `${en ? 'HR max' : 'FC máx.'} ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />}
+          {selectedPoint?.load != null && selectedPoint.hr != null && <ReferenceDot x={selectedPoint.load} y={selectedPoint.hr} r={7} fill="#fdda36" stroke="#514163" strokeWidth={2} />}
+        </ScatterChart>
       </ResponsiveContainer>
       <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-        HR lags behind load in short stages — the last-30s window helps capture steady-state HR.
+        {en ? 'Heart rate responds with a delay to load. Read short stages with caution.' : 'La frecuencia cardíaca responde con retraso a la carga; interpreta con cautela los estadios cortos.'}
       </p>
     </SectionCard>
   ) : null;
@@ -310,10 +318,8 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
         </div>
-        <h3 className="text-2xl font-bold text-gray-800 dark:text-white">Advanced Analysis</h3>
+        <h3 className="text-2xl font-bold text-gray-800 dark:text-white">{en ? 'Explore analysis' : 'Explorar análisis'}</h3>
       </div>
-
-      {hrLoadSection}
 
       <div className="flex gap-1 flex-wrap border-b border-gray-200 dark:border-gray-700">
         {TABS.map(tab => (
@@ -326,27 +332,99 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                 : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700/30'
             }`}
           >
-            {tab.label}
+            {en ? tab.en : tab.es}
           </button>
         ))}
       </div>
 
+      {surface === 'results' && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {en ? 'Hover for exact values. Click a point to focus that stage across the charts.' : 'Pasa el cursor para ver valores exactos. Selecciona un punto para enfocar ese estadio en los gráficos.'}
+        </p>
+      )}
+
       {surface === 'results' && selectedPoint && (
-        <div className="grid grid-cols-2 gap-y-3 border-y border-gray-200 py-3 text-sm sm:grid-cols-5 dark:border-gray-700">
-          <Reading label="Etapa" value={selectedPoint.stage} />
-          <Reading label={hasPower ? 'Potencia' : 'Velocidad'} value={selectedPoint.load ?? '—'} unit={hasPower ? 'W' : 'km/h'} />
-          <Reading label="FC" value={selectedPoint.hr ?? '—'} unit="bpm" />
-          <Reading label="Lactato" value={selectedPoint.lactate ?? '—'} unit="mmol/L" />
+        <div aria-live="polite" className="grid grid-cols-2 gap-y-3 border-y border-gray-200 py-3 text-sm sm:grid-cols-5 dark:border-gray-700">
+          <Reading label={en ? 'Stage' : 'Estadio'} value={selectedPoint.stage} />
+          <Reading label={hasPower ? (en ? 'Power' : 'Potencia') : (en ? 'Speed' : 'Velocidad')} value={selectedPoint.load ?? '—'} unit={hasPower ? 'W' : 'km/h'} />
+          <Reading label={en ? 'Heart rate' : 'Frecuencia cardíaca'} value={selectedPoint.hr ?? '—'} unit="bpm" />
+          <Reading label={en ? 'Lactate' : 'Lactato'} value={selectedPoint.lactate ?? '—'} unit="mmol/L" />
           <Reading label="VO₂" value={selectedPoint.vo2 ?? '—'} unit="ml/kg/min" />
         </div>
       )}
 
       {activeTab === 'charts' && (
         <div className="space-y-6">
+          <section className="border-y border-gray-200 py-5 dark:border-gray-700">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900 dark:text-white">{en ? 'Compare response curves' : 'Comparar curvas de respuesta'}</h4>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {en
+                    ? 'Choose up to four signals. Each is scaled to its own observed range (0–100%) to compare curve shape, not absolute magnitude. Hover or click to read original values and units.'
+                    : 'Elige hasta cuatro señales. Cada una se escala a su propio rango observado (0–100%) para comparar la forma, no la magnitud absoluta. Pasa el cursor o selecciona para ver los valores y unidades originales.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 border border-gray-200 p-1 text-xs dark:border-gray-700" role="group" aria-label={en ? 'Horizontal axis' : 'Eje horizontal'}>
+                <button type="button" onClick={() => setOverlayXAxis('load')} disabled={!chartData.some(point => point.load != null)} className={`px-2.5 py-1.5 font-medium ${overlayXAxis === 'load' ? 'bg-[#5A4E6B] text-white' : 'text-gray-600 dark:text-gray-300 disabled:opacity-40'}`}>{en ? 'Workload' : 'Carga'}</button>
+                <button type="button" onClick={() => setOverlayXAxis('stage')} className={`px-2.5 py-1.5 font-medium ${overlayXAxis === 'stage' ? 'bg-[#5A4E6B] text-white' : 'text-gray-600 dark:text-gray-300'}`}>{en ? 'Stage' : 'Estadio'}</button>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+              {availableOverlaySeries.map(series => {
+                const selected = overlayKeys.includes(series.key);
+                const capped = overlayKeys.length >= 4 && !selected;
+                const label = en ? series.en : series.es;
+                const source = series.key === 'rer'
+                  ? (results.has_rer ? (en ? 'measured' : 'medido') : (en ? 'estimated' : 'estimado'))
+                  : series.source === 'estimate' ? (en ? 'estimated' : 'estimado') : null;
+                return (
+                  <button key={series.key} type="button" aria-pressed={selected} disabled={capped} onClick={() => setOverlayKeys(current => current.includes(series.key) ? current.filter(key => key !== series.key) : current.length < 4 ? [...current, series.key] : current)} className={`inline-flex items-center gap-2 text-xs transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${selected ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+                    <span className={`flex h-4 w-4 items-center justify-center border ${selected ? 'border-current' : 'border-gray-400 dark:border-gray-500'}`} style={{ color: selected ? series.color : undefined }} aria-hidden="true">{selected ? '✓' : ''}</span>
+                    <span>{label}{source ? <span className="ml-1 text-[10px] text-gray-400">· {source}</span> : null}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4 h-72">
+              {selectedOverlaySeries.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={overlayData} margin={{ top: 8, right: 16, bottom: 12, left: 4 }} onClick={selectChartPoint}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey={overlayXAxis} type={overlayXAxis === 'load' ? 'number' : 'category'} domain={overlayXAxis === 'load' ? ['dataMin', 'dataMax'] : undefined} name={overlayXAxis === 'load' ? (hasPower ? (en ? 'Power' : 'Potencia') : (en ? 'Speed' : 'Velocidad')) : (en ? 'Stage' : 'Estadio')} unit={overlayXAxis === 'load' ? (hasPower ? ' W' : ' km/h') : undefined} label={{ value: overlayXAxis === 'load' ? (hasPower ? (en ? 'Power (W)' : 'Potencia (W)') : (en ? 'Speed (km/h)' : 'Velocidad (km/h)')) : (en ? 'Stage' : 'Estadio'), position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
+                    <YAxis domain={[0, 100]} unit="%" label={{ value: en ? 'Relative range (%)' : 'Rango relativo (%)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
+                    <Tooltip content={(props: any) => {
+                      const point = props.payload?.[0]?.payload?.original;
+                      if (!props.active || !point) return null;
+                      return <div className="border border-gray-200 bg-white px-3 py-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                        <p className="mb-1 text-xs font-semibold text-gray-900 dark:text-white">{en ? 'Stage' : 'Estadio'} {point.stage} · {point.load ?? '—'} {hasPower ? 'W' : 'km/h'}</p>
+                        {selectedOverlaySeries.map(series => {
+                          const value = point[series.key];
+                          if (value == null) return null;
+                          const decimals = series.key === 'hr' || series.key === 'rpe' ? 0 : series.key === 'vo2' ? 1 : 2;
+                          const sourceLabel = series.key === 'rer' ? (results.has_rer ? (en ? 'measured' : 'medido') : (en ? 'estimated' : 'estimado')) : series.source === 'estimate' ? (en ? 'estimated' : 'estimado') : '';
+                          return <p key={series.key} className="text-xs text-gray-700 dark:text-gray-200"><span style={{ color: series.color }}>●</span> {en ? series.en : series.es}: <strong>{Number(value).toFixed(decimals)} {series.unit}</strong>{sourceLabel ? ` · ${sourceLabel}` : ''}</p>;
+                        })}
+                      </div>;
+                    }} />
+                    {selectedPoint && <ReferenceLine x={overlayXAxis === 'load' ? selectedPoint.load ?? undefined : selectedPoint.stage} stroke="#514163" strokeDasharray="2 3" />}
+                    {selectedOverlaySeries.map(series => <Line key={series.key} type="monotone" dataKey={`${series.key}_scaled`} name={en ? series.en : series.es} stroke={series.color} strokeWidth={2.5} dot={{ r: 3, fill: series.color }} activeDot={{ r: 6 }} connectNulls />)}
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400">{en ? 'Select at least one signal to draw a curve.' : 'Selecciona al menos una señal para mostrar una curva.'}</div>
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-gray-100 pt-3 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              {selectedOverlaySeries.map(series => <span key={series.key} className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4" style={{ backgroundColor: series.color }} />{en ? series.en : series.es}</span>)}
+            </div>
+          </section>
+
+          {hrLoadSection}
           {hasVO2 && hasPower && (
-            <SectionCard title="VO₂ vs Power">
+            <SectionCard title={en ? 'VO₂ vs power' : 'VO₂ vs potencia'}>
               <ResponsiveContainer width="100%" height={350}>
-                <ScatterChart>
+                <ScatterChart onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="power" type="number" name="Power (W)"
                     label={{ value: 'Power (W)', position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
@@ -355,13 +433,14 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                   <Tooltip contentStyle={tooltipStyle} />
                   <Scatter data={chartData.filter(d => d.power && d.vo2)} fill="#3b82f6"
                     line={{ stroke: '#3b82f6', strokeWidth: 2 }} />
+                  {selectedPoint?.power != null && <ReferenceLine x={selectedPoint.power} stroke="#5A4E6B" strokeDasharray="2 3" />}
                 </ScatterChart>
               </ResponsiveContainer>
             </SectionCard>
           )}
 
           {hasLactate && (
-            <SectionCard title="Lactate Curve">
+            <SectionCard title={en ? 'Lactate response' : 'Respuesta del lactato'}>
               {results.lactate_analysis && (
                 <div className={`mb-4 rounded-lg border px-3 py-2 text-xs ${results.lactate_analysis.quality.validForThresholds ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300' : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'}`}>
                   <strong>Data quality: {results.lactate_analysis.quality.grade} ({results.lactate_analysis.quality.score}/100)</strong>
@@ -411,6 +490,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                   <Tooltip contentStyle={tooltipStyle} />
                   <Line type="monotone" dataKey="rpe" stroke="#10b981" strokeWidth={2} name="RPE"
                     dot={{ r: 4, fill: '#10b981' }} />
+                  {selectedPoint?.load != null && <ReferenceLine x={selectedPoint.load} stroke="#5A4E6B" strokeDasharray="2 3" />}
                 </LineChart>
               </ResponsiveContainer>
             </SectionCard>
@@ -432,6 +512,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                     name="% Fat" dot={{ r: 4, fill: '#f59e0b' }} />
                   <Line type="monotone" dataKey="carb_pct" stroke="#3b82f6" strokeWidth={2}
                     name="% Carbohydrates" dot={{ r: 4, fill: '#3b82f6' }} />
+                  {selectedPoint?.stage != null && <ReferenceLine x={selectedPoint.stage} stroke="#5A4E6B" strokeDasharray="2 3" />}
                 </LineChart>
               </ResponsiveContainer>
             </SectionCard>
@@ -473,6 +554,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                       label={{ value: 'RER 1.0', fill: '#ef4444', fontSize: 11 }} />
                     <Line type="monotone" dataKey="rer" stroke="#14b8a6" strokeWidth={2} name="RER"
                       dot={{ r: 4, fill: '#14b8a6' }} />
+                    {selectedPoint?.stage != null && <ReferenceLine x={selectedPoint.stage} stroke="#5A4E6B" strokeDasharray="2 3" />}
                   </LineChart>
                 </ResponsiveContainer>
               </SectionCard>
@@ -482,7 +564,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                     Estimated distribution of fat and carbohydrates as energy source by test intensity
                 </p>
                 <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={chartData}>
+                  <BarChart data={chartData} onClick={selectChartPoint}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="load" stroke="#9ca3af" name={hasPower ? 'Power (W)' : hasSpeed ? 'Speed (km/h)' : 'Stage'} />
                     <YAxis domain={[0, 100]} stroke="#9ca3af" unit="%" />
@@ -490,6 +572,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                     <Legend />
                     <Bar dataKey="fat_pct" name="Fat %" fill="#f59e0b" stackId="a" />
                     <Bar dataKey="carb_pct" name="Carbohydrates %" fill="#3b82f6" stackId="a" />
+                    {selectedPoint?.load != null && <ReferenceLine x={selectedPoint.load} stroke="#5A4E6B" strokeDasharray="2 3" />}
                   </BarChart>
                 </ResponsiveContainer>
               </SectionCard>
@@ -569,7 +652,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                 Measured stage values only. No extrapolation is shown; valid points require a stage of at least 2 minutes and intensity at or below 85% of measured VO₂peak.
               </p>
               <ResponsiveContainer width="100%" height={300}>
-                <ScatterChart>
+                <ScatterChart onClick={selectChartPoint}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="load" type="number" name={economyLoadLabel}
                     label={{ value: economyLoadLabel, position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
@@ -577,6 +660,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                     label={{ value: 'VO₂ (ml/kg/min)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
                   <Scatter data={economyChartData} fill="#14b8a6" line={{ stroke: '#14b8a6', strokeWidth: 2 }} />
+                  {selectedPoint?.load != null && <ReferenceLine x={selectedPoint.load} stroke="#5A4E6B" strokeDasharray="2 3" />}
                 </ScatterChart>
               </ResponsiveContainer>
             </SectionCard>
@@ -681,6 +765,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                       name="HR last-30s (bpm)" dot={{ r: 3, fill: '#f59e0b' }}
                       strokeDasharray="5 3" connectNulls />
                   )}
+                  {selectedPoint?.load != null && <ReferenceLine x={selectedPoint.load} stroke="#5A4E6B" strokeDasharray="2 3" />}
                   <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4}
                     label={{ value: `HR max ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />
                 </LineChart>

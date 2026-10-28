@@ -110,31 +110,36 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
       </div>
 
       {lactateHistory.length > 1 && (
-        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white">{es ? 'Curvas de lactato — evolución por test' : 'Lactate curves — test history'}</h3>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{es ? 'Cada línea corresponde a las mediciones guardadas de una evaluación.' : 'Each line shows the saved measurements from one evaluation.'}</p>
+        <section className="border-y border-gray-200 py-5 dark:border-gray-700">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">{es ? 'Evolución longitudinal del lactato' : 'Longitudinal lactate response'}</h3>
+            <span className="text-xs font-semibold uppercase tracking-wide text-[#5A4E6B] dark:text-violet-300">{lactateByTest[0]?.basis}</span>
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{es ? `Cada línea corresponde a un test. Se muestran solo evaluaciones con la misma base de carga (${lactateByTest[0]?.basis}) para permitir comparación.` : `Each line represents one test. Only assessments with a matching workload basis (${lactateByTest[0]?.basis}) are shown for comparison.`}</p>
           <div className="mt-4 h-72">
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis type="number" dataKey="load" domain={['dataMin', 'dataMax']} label={{ value: lactateByTest[0]?.basis === 'W/kg' ? 'W/kg' : (es ? 'Velocidad (km/h)' : 'Speed (km/h)'), position: 'insideBottom', offset: -2 }} />
-                <YAxis dataKey="lactate" unit=" mmol/L" />
-                <Tooltip />
+                <YAxis dataKey="lactate" unit=" mmol/L" label={{ value: es ? 'Lactato (mmol/L)' : 'Lactate (mmol/L)', angle: -90, position: 'insideLeft' }} />
+                <Tooltip contentStyle={{ backgroundColor: 'rgba(255,255,255,0.98)', border: '1px solid #e5e7eb', borderRadius: '0.375rem', color: '#1f2937', fontSize: '12px' }} />
                 <Legend />
                 {lactateByTest.map((series, index) => <Scatter key={series.id} name={series.label} data={series.points} fill={colors[index % colors.length]} line={{ stroke: colors[index % colors.length], strokeWidth: 2 }} />)}
               </ScatterChart>
             </ResponsiveContainer>
           </div>
-        </div>
+          <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">{es ? 'Puntos: lactato medido. Las diferencias entre curvas describen cambios observados; no demuestran por sí solas una adaptación causal.' : 'Points: measured lactate. Curve differences describe observed change; they do not alone establish a causal adaptation.'}</p>
+        </section>
       )}
 
-      {tests.map(({ test, points, timeline, results, advanced }) => (
-        <article key={test.id} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-4 sm:p-5">
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="font-semibold text-gray-900 dark:text-white">{dateLabel(test.test_date)} <span className="font-normal text-gray-500">· {test.sport}</span></h3>
-            <span className="text-xs text-gray-500 dark:text-gray-400">{test.test_type.replace('_', ' ')}</span>
-          </div>
-          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      {tests.map(({ test, points, timeline, results, advanced }, index) => (
+        <details key={test.id} className="border-b border-gray-200 py-4 dark:border-gray-700" open={index === 0}>
+          <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-2 text-left">
+            <span className="font-semibold text-gray-900 dark:text-white">{dateLabel(test.test_date)} <span className="font-normal text-gray-500">· {test.sport}</span></span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{test.test_type.replace('_', ' ')} · {es ? 'ver análisis' : 'view analysis'}</span>
+          </summary>
+          <div className="pt-4">
+          <div className="mb-5 grid grid-cols-2 border-y border-gray-200 py-3 sm:grid-cols-3 lg:grid-cols-6 dark:border-gray-700">
             {[
               { label: 'VO₂max', value: results.vo2max, unit: 'ml/kg/min' },
               { label: 'LT1', value: results.lt1_power ?? results.lt1_pace ?? results.lt1_hr, unit: results.lt1_power != null ? 'W' : results.lt1_pace ? '' : (es ? 'lpm' : 'bpm') },
@@ -143,13 +148,13 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
               { label: 'VAM', value: results.vam_kmh, unit: 'km/h' },
               { label: 'FatMax', value: results.fatmax_power ?? results.fatmax_pace ?? results.fatmax_hr, unit: results.fatmax_power != null ? 'W' : results.fatmax_pace ? '' : (es ? 'lpm' : 'bpm') },
             ].filter(metric => metric.value != null).map(metric => (
-              <div key={metric.label} className="rounded-xl bg-white dark:bg-gray-800 px-3 py-2">
+              <div key={metric.label} className="border-r border-gray-200 px-3 py-2 last:border-r-0 dark:border-gray-700">
                 <p className="text-xs text-gray-500 dark:text-gray-400">{metric.label}</p>
                 <p className="font-bold tabular-nums text-gray-900 dark:text-white">{typeof metric.value === 'number' ? Number(metric.value).toFixed(1) : metric.value} <span className="text-xs font-normal">{metric.unit}</span></p>
               </div>
             ))}
           </div>
-          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg} sport={test.sport} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} />}
+          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg} sport={test.sport} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} surface="results" />}
           <MetabolicProfile results={results} />
           {[
             { key: 'LT1', value: results.thresholds?.LT1?.percent_vo2max },
@@ -164,7 +169,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
                 { key: 'VT1', value: results.thresholds?.VT1?.percent_vo2max },
                 { key: 'VT2', value: results.thresholds?.VT2?.percent_vo2max },
               ].filter(threshold => threshold.value != null).map(threshold => (
-                <div key={threshold.key} className="rounded-xl bg-white dark:bg-gray-800 px-4 py-3">
+                <div key={threshold.key} className="border-r border-gray-200 px-4 py-3 last:border-r-0 dark:border-gray-700">
                   <p className="text-xs text-gray-500 dark:text-gray-400">{threshold.key} · {es ? '% de VO₂máx' : '% of VO₂max'}</p>
                   <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-white">{threshold.value}%</p>
                 </div>
@@ -172,8 +177,8 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
             </div>
           )}
           {(results.zones_data?.zones7 ?? []).length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-              <h4 className="px-4 pt-4 font-semibold text-gray-900 dark:text-white">{es ? 'Tus 7 zonas de entrenamiento' : 'Your 7 training zones'}</h4>
+            <div className="overflow-x-auto border-y border-gray-200 dark:border-gray-700">
+              <h4 className="pt-4 font-semibold text-gray-900 dark:text-white">{es ? 'Tus 7 zonas de entrenamiento' : 'Your 7 training zones'}</h4>
               <table className="mt-2 min-w-full text-sm">
                 <thead><tr className="border-b border-gray-200 dark:border-gray-700 text-left text-gray-500"><th className="px-4 py-2">{es ? 'Zona' : 'Zone'}</th><th className="px-4 py-2">{es ? 'Frecuencia cardíaca' : 'Heart rate'}</th><th className="px-4 py-2">{es ? 'Potencia' : 'Power'}</th><th className="px-4 py-2">{es ? 'Ritmo' : 'Pace'}</th></tr></thead>
                 <tbody>{results.zones_data.zones7.map(zone => (
@@ -187,7 +192,8 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
               </table>
             </div>
           )}
-        </article>
+          </div>
+        </details>
       ))}
     </section>
   );

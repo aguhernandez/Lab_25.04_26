@@ -1,12 +1,13 @@
 import { PhysiologyResults, ConfidenceLevel } from '../lib/physiology';
 import { ThresholdConfidence } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface MetabolicProfileProps {
   results: PhysiologyResults;
   onEdit?: () => void;
 }
 
-function getConfidenceBadge(confidence: ConfidenceLevel | ThresholdConfidence) {
+function getConfidenceBadge(confidence: ConfidenceLevel | ThresholdConfidence, es = false) {
   const colors: Record<string, string> = {
     measured: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
     estimated: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
@@ -14,7 +15,12 @@ function getConfidenceBadge(confidence: ConfidenceLevel | ThresholdConfidence) {
     manual: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400',
   };
 
-  const labels: Record<string, string> = {
+  const labels: Record<string, string> = es ? {
+    measured: 'MEDIDO',
+    estimated: 'ESTIMADO',
+    inferred: 'INFERIDO',
+    manual: 'MANUAL',
+  } : {
     measured: 'MEASURED',
     estimated: 'ESTIMATED',
     inferred: 'INFERRED',
@@ -29,270 +35,98 @@ function getConfidenceBadge(confidence: ConfidenceLevel | ThresholdConfidence) {
 }
 
 export default function MetabolicProfile({ results, onEdit }: MetabolicProfileProps) {
+  const { language } = useLanguage();
+  const es = language === 'es';
   const fatmaxPercentVO2max = results.fatmax_vo2 && results.vo2max
     ? ((results.fatmax_vo2 / results.vo2max) * 100).toFixed(1)
     : null;
 
+  const rows = [
+    { label: 'HRmax', value: results.hrmax == null ? '—' : `${results.hrmax} bpm`, detail: null, confidence: results.hrmax_confidence },
+    { label: 'VO₂max', value: results.vo2max == null ? '—' : `${results.vo2max.toFixed(1)} ml/kg/min`, detail: results.vo2max_ml_min == null ? null : `${Math.round(results.vo2max_ml_min)} ml/min`, confidence: results.vo2max_confidence },
+    { label: 'LT1', value: results.lt1_hr == null ? '—' : `${results.lt1_hr} bpm`, detail: [results.lt1_power == null ? null : `${Math.round(results.lt1_power)} W`, results.lt1_pace, results.lt1_percent_vo2max == null ? null : `${results.lt1_percent_vo2max.toFixed(0)}% VO₂max`].filter(Boolean).join(' · ') || null, confidence: results.lt1_confidence },
+    { label: 'LT2', value: results.lt2_hr == null ? '—' : `${results.lt2_hr} bpm`, detail: [results.lt2_power == null ? null : `${Math.round(results.lt2_power)} W`, results.lt2_pace, results.lt2_percent_vo2max == null ? null : `${results.lt2_percent_vo2max.toFixed(0)}% VO₂max`].filter(Boolean).join(' · ') || null, confidence: results.lt2_confidence },
+    { label: 'FatMax', value: results.fatmax_hr == null ? '—' : `${results.fatmax_hr} bpm`, detail: [results.fatmax_power == null ? null : `${Math.round(results.fatmax_power)} W`, results.fatmax_pace, fatmaxPercentVO2max ? `${fatmaxPercentVO2max}% VO₂max` : null].filter(Boolean).join(' · ') || null, confidence: results.fatmax_confidence },
+    ...(results.hr_drift_percent == null ? [] : [{ label: 'HR drift', value: `${results.hr_drift_percent > 0 ? '+' : ''}${results.hr_drift_percent}%`, detail: null, confidence: 'measured' as ConfidenceLevel }]),
+  ];
+  const sourceNote = results.has_lactate
+    ? (es ? 'Los umbrales usan lactato medido; el método de selección sigue determinando cada valor.' : 'Thresholds use measured lactate; the selected method still determines each value.')
+    : results.has_vo2
+      ? (es ? 'Los umbrales se estiman a partir de VO₂ y frecuencia cardíaca.' : 'Thresholds are estimated from VO₂ and heart rate.')
+      : (es ? 'Los umbrales se infieren de la progresión cardíaca y el modelo fisiológico.' : 'Thresholds are inferred from heart-rate progression and the physiology model.');
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-      <div className="bg-gradient-to-r from-[#5A4E6B] to-[#6B5D7B] dark:from-[#4A3E5B] dark:to-[#5B4D6B] px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/20 rounded-lg p-2">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-white">Metabolic Profile</h3>
-          </div>
-          {onEdit && (
-            <button
-              onClick={onEdit}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-              title="Edit metabolic data"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="p-6 space-y-6">
+    <section className="border-y border-gray-200 py-5 dark:border-gray-700" aria-label={es ? 'Perfil metabólico' : 'Metabolic profile'}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            HRmax
-          </h4>
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="text-3xl font-bold text-[#514163] dark:text-[#fdda36]">
-                {results.hrmax} <span className="text-lg">bpm</span>
-              </div>
-            </div>
-            {getConfidenceBadge(results.hrmax_confidence)}
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{es ? 'Perfil metabólico' : 'Metabolic profile'}</h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{es ? 'Valor principal, carga de trabajo y procedencia del dato.' : 'Primary value, external workload and evidence source.'}</p>
         </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            VO₂max
-          </h4>
-          <div className="flex justify-between items-start mb-2">
-            <div>
-              <div className="text-3xl font-bold text-[#514163] dark:text-[#fdda36]">
-                {results.vo2max ? results.vo2max.toFixed(1) : 'N/A'} <span className="text-lg">ml/kg/min</span>
-              </div>
-              {results.vo2max_ml_min && (
-                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {Math.round(results.vo2max_ml_min)} ml/min
-                </div>
-              )}
-            </div>
-            {getConfidenceBadge(results.vo2max_confidence)}
-          </div>
-        </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            LT1 (Aerobic Threshold)
-          </h4>
-          <div className="flex justify-between items-start">
-            <div className="space-y-2">
-              <div className="text-3xl font-bold text-[#514163] dark:text-[#fdda36]">
-                {results.lt1_hr ? `${results.lt1_hr} bpm` : 'N/A'}
-              </div>
-              {results.lt1_power && (
-                <div className="text-lg text-gray-700 dark:text-gray-300 font-semibold">
-                  {Math.round(results.lt1_power)} W
-                </div>
-              )}
-              {results.lt1_vo2 && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {results.lt1_vo2.toFixed(1)} ml/kg/min
-                </div>
-              )}
-              {results.lt1_percent_vo2max && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {results.lt1_percent_vo2max.toFixed(0)}% VO₂max
-                </div>
-              )}
-            </div>
-            {getConfidenceBadge(results.lt1_confidence)}
-          </div>
-        </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            LT2 (Lactate Threshold)
-          </h4>
-          <div className="flex justify-between items-start">
-            <div className="space-y-2">
-              <div className="text-3xl font-bold text-[#514163] dark:text-[#fdda36]">
-                {results.lt2_hr ? `${results.lt2_hr} bpm` : 'N/A'}
-              </div>
-              {results.lt2_power && (
-                <div className="text-lg text-gray-700 dark:text-gray-300 font-semibold">
-                  {Math.round(results.lt2_power)} W
-                </div>
-              )}
-              {results.lt2_vo2 && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {results.lt2_vo2.toFixed(1)} ml/kg/min
-                </div>
-              )}
-              {results.lt2_percent_vo2max && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {results.lt2_percent_vo2max.toFixed(0)}% VO₂max
-                </div>
-              )}
-            </div>
-            {getConfidenceBadge(results.lt2_confidence)}
-          </div>
-        </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-          <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            {results.fatmax_method === 'calorimetry'
-              ? 'FatMax (Calorimetry)'
-              : results.fatmax_method === 'lt1_proxy'
-              ? 'FatMax (proxy de LT1)'
-              : 'FatMax (estimated)'}
-          </h4>
-          <div className="flex justify-between items-start">
-            <div className="space-y-2">
-              <div className="text-3xl font-bold text-[#514163] dark:text-[#fdda36]">
-                {results.fatmax_hr ? `${results.fatmax_hr} bpm` : 'N/A'}
-              </div>
-              {results.fatmax_power && (
-                <div className="text-lg text-gray-700 dark:text-gray-300 font-semibold">
-                  {Math.round(results.fatmax_power)} W
-                </div>
-              )}
-              {results.fatmax_vo2 && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {results.fatmax_vo2.toFixed(1)} ml/kg/min
-                </div>
-              )}
-              {fatmaxPercentVO2max && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {fatmaxPercentVO2max}% VO₂max
-                </div>
-              )}
-              {results.fatmax_method !== 'calorimetry' && (
-                <div className="text-xs text-amber-600 dark:text-amber-400">
-                  Not a direct measurement — estimated from LT1
-                </div>
-              )}
-            </div>
-            {getConfidenceBadge(results.fatmax_confidence)}
-          </div>
-        </div>
-
-        {results.hr_drift_percent !== null && (
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-            <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-              HR Drift
-            </h4>
-            <div className="flex justify-between items-start">
-              <div>
-                <div className={`text-3xl font-bold ${
-                  Math.abs(results.hr_drift_percent) > 5
-                    ? 'text-red-600 dark:text-red-400'
-                    : 'text-green-600 dark:text-green-400'
-                }`}>
-                  {results.hr_drift_percent > 0 ? '+' : ''}{results.hr_drift_percent}%
-                </div>
-              </div>
-              {getConfidenceBadge('measured')}
-            </div>
-          </div>
+        {onEdit && (
+          <button onClick={onEdit} className="border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-[#5A4E6B] hover:text-[#5A4E6B] dark:border-gray-600 dark:text-gray-200 dark:hover:text-violet-200">
+            {es ? 'Editar datos' : 'Edit data'}
+          </button>
         )}
+      </div>
 
-        {/* Threshold Comparison: LT vs VT */}
-        {results.thresholds && (
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-            <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
-              Threshold Comparison (LT vs VT)
-            </h4>
-            <div className="space-y-3">
-              <ThresholdRow
-                ltLabel="LT1"
-                vtLabel="VT1"
-                ltHr={results.thresholds.LT1.hr}
-                vtHr={results.thresholds.VT1.hr}
-                ltConfidence={results.thresholds.LT1.confidence}
-                vtConfidence={results.thresholds.VT1.confidence}
-                delta={results.thresholds.delta_lt1_vt1_hr}
-              />
-              <ThresholdRow
-                ltLabel="LT2"
-                vtLabel="VT2"
-                ltHr={results.thresholds.LT2.hr}
-                vtHr={results.thresholds.VT2.hr}
-                ltConfidence={results.thresholds.LT2.confidence}
-                vtConfidence={results.thresholds.VT2.confidence}
-                delta={results.thresholds.delta_lt2_vt2_hr}
-              />
-            </div>
-            <div className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-              {results.thresholds.vt_source === 'estimated_from_lt'
-                ? 'VT values estimated from lactate thresholds (VT = LT).'
-                : results.thresholds.vt_source === 'manual'
-                ? 'VT values manually entered from gas exchange analysis.'
-                : 'VT values from direct measurement.'}
-            </div>
-          </div>
-        )}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-[11px] uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <th className="py-2 pr-4 font-semibold">{es ? 'Métrica' : 'Metric'}</th>
+              <th className="py-2 pr-4 font-semibold">{es ? 'Resultado' : 'Result'}</th>
+              <th className="py-2 pr-4 font-semibold">{es ? 'Carga / contexto' : 'Workload / context'}</th>
+              <th className="py-2 font-semibold">{es ? 'Evidencia' : 'Evidence'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row => (
+              <tr key={row.label} className="border-b border-gray-100 last:border-0 dark:border-gray-800">
+                <th scope="row" className="py-3 pr-4 text-left font-semibold text-gray-800 dark:text-gray-100">{row.label}</th>
+                <td className="py-3 pr-4 font-semibold tabular-nums text-[#514163] dark:text-violet-200">{row.value}</td>
+                <td className="py-3 pr-4 text-xs text-gray-600 dark:text-gray-300">{row.detail ?? '—'}</td>
+                <td className="py-3">{getConfidenceBadge(row.confidence, es)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
-          <div className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-            Qualitative Assessment
+      {results.thresholds && (
+        <div className="mt-5 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <h4 className="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{es ? 'Umbrales de lactato y ventilatorios' : 'Lactate and ventilatory thresholds'}</h4>
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{es ? 'Se muestran por separado: una VT estimada desde LT no es una segunda medición independiente.' : 'Shown separately: a VT estimated from LT is not a second independent measurement.'}</p>
+          <div className="divide-y divide-gray-100 border-y border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+            <ThresholdRow ltLabel="LT1" vtLabel="VT1" ltHr={results.thresholds.LT1.hr} vtHr={results.thresholds.VT1.hr} ltConfidence={results.thresholds.LT1.confidence} vtConfidence={results.thresholds.VT1.confidence} delta={results.thresholds.delta_lt1_vt1_hr} es={es} />
+            <ThresholdRow ltLabel="LT2" vtLabel="VT2" ltHr={results.thresholds.LT2.hr} vtHr={results.thresholds.VT2.hr} ltConfidence={results.thresholds.LT2.confidence} vtConfidence={results.thresholds.VT2.confidence} delta={results.thresholds.delta_lt2_vt2_hr} es={es} />
           </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Aerobic Capacity:</span>{' '}
-              <span className="text-gray-900 dark:text-white font-semibold">
-                {results.metabolic_profile.aerobic_capacity}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Fat Utilization:</span>{' '}
-              <span className="text-gray-900 dark:text-white font-semibold">
-                {results.metabolic_profile.fat_utilization}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Anaerobic:</span>{' '}
-              <span className="text-gray-900 dark:text-white font-semibold">
-                {results.metabolic_profile.anaerobic_contribution}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Durability:</span>{' '}
-              <span className="text-gray-900 dark:text-white font-semibold">
-                {results.metabolic_profile.durability}
-              </span>
-            </div>
-          </div>
+          <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+            {results.thresholds.vt_source === 'estimated_from_lt'
+              ? (es ? 'VT estimados a partir de los umbrales de lactato.' : 'VT values estimated from lactate thresholds.')
+              : results.thresholds.vt_source === 'manual'
+                ? (es ? 'VT introducidos manualmente desde análisis de gases.' : 'VT values entered manually from gas-exchange analysis.')
+                : (es ? 'VT derivados de medición directa.' : 'VT values derived from direct measurement.')}
+          </p>
         </div>
+      )}
 
-        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-700">
-          <div className="text-sm text-blue-900 dark:text-blue-100">
-            <strong>Note:</strong>{' '}
-            {results.has_lactate
-              ? 'Thresholds determined from direct lactate measurements.'
-              : results.has_vo2
-              ? 'Thresholds estimated from VO₂ and HR data.'
-              : 'Thresholds estimated from heart rate progression and physiological models.'}
-          </div>
+      <div className="mt-5 border-t border-gray-200 pt-4 dark:border-gray-700">
+        <h4 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{es ? 'Lectura cualitativa del modelo' : 'Model interpretation'}</h4>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+          {[
+            [es ? 'Capacidad aeróbica' : 'Aerobic capacity', results.metabolic_profile.aerobic_capacity],
+            [es ? 'Uso de grasas' : 'Fat utilization', results.metabolic_profile.fat_utilization],
+            [es ? 'Contribución anaeróbica' : 'Anaerobic contribution', results.metabolic_profile.anaerobic_contribution],
+            [es ? 'Durabilidad' : 'Durability', results.metabolic_profile.durability],
+          ].map(([label, value]) => <div key={String(label)}><p className="text-xs text-gray-500 dark:text-gray-400">{label}</p><p className="mt-1 font-semibold text-gray-800 dark:text-gray-100">{value}</p></div>)}
         </div>
       </div>
-    </div>
+      <p className="mt-4 border-l-2 border-amber-400 pl-3 text-xs text-gray-600 dark:text-gray-300">{sourceNote}</p>
+    </section>
   );
 }
 
-function ThresholdRow({ ltLabel, vtLabel, ltHr, vtHr, ltConfidence, vtConfidence, delta }: {
+function ThresholdRow({ ltLabel, vtLabel, ltHr, vtHr, ltConfidence, vtConfidence, delta, es = false }: {
   ltLabel: string;
   vtLabel: string;
   ltHr: number | null;
@@ -300,37 +134,35 @@ function ThresholdRow({ ltLabel, vtLabel, ltHr, vtHr, ltConfidence, vtConfidence
   ltConfidence: ThresholdConfidence;
   vtConfidence: ThresholdConfidence;
   delta: number | null;
+  es?: boolean;
 }) {
   const getDeltaStatus = (d: number | null) => {
-    if (d === null || d === 0) return { label: 'Matching', color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' };
-    if (Math.abs(d) <= 5) return { label: 'Slight Difference', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' };
-    return { label: 'Large Difference', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' };
+    if (d === null || d === 0) return { label: es ? 'Coinciden' : 'Matching', color: 'text-green-600 dark:text-green-400' };
+    if (Math.abs(d) <= 5) return { label: es ? 'Diferencia leve' : 'Slight difference', color: 'text-blue-600 dark:text-blue-400' };
+    return { label: es ? 'Diferencia amplia' : 'Large difference', color: 'text-amber-600 dark:text-amber-400' };
   };
 
   const status = getDeltaStatus(delta);
 
   return (
-    <div className={`rounded-lg px-4 py-3 ${status.bg} border border-gray-100 dark:border-gray-700`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="text-sm">
-            <span className="font-semibold text-gray-700 dark:text-gray-300">{ltLabel}</span>
-            <span className="text-gray-900 dark:text-white font-bold ml-2">{ltHr ?? '—'} bpm</span>
-            <span className="ml-1">{getConfidenceBadge(ltConfidence)}</span>
-          </div>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <div className="text-sm">
-            <span className="font-semibold text-gray-700 dark:text-gray-300">{vtLabel}</span>
-            <span className="text-gray-900 dark:text-white font-bold ml-2">{vtHr ?? '—'} bpm</span>
-            <span className="ml-1">{getConfidenceBadge(vtConfidence)}</span>
-          </div>
+    <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="text-sm">
+          <span className="font-semibold text-gray-700 dark:text-gray-300">{ltLabel}</span>
+          <span className="ml-2 font-bold text-gray-900 dark:text-white">{ltHr ?? '—'} bpm</span>
+          <span className="ml-2">{getConfidenceBadge(ltConfidence, es)}</span>
         </div>
-        <div className="text-right">
+        <div className="text-sm">
+          <span className="font-semibold text-gray-700 dark:text-gray-300">{vtLabel}</span>
+          <span className="ml-2 font-bold text-gray-900 dark:text-white">{vtHr ?? '—'} bpm</span>
+          <span className="ml-2">{getConfidenceBadge(vtConfidence, es)}</span>
+        </div>
+      </div>
+      <div className="text-right">
           <div className={`text-sm font-semibold ${status.color}`}>
             {delta !== null && delta !== 0 ? `${delta > 0 ? '+' : ''}${delta} bpm` : '0 bpm'}
           </div>
           <div className={`text-xs ${status.color}`}>{status.label}</div>
-        </div>
       </div>
     </div>
   );
