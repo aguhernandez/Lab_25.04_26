@@ -8,12 +8,11 @@ import {
   lockZonesToLab,
   updateTrainingZonesManual
 } from '../lib/physiologyProfile';
-import { TrainingZone, TestDataPoint, AdvancedMetrics } from '../types';
+import { TrainingZone, TestDataPoint, AdvancedMetrics, Sport, Test, AnthropometryData, Athlete } from '../types';
 import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults, type TimelineHRSample } from '../lib/physiology';
 import ManualPhysiologyForm from './ManualPhysiologyForm';
 import AdvancedData from './AdvancedData';
 import { calculateZones7, convertTo5Zones } from '../lib/trainingZones';
-import { Sport } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface PhysiologyProfileCardProps {
@@ -41,6 +40,9 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     advancedMetrics: AdvancedMetrics | null;
     dataPoints: TestDataPoint[];
     timelineSamples: TimelineHRSample[];
+    sport: Sport;
+    bodyMassKg: number | null;
+    leanBodyMassKg: number | null;
   } | null>(null);
 
   useEffect(() => {
@@ -58,22 +60,41 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
     setZones(zonesData);
 
     if (profileData?.last_test_id) {
-      const [{ data: pointRows }, { data: timelineRows }, { data: resultRow }, { data: athleteRow }] = await Promise.all([
+      const [{ data: pointRows }, { data: timelineRows }, { data: resultRow }, { data: athleteRow }, { data: testRow }] = await Promise.all([
         supabase.from('test_data_points').select('*').eq('test_id', profileData.last_test_id).order('stage_number', { ascending: true }),
         supabase.from('test_timeline_samples').select('timestamp_s, heart_rate, speed_pace, lactate, rpe, vo2_ml_kg_min').eq('test_id', profileData.last_test_id).order('timestamp_s', { ascending: true }),
         supabase.from('test_results').select('results_snapshot, advanced_metrics').eq('test_id', profileData.last_test_id).maybeSingle(),
         supabase.from('athletes').select('*').eq('id', athleteId).maybeSingle(),
+        supabase.from('tests').select('sport, anthropometry_snapshot').eq('id', profileData.last_test_id).maybeSingle(),
       ]);
       const snapshot = (resultRow as { results_snapshot?: { results?: PhysiologyResults; advancedMetrics?: AdvancedMetrics | null } } | null)?.results_snapshot;
       if (pointRows && pointRows.length > 0) {
         const dataPoints = pointRows as TestDataPoint[];
-        const calculatedResults = snapshot?.results ?? (athleteRow ? calculatePhysiology(athleteRow as import('../types').Athlete, dataPoints) : null);
+        const testSport = ((testRow as Pick<Test, 'sport'> | null)?.sport ?? sport) as Sport;
+        const anthropometry = (testRow as { anthropometry_snapshot?: AnthropometryData } | null)?.anthropometry_snapshot;
+        const athleteForEconomy = athleteRow ? {
+          ...(athleteRow as Athlete),
+          sport: testSport,
+          weight_kg: anthropometry?.weight_kg ?? (athleteRow as Athlete).weight_kg,
+          lean_body_mass_kg: anthropometry?.leanBodyMassKg ?? (athleteRow as Athlete).lean_body_mass_kg,
+        } : null;
+        const calculatedResults = snapshot?.results ?? (athleteForEconomy ? calculatePhysiology(athleteForEconomy, dataPoints) : null);
         if (calculatedResults) {
+          const storedAdvanced = snapshot?.advancedMetrics ?? ((resultRow as { advanced_metrics?: AdvancedMetrics | null } | null)?.advanced_metrics ?? null);
+          const recalculatedAdvanced = athleteForEconomy
+            ? calculateAdvancedMetrics(athleteForEconomy, dataPoints, calculatedResults, undefined, testSport)
+            : null;
+          const currentAdvanced = storedAdvanced && recalculatedAdvanced
+            ? { ...storedAdvanced, movementEconomy: recalculatedAdvanced.movementEconomy }
+            : storedAdvanced ?? recalculatedAdvanced;
           setAdvancedTest({
             results: calculatedResults,
-            advancedMetrics: snapshot?.advancedMetrics ?? ((resultRow as { advanced_metrics?: AdvancedMetrics | null } | null)?.advanced_metrics ?? (athleteRow ? calculateAdvancedMetrics(athleteRow as import('../types').Athlete, dataPoints, calculatedResults) : null)),
+            advancedMetrics: currentAdvanced,
             dataPoints,
             timelineSamples: (timelineRows as TimelineHRSample[]) ?? [],
+            sport: testSport,
+            bodyMassKg: anthropometry?.weight_kg ?? (athleteRow as Athlete | null)?.weight_kg ?? null,
+            leanBodyMassKg: anthropometry?.leanBodyMassKg ?? (athleteRow as Athlete | null)?.lean_body_mass_kg ?? null,
           });
         } else {
           setAdvancedTest(null);
@@ -569,6 +590,9 @@ export default function PhysiologyProfileCard({ athleteId, sport, onToast }: Phy
 
     {advancedTest ? (
       <AdvancedData
+        sport={advancedTest.sport}
+        bodyMassKg={advancedTest.bodyMassKg}
+        leanBodyMassKg={advancedTest.leanBodyMassKg}
         dataPoints={advancedTest.dataPoints}
         results={advancedTest.results}
         advancedMetrics={advancedTest.advancedMetrics}

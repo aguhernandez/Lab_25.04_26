@@ -6,6 +6,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchHubCoachAthletes, syncHubAthletesToLocal } from '../../lib/hubLink';
 import { getDefaultCoachId } from '../../lib/auth';
+import { createProtocolRunSettings, defaultProtocolForTestType, PROTOCOL_CATALOG, protocolForId, type ProtocolId } from '../../lib/protocolEngine';
 
 interface Props {
   session: LabSession;
@@ -90,15 +91,39 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
     a.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const canProceed = session.athlete !== null && session.testType !== null && session.sport !== null;
+  const canProceed = session.athlete !== null && session.testType !== null && session.sport !== null && session.protocolId !== null;
 
   const selectAthlete = (a: Athlete) => {
     onUpdate({ athlete: a, sport: a.sport });
   };
 
   const selectTestType = (t: TestType) => {
-    onUpdate({ testType: t });
+    const protocolId = defaultProtocolForTestType(t);
+    onUpdate({ testType: t, protocolId, protocolSettings: createProtocolRunSettings(protocolId, { stageDurationSeconds: session.stageDurationSeconds }) });
   };
+
+  const selectProtocol = (protocolId: ProtocolId) => {
+    const definition = protocolForId(protocolId);
+    if (!definition) return;
+    onUpdate({
+      testType: definition.testType,
+      protocolId,
+      protocolSettings: createProtocolRunSettings(protocolId, {
+        stageDurationSeconds: session.stageDurationSeconds,
+        effortDurationsSeconds: protocolId === 'critical_power' ? [180, 360, 720] : [],
+      }),
+    });
+  };
+
+  const updateProtocolSettings = (updates: Partial<NonNullable<LabSession['protocolSettings']>>) => {
+    if (!session.protocolId) return;
+    onUpdate({ protocolSettings: { ...createProtocolRunSettings(session.protocolId), ...session.protocolSettings, ...updates } });
+  };
+
+  const compatibleProtocols = session.testType
+    ? PROTOCOL_CATALOG.filter((protocol) => protocol.testType === session.testType)
+    : [];
+  const selectedProtocol = protocolForId(session.protocolId);
 
   const selectSport = (s: Sport) => {
     onUpdate({ sport: s });
@@ -237,6 +262,55 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
             ))}
           </div>
 
+          {session.testType && (
+            <div className="px-6 pb-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Specific protocol</label>
+                <select
+                  value={session.protocolId ?? ''}
+                  onChange={(event) => selectProtocol(event.target.value as ProtocolId)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                >
+                  {compatibleProtocols.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.label}</option>)}
+                </select>
+                {selectedProtocol && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{selectedProtocol.description}</p>}
+              </div>
+
+              {selectedProtocol?.id === 'incremental_lactate' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <ProtocolNumberField label="Recovery between stages (s)" value={session.protocolSettings?.restBetweenStagesSeconds} onChange={(value) => updateProtocolSettings({ restBetweenStagesSeconds: value })} />
+                  <ProtocolNumberField label="Lactate sampling before stage end (s)" value={session.protocolSettings?.lactateSamplingOffsetSeconds} onChange={(value) => updateProtocolSettings({ lactateSamplingOffsetSeconds: value })} />
+                </div>
+              )}
+              {selectedProtocol?.id === 'mlss_constant' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                  <ProtocolNumberField label="Constant-load duration (min)" value={(session.protocolSettings?.targetDurationSeconds ?? 1800) / 60} onChange={(value) => updateProtocolSettings({ targetDurationSeconds: value * 60 })} />
+                  <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 pb-2">
+                    <input type="checkbox" checked={session.protocolSettings?.constantLoadVerified ?? false} onChange={(event) => updateProtocolSettings({ constantLoadVerified: event.target.checked })} />
+                    Constant load was verified
+                  </label>
+                </div>
+              )}
+              {selectedProtocol?.id === 'vlamax_sprint' && (
+                <ProtocolNumberField label="Maximum sprint duration (s)" value={session.protocolSettings?.targetDurationSeconds ?? undefined} onChange={(value) => updateProtocolSettings({ targetDurationSeconds: value })} />
+              )}
+              {selectedProtocol?.id === 'critical_power' && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Effort durations (s, comma-separated)</label>
+                  <input
+                    value={(session.protocolSettings?.effortDurationsSeconds ?? []).join(', ')}
+                    onChange={(event) => updateProtocolSettings({ effortDurationsSeconds: event.target.value.split(',').map(Number).filter((value) => Number.isFinite(value) && value > 0) })}
+                    placeholder="180, 360, 720"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                  />
+                </div>
+              )}
+              {selectedProtocol && ['time_trial_3min', 'time_trial_6min', 'time_trial_12min', 'time_trial_20min'].includes(selectedProtocol.id) && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">Target duration: {selectedProtocol.targetDurationSeconds! / 60} minutes. The protocol engine will check the recorded effort duration against this target.</p>
+              )}
+            </div>
+          )}
+
           {(session.testType === 'ramp' || session.testType === 'step') && (
             <div className="px-6 pb-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -363,6 +437,15 @@ export default function LabPhaseSelection({ session, onUpdate, onNext }: Props) 
           {t('lab.startSession')}
         </button>
       </div>
+    </div>
+  );
+}
+
+function ProtocolNumberField({ label, value, onChange }: { label: string; value?: number | null; onChange: (value: number) => void }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">{label}</label>
+      <input type="number" min="0" step="1" value={value ?? ''} onChange={(event) => onChange(Number(event.target.value) || 0)} className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
     </div>
   );
 }

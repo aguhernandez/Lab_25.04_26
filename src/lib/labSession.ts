@@ -3,6 +3,8 @@ import { PhysiologyResults } from './physiology';
 import { AdvancedMetrics } from '../types';
 import { AthleteTrainingZones } from './physiologyProfile';
 import type { BreathSample, DeviceProfile } from '../types/breathData.types';
+import type { DataImportMetadata } from '../types/importData.types';
+import type { ProtocolId, ProtocolRunSettings } from './protocolEngine';
 
 export type LabPhase =
   | 'selection'
@@ -60,6 +62,8 @@ export interface LabSession {
   phase: LabPhase;
   athlete: Athlete | null;
   testType: TestType | null;
+  protocolId: ProtocolId | null;
+  protocolSettings: ProtocolRunSettings | null;
   sport: Sport | null;
   numStages: number;
   stageDurationSeconds: number;
@@ -79,12 +83,15 @@ export interface LabSession {
   breathData: BreathSample[] | null;
   deviceProfile: DeviceProfile | null;
   breathVT: UnifiedThresholds | null;
+  breathImportMetadata: DataImportMetadata | null;
 }
 
 export const initialLabSession = (): LabSession => ({
   phase: 'selection',
   athlete: null,
   testType: null,
+  protocolId: null,
+  protocolSettings: null,
   sport: null,
   numStages: 8,
   stageDurationSeconds: 180,
@@ -104,6 +111,7 @@ export const initialLabSession = (): LabSession => ({
   breathData: null,
   deviceProfile: null,
   breathVT: null,
+  breathImportMetadata: null,
 });
 
 export const LAB_TEST_TYPES: { value: TestType; label: string; description: string; icon: string }[] = [

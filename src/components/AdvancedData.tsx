@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react';
-import { TestDataPoint, AdvancedMetrics } from '../types';
+import { TestDataPoint, AdvancedMetrics, Sport } from '../types';
 import { PhysiologyResults, computeStageHRFromTimeline, interpolateHRAtLoad, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
+import { calculateMovementEconomy } from '../lib/movementEconomy';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ScatterChart, Scatter, ReferenceLine, BarChart, Bar, ReferenceDot
@@ -13,6 +14,8 @@ type AnalysisSurface = 'results' | 'dashboard';
 interface AdvancedDataProps {
   testId?: string;
   bodyMassKg?: number | null;
+  leanBodyMassKg?: number | null;
+  sport?: Sport;
   dataPoints: TestDataPoint[];
   results: PhysiologyResults;
   advancedMetrics?: AdvancedMetrics | null;
@@ -64,13 +67,22 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function parseSpeedKmh(value: string | null | undefined): number | null {
+function parseSpeedKmh(value: string | null | undefined, sport?: Sport): number | null {
   if (!value) return null;
+  if (sport === 'other') {
+    const unit = value.trim().match(/^(-?\d+(?:[.,]\d+)?)\s*(km\/h|kmh|m\/s)$/i);
+    if (!unit) return null;
+    const speed = Number(unit[1].replace(',', '.'));
+    return speed > 0 ? (unit[2].toLowerCase() === 'm/s' ? speed * 3.6 : speed) : null;
+  }
   // Accept both a speed (12.5 km/h) and a running pace (5:00/km).
-  const pace = value.match(/^(\d+):([0-5]\d)\s*(?:\/\s*km)?$/i);
+  const pace = value.match(/^(\d+):([0-5]\d)(?:\.([0-9]+))?\s*(?:\/\s*(km|100\s*m))?$/i);
   if (pace) {
-    const minutes = Number(pace[1]) + Number(pace[2]) / 60;
-    return minutes > 0 ? 60 / minutes : null;
+    const minutes = Number(pace[1]) + Number(`${pace[2]}.${pace[3] ?? '0'}`) / 60;
+    if (minutes <= 0) return null;
+    return sport === 'swimming' || pace[4]?.replace(/\s/g, '').toLowerCase() === '100m'
+      ? 6 / minutes
+      : 60 / minutes;
   }
   const match = value.match(/-?\d+(?:[.,]\d+)?/);
   return match ? Number(match[0].replace(',', '.')) : null;
@@ -100,7 +112,7 @@ function MetricTile({
   );
 }
 
-export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
+export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
   const [activeTab, setActiveTab] = useState<Tab>('charts');
   const [selectedStage, setSelectedStage] = useState<number | null>(null);
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
@@ -128,16 +140,16 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
 
   // HR–load regression
   const hasPower = results.has_power || sorted.some(p => p.power_watts != null);
-  const hasSpeed = sorted.some(p => parseSpeedKmh(p.speed_pace) != null);
+  const hasSpeed = sorted.some(p => parseSpeedKmh(p.speed_pace, sport) != null);
   const hasLoad = hasPower || hasSpeed;
   const loadUnit = hasPower ? 'W' : 'km/h';
   const hrRegression = useMemo(() => {
     if (!hasLoad) return null;
-    const loadValues = sorted.map(p => hasPower ? (p.power_watts ?? 0) : (parseSpeedKmh(p.speed_pace) ?? 0));
+    const loadValues = sorted.map(p => hasPower ? (p.power_watts ?? 0) : (parseSpeedKmh(p.speed_pace, sport) ?? 0));
     const validPairs = loadValues.map((load, i) => ({ load, hr: effectiveHR[i] })).filter(p => p.load > 0 && p.hr > 0);
     if (validPairs.length < 3) return null;
     return computeHRLoadRegression(validPairs.map(p => p.load), validPairs.map(p => p.hr), loadUnit);
-  }, [sorted, effectiveHR, hasLoad, hasPower, loadUnit]);
+  }, [sorted, effectiveHR, hasLoad, hasPower, loadUnit, sport]);
 
   // Interpolated HR at thresholds
   const hrAtLT1 = useMemo(() => {
@@ -162,7 +174,7 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
     hr: effectiveHR[i] ?? p.heart_rate,
     hr_timeline: stageHR[i]?.hr_last_window ?? null,
     power: p.power_watts ?? null,
-    load: hasPower ? (p.power_watts ?? null) : parseSpeedKmh(p.speed_pace),
+    load: hasPower ? (p.power_watts ?? null) : parseSpeedKmh(p.speed_pace, sport),
     lactate: p.lactate ?? null,
     vo2: p.vo2_ml_kg_min ?? null,
     rpe: p.rpe ?? null,
@@ -193,6 +205,41 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
   const hasLactate = results.has_lactate;
   const hasRpe = sorted.some(p => p.rpe != null);
   const hasEnergyData = advancedMetrics?.energyProfile.rer_vs_stage.some(v => v !== null) ?? false;
+  const economySport: Sport = sport ?? (hasPower ? 'cycling' : hasSpeed ? 'running' : 'other');
+  const economyMode = economySport === 'triathlon'
+    ? (hasPower ? 'cycling' : sorted.some(point => /\/\s*100\s*m\b/i.test(point.speed_pace ?? '')) ? 'swimming' : 'running')
+    : economySport;
+  const measuredVO2Peak = sorted.reduce((peak, point) => Math.max(peak, point.vo2_ml_kg_min ?? 0), 0);
+  const economyChartData = sorted
+    .filter(point => point.vo2_ml_kg_min != null
+      && point.duration_seconds >= 120
+      && measuredVO2Peak > 0
+      && point.vo2_ml_kg_min <= measuredVO2Peak * 0.85)
+    .map(point => ({
+      stage: point.stage_number,
+      load: economyMode === 'cycling' || (economyMode === 'other' && hasPower)
+        ? point.power_watts ?? null
+        : parseSpeedKmh(point.speed_pace, economyMode === 'swimming' ? 'swimming' : economyMode === 'other' ? 'other' : 'running'),
+      vo2: point.vo2_ml_kg_min,
+    }))
+    .filter(point => point.load != null && point.load > 0);
+  const economyLoadLabel = economyMode === 'cycling' || (economyMode === 'other' && hasPower)
+    ? 'Potencia (W)'
+    : 'Velocidad (km/h)';
+  const freshEconomy = calculateMovementEconomy(
+    sorted,
+    economySport,
+    bodyMassKg,
+    leanBodyMassKg,
+    measuredVO2Peak || null,
+  );
+  const economyMetrics = {
+    ...freshEconomy,
+    cycling: {
+      ...freshEconomy.cycling,
+      watts_per_kg_lbm: freshEconomy.cycling.watts_per_kg_lbm ?? advancedMetrics?.movementEconomy?.cycling?.watts_per_kg_lbm ?? null,
+    },
+  };
 
   const hrLoadSection = hasLoad ? (
     <SectionCard title={`HR vs ${hasPower ? 'Power' : 'Speed'}`}>
@@ -469,74 +516,76 @@ export default function AdvancedData({ testId, bodyMassKg, dataPoints, results, 
 
       {activeTab === 'economy' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <SectionCard title="Movement Economy — Cycling">
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <MetricTile
-                  label="W/kg Lean Mass"
-                  value={advancedMetrics?.movementEconomy.cycling.watts_per_kg_lbm?.toFixed(2)}
-                  unit="W/kg LBM"
-                  note="Power relative to lean body mass"
-                />
-                <MetricTile
-                  label="Mechanical Efficiency"
-                  value={advancedMetrics?.movementEconomy.cycling.efficiency_percent?.toFixed(1)}
-                  unit="%"
-                  note="Useful work / energy consumed"
-                />
+          {economyMode === 'cycling' && (
+            <SectionCard title="Cycling economy">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <MetricTile label="Peak power / lean mass" value={economyMetrics?.cycling.watts_per_kg_lbm?.toFixed(2)} unit="W/kg LBM" note="Peak power normalized to lean mass" />
+                <MetricTile label="VO₂ per 100 W" value={economyMetrics?.cycling.vo2_ml_kg_min_per_100w?.toFixed(1)} unit="ml/kg/min" note="Mean of valid submax stages" />
+                <MetricTile label="Gross efficiency" value={economyMetrics?.cycling.efficiency_percent?.toFixed(1)} unit="%" note={economyMetrics?.cycling.efficiency_basis === 'measured_rer' ? 'Calculated with measured VO₂ + VCO₂ (RER)' : economyMetrics?.cycling.efficiency_basis === 'oxygen_only_estimate' ? 'Estimated from VO₂ alone; caloric equivalent assumed' : 'Requires measured VO₂ and power'} />
               </div>
-              {!advancedMetrics?.movementEconomy.cycling.watts_per_kg_lbm && (
-                <p className="text-xs text-center text-gray-400 dark:text-gray-500">
-                  Requires: power data + body fat % (sport: cycling)
-                </p>
-              )}
-              <div className="mt-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  <strong>Reference:</strong> Elite cyclists: 5–6 W/kg LBM · Normal mechanical efficiency: 20–26%
-                </p>
-              </div>
+              <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                Uses stages lasting at least 2 minutes and at or below 85% of measured VO₂peak. Gross efficiency is averaged across valid stages.
+              </p>
             </SectionCard>
+          )}
 
-            <SectionCard title="Movement Economy — Running">
-              <div className="flex justify-center mb-4">
-                <MetricTile
-                  label="Energy Cost"
-                  value={advancedMetrics?.movementEconomy.running.cost_per_km_ml_o2_kg?.toFixed(0)}
-                  unit="ml O₂/kg/km"
-                  note="Lower value = more economical"
-                />
+          {economyMode === 'running' && (
+            <SectionCard title="Running economy">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricTile label="Oxygen cost per distance" value={economyMetrics?.running.cost_per_km_ml_o2_kg?.toFixed(1)} unit="ml O₂/kg/km" note="Lower cost means less oxygen for each kilometre" />
+                <MetricTile label="VO₂–speed slope" value={economyMetrics?.running.vo2_slope_ml_kg_min_per_kmh?.toFixed(2)} unit="ml/kg/min per km/h" note={`${economyMetrics?.running.valid_stage_count ?? 0} measured submax stages`} />
               </div>
-              {!advancedMetrics?.movementEconomy.running.cost_per_km_ml_o2_kg && (
-                <p className="text-xs text-center text-gray-400 dark:text-gray-500">
-                  Requires: VO₂ data + speed (sport: running)
-                </p>
-              )}
-              <div className="mt-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  <strong>Reference:</strong> Elite: ~180–210 ml O₂/kg/km · Recreational: ~220–260 ml O₂/kg/km
-                </p>
-              </div>
+              <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                Oxygen cost is calculated as VO₂ × 60 ÷ speed (km/h), using measured VO₂ and stages of at least 2 minutes at or below 85% of measured VO₂peak.
+              </p>
             </SectionCard>
-          </div>
+          )}
 
-          {hasPower && hasVO2 && (
-            <SectionCard title="Submaximal VO₂ vs Power — Delta Efficiency">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                The slope of this curve reflects metabolic efficiency. Greater curvature = worse economy.
+          {economyMode === 'swimming' && (
+            <SectionCard title="Swimming economy">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricTile label="Oxygen cost per 100 m" value={economyMetrics?.swimming?.cost_per_100m_ml_o2_kg?.toFixed(1)} unit="ml O₂/kg/100 m" note="Based on measured pace and VO₂" />
+                <MetricTile label="VO₂–speed slope" value={economyMetrics?.swimming?.vo2_slope_ml_kg_min_per_kmh?.toFixed(2)} unit="ml/kg/min per km/h" note={`${economyMetrics?.swimming?.valid_stage_count ?? 0} measured submax stages`} />
+              </div>
+              <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                This is oxygen cost, not total metabolic cost. Hydrodynamic resistance is not estimated from speed and VO₂ alone; it needs a specific drag or resisted-swimming protocol.
+              </p>
+            </SectionCard>
+          )}
+
+          {economyMode === 'other' && (
+            <SectionCard title="Sport-specific economy">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {hasPower && hasVO2
+                  ? 'The graph below shows measured VO₂ against external power. A sport-specific energy cost is not calculated until the sport, load units and protocol are defined.'
+                  : 'A sport-specific model needs measured VO₂ plus a clearly defined speed, distance or external-load measure for each stage.'}
+              </p>
+            </SectionCard>
+          )}
+
+          {hasVO2 && economyChartData.length >= 2 && (
+            <SectionCard title={`Measured VO₂ vs ${economyLoadLabel.toLowerCase()}`}>
+              <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+                Measured stage values only. No extrapolation is shown; valid points require a stage of at least 2 minutes and intensity at or below 85% of measured VO₂peak.
               </p>
               <ResponsiveContainer width="100%" height={300}>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="power" type="number" name="Power"
-                    label={{ value: 'Power (W)', position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
+                  <XAxis dataKey="load" type="number" name={economyLoadLabel}
+                    label={{ value: economyLoadLabel, position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
                   <YAxis dataKey="vo2" type="number" name="VO₂"
                     label={{ value: 'VO₂ (ml/kg/min)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Scatter data={chartData.filter(d => d.power && d.vo2)} fill="#14b8a6"
-                    line={{ stroke: '#14b8a6', strokeWidth: 2 }} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
+                  <Scatter data={economyChartData} fill="#14b8a6" line={{ stroke: '#14b8a6', strokeWidth: 2 }} />
                 </ScatterChart>
               </ResponsiveContainer>
             </SectionCard>
+          )}
+
+          {hasVO2 && economyMode !== 'other' && economyChartData.length < 2 && (
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              Economy requires at least two measured submaximal stages with VO₂, speed or power, each lasting at least 2 minutes.
+            </p>
           )}
         </div>
       )}

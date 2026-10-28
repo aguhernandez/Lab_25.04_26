@@ -82,7 +82,12 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         duration_seconds: Number(point.duration_seconds),
         heart_rate: Number(point.heart_rate),
       }));
-      if (dataPoints.length === 0) {
+      const protocolMetadata = (testData?.protocol_metadata ?? {}) as Record<string, any>;
+      const protocolValidation = protocolMetadata.validation;
+      const protocolOnlyDataIsValid = Boolean(
+        timelineRows?.length && protocolValidation && protocolValidation.status !== 'incomplete'
+      );
+      if (dataPoints.length === 0 && !protocolOnlyDataIsValid) {
         throw new Error('No valid test stages were saved. Each stage needs a valid heart rate.');
       }
       markStep(0);
@@ -160,7 +165,7 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
           lactate_clearance: { min5: null, min10: null, min20: null },
           hr_drift_percent: results.hr_drift_percent,
         } : undefined,
-      });
+      }, session.sport ?? undefined);
       markStep(4);
       await delay(300);
       markStep(5);
@@ -170,6 +175,10 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
       markStep(6);
       await delay(350);
 
+      const importMetadata = {
+        imports: Array.isArray(protocolMetadata.imports) ? protocolMetadata.imports : [],
+        breathData: session.breathImportMetadata ?? null,
+      };
       const { error: resultError } = await supabase.from('test_results').upsert({
         test_id: testId,
         vo2max: results.vo2max,
@@ -181,15 +190,20 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         fatmax_hr: results.fatmax_hr,
         hr_drift_percent: results.hr_drift_percent,
         training_zones: results.training_zones,
-        data_quality: results.data_quality,
+        data_quality: dataPoints.length > 0
+          ? results.data_quality
+          : `Protocol data captured; heart-rate based physiology was not calculated (${session.protocolId ?? 'protocol'}).`,
         advanced_metrics: advanced,
         thresholds: results.thresholds,
         breath_data: session.breathData,
-        device_profile_id: session.deviceProfile?.id ?? null,
+        device_profile_id: session.deviceProfile?.id && isUuid(session.deviceProfile.id) ? session.deviceProfile.id : null,
+        import_metadata: importMetadata,
       }, { onConflict: 'test_id' });
       if (resultError) throw resultError;
 
-      const { success } = await updateAthletePhysiologyProfile(athlete, testData, results);
+      const { success } = dataPoints.length > 0
+        ? await updateAthletePhysiologyProfile(athlete, testData, results)
+        : { success: false };
       const zones: AthleteTrainingZones | null = success ? await fetchAthleteTrainingZones(athlete.id) : null;
       markStep(7);
       await delay(400);
@@ -271,4 +285,8 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
       </div>
     </div>
   );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

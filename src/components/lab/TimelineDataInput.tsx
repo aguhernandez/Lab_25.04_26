@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import {
   parseTimelineFile, extractHeaders, autoDetectMapping,
   getDefaultProfiles, getRawColumnKeys, CANONICAL_FIELDS,
-  type ColumnMapping,
+  type ColumnMapping, type ImportOptions,
 } from '../../lib/timelineParser';
 import type { DeviceProfile } from '../../types/breathData.types';
 import type { TimelineSample, ProtocolStep } from '../../types/timeline.types';
@@ -27,11 +27,16 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const [saving, setSaving] = useState(false);
 
   // Import state
-  const [profiles] = useState<DeviceProfile[]>(getDefaultProfiles());
+  const [profiles, setProfiles] = useState<DeviceProfile[]>(getDefaultProfiles());
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState(0);
   const [offset_s, setOffset_s] = useState(0);
+  const [deviceName, setDeviceName] = useState('');
+  const [calibrationDate, setCalibrationDate] = useState('');
+  const [calibrationNotes, setCalibrationNotes] = useState('');
+  const [sampleFrequencyHz, setSampleFrequencyHz] = useState('');
+  const [deviceProfileId, setDeviceProfileId] = useState<string | null>(null);
   const [showProtocol, setShowProtocol] = useState(false);
   const [protocol, setProtocol] = useState<ProtocolStep[]>(DEFAULT_PROTOCOL);
   const [protocolLoaded, setProtocolLoaded] = useState(false);
@@ -64,17 +69,37 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
         .eq('test_id', testId)
         .order('timestamp_s', { ascending: true });
       if (data && data.length > 0) {
-        setSamples(data.map((r: any) => ({
+        setSamples(data.map((r: any) => {
+          const rawData = r.raw_data ?? {};
+          return ({
           id: r.id, timestamp_s: Number(r.timestamp_s), speed_pace: r.speed_pace,
+          speed_kmh: rawData.__canonicalMeasurements?.speed_kmh ?? null,
           heart_rate: r.heart_rate != null ? Number(r.heart_rate) : null,
+          power_watts: rawData.__canonicalMeasurements?.power_watts ?? null,
+          distance_m: rawData.__canonicalMeasurements?.distance_m ?? null,
+          latitude_deg: rawData.__canonicalMeasurements?.latitude_deg ?? null,
+          longitude_deg: rawData.__canonicalMeasurements?.longitude_deg ?? null,
+          cadence_rpm: rawData.__canonicalMeasurements?.cadence_rpm ?? null,
           lactate: r.lactate != null ? Number(r.lactate) : null,
           rpe: r.rpe != null ? Number(r.rpe) : null,
           vo2_ml_kg_min: r.vo2_ml_kg_min != null ? Number(r.vo2_ml_kg_min) : null,
-          raw_data: r.raw_data ?? {}, source: r.source, edited_fields: r.edited_fields ?? [],
-        })));
+          measurements: rawData.__canonicalMeasurements ?? {},
+          raw_data: rawData, source: r.source, edited_fields: r.edited_fields ?? [],
+          provenance: rawData.__provenance,
+        });
+        }));
       }
     })();
   }, [testId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.from('device_profiles').select('*').order('name');
+      if (!cancelled && data?.length) setProfiles(data as DeviceProfile[]);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Timer
   useEffect(() => {
@@ -151,8 +176,19 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     setImporting(true);
     setImportError(null);
     try {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      if (extension === 'fit' || extension === 'tcx') {
+        const imported = await parseTimelineFile(file, {}, offset_s, { ...buildImportOptions(), deviceProfileId: null });
+        setSamples((prev) => [...prev.filter((sample) => sample.source === 'manual'), ...imported].sort((a, b) => a.timestamp_s - b.timestamp_s));
+        setImportedCount(imported.length);
+        setShowMapper(false);
+        setPendingFile(null);
+        return;
+      }
       const headers = await extractHeaders(file);
-      const { mapping } = autoDetectMapping(headers, profiles);
+      const { profile, mapping } = autoDetectMapping(headers, profiles);
+      setDeviceProfileId(profile && isUuid(profile.id) ? profile.id : null);
+      if (profile && !deviceName.trim()) setDeviceName(profile.name);
       setPendingFile(file);
       setPendingHeaders(headers);
       setColumnMapping(mapping);
@@ -170,7 +206,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
     setImporting(true);
     setImportError(null);
     try {
-      const imported = await parseTimelineFile(pendingFile, columnMapping, offset_s);
+      const imported = await parseTimelineFile(pendingFile, columnMapping, offset_s, buildImportOptions());
       setSamples((prev) => {
         const manual = prev.filter((s) => s.source === 'manual');
         return [...manual, ...imported].sort((a, b) => a.timestamp_s - b.timestamp_s);
@@ -185,6 +221,14 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
       setImporting(false);
     }
   };
+
+  const buildImportOptions = (): ImportOptions => ({
+    deviceName: deviceName.trim() || undefined,
+    deviceProfileId,
+    calibrationDate: calibrationDate || null,
+    calibrationNotes: calibrationNotes.trim() || null,
+    sampleFrequencyHz: sampleFrequencyHz ? Number(sampleFrequencyHz) : null,
+  });
 
   const updateColumnMapping = (header: string, canonKey: string) => {
     setColumnMapping((prev) => {
@@ -249,7 +293,11 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
         lactate: s.lactate,
         rpe: s.rpe,
         vo2_ml_kg_min: s.vo2_ml_kg_min,
-        raw_data: s.raw_data,
+        raw_data: {
+          ...s.raw_data,
+          ...(s.measurements ? { __canonicalMeasurements: s.measurements } : {}),
+          ...(s.provenance ? { __provenance: s.provenance } : {}),
+        },
         source: s.source,
         edited_fields: s.edited_fields,
       }));
@@ -459,6 +507,22 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
         {!showMapper && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
             <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Device / analyzer</label>
+              <input type="text" className="input" value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="Garmin, lactometer, trainer…" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Sample frequency (Hz, optional)</label>
+              <input type="number" min="0.01" step="0.01" className="input" value={sampleFrequencyHz} onChange={(e) => setSampleFrequencyHz(e.target.value)} placeholder="Auto-detect from timestamps" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Last calibration date</label>
+              <input type="date" className="input" value={calibrationDate} onChange={(e) => setCalibrationDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Calibration notes / reference</label>
+              <input type="text" className="input" value={calibrationNotes} onChange={(e) => setCalibrationNotes(e.target.value)} placeholder="Certificate or procedure (optional)" />
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Time Offset (s)</label>
               <div className="flex items-center gap-1">
                 <button onClick={() => setOffset_s(o => o - 1)} className="px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">−</button>
@@ -472,13 +536,13 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
               <label className="flex items-center gap-2 px-4 py-2 bg-yellow-400 text-gray-800 rounded-lg text-sm font-medium cursor-pointer hover:bg-yellow-300 transition-colors">
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 {importing ? 'Reading...' : 'Browse files'}
-                <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={handleFileSelect} className="hidden" disabled={importing} />
+                <input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt,.fit,.tcx" onChange={handleFileSelect} className="hidden" disabled={importing} />
               </label>
             </div>
           </div>
         )}
         <p className="text-xs text-gray-400 mt-2">
-          Supports XLSX, CSV, TXT. FIT files: export to CSV first. Offset adjusts alignment if device started early/late.
+          Supports XLSX, CSV/TSV, Garmin FIT and TCX. CSV columns can map lactate, VO₂, power, pace, GPS and respiratory fields.
         </p>
       </div>
 
@@ -558,7 +622,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
                         <input type="number" step="0.1" className="input" style={{ padding: '2px 4px', fontSize: '11px' }}
                           value={editValues.vo2_ml_kg_min ?? ''} onChange={(e) => setEditValues(v => ({ ...v, vo2_ml_kg_min: e.target.value ? parseFloat(e.target.value) : null }))} />
                       </td>
-                      {showAllColumns && rawKeys.map((k) => <td key={k} className="px-2 py-1 text-gray-400">{s.raw_data[k] ?? '—'}</td>)}
+                      {showAllColumns && rawKeys.map((k) => <td key={k} className="px-2 py-1 text-gray-400">{s.raw_data[k] == null ? '—' : String(s.raw_data[k])}</td>)}
                       <td className="px-2 py-1">{s.source[0].toUpperCase()}</td>
                       <td className="px-2 py-1">
                         <div className="flex gap-1">
@@ -576,7 +640,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
                       <td className={`px-2 py-1 ${s.edited_fields.includes('rpe') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.rpe ?? '—'}</td>
                       <td className={`px-2 py-1 ${s.edited_fields.includes('vo2_ml_kg_min') ? 'bg-amber-100 dark:bg-amber-900/30 rounded' : ''} text-gray-700 dark:text-gray-300`}>{s.vo2_ml_kg_min ?? '—'}</td>
                       {showAllColumns && rawKeys.map((k) => (
-                        <td key={k} className={`px-2 py-1 ${s.edited_fields.includes(k) ? 'bg-amber-100 dark:bg-amber-900/30' : ''} text-gray-500 dark:text-gray-400`}>{s.raw_data[k] ?? '—'}</td>
+                        <td key={k} className={`px-2 py-1 ${s.edited_fields.includes(k) ? 'bg-amber-100 dark:bg-amber-900/30' : ''} text-gray-500 dark:text-gray-400`}>{s.raw_data[k] == null ? '—' : String(s.raw_data[k])}</td>
                       ))}
                       <td className="px-2 py-1">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${s.source === 'imported' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'}`}>
@@ -606,4 +670,8 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
       </div>
     </div>
   );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

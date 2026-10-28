@@ -2,6 +2,7 @@ import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, Threshold
 import { buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import { analyzeLactate, type LactateAnalysisResult } from './lactateAnalysis';
+import { calculateMovementEconomy } from './movementEconomy';
 
 export type ConfidenceLevel = 'measured' | 'estimated' | 'inferred';
 
@@ -1186,7 +1187,8 @@ export function calculateAdvancedMetrics(
   athlete: Athlete,
   dataPoints: TestDataPoint[],
   results: PhysiologyResults,
-  manualOverrides?: Partial<AdvancedMetrics>
+  manualOverrides?: Partial<AdvancedMetrics>,
+  sportOverride?: Sport
 ): AdvancedMetrics {
   const normalizedAthlete = normalizeAthlete(athlete);
   const sorted = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
@@ -1210,40 +1212,13 @@ export function calculateAdvancedMetrics(
   const percent_fat_vs_stage = energy_mixes.map(m => m ? Math.round(m.fat_percent) : null);
   const percent_carb_vs_stage = energy_mixes.map(m => m ? Math.round(m.carb_percent) : null);
 
-  let watts_per_kg_lbm: number | null = null;
-  let efficiency_percent: number | null = null;
-  if (athlete.sport === 'cycling' && lbm && sorted.length > 0) {
-    const maxPowerPoint = sorted.reduce((best, p) =>
-      (p.power_watts || 0) > (best.power_watts || 0) ? p : best, sorted[0]);    if (maxPowerPoint?.power_watts) {
-      watts_per_kg_lbm = Math.round((maxPowerPoint.power_watts / lbm) * 100) / 100;
-      if (maxPowerPoint.vo2_ml_kg_min && weight) {
-        const vo2_l_min = convertVO2ToAbsolute(maxPowerPoint.vo2_ml_kg_min, weight);
-        const energy_rate_watts = vo2_l_min * 20.9 * 1000 / 60;
-        efficiency_percent = Math.round((maxPowerPoint.power_watts / energy_rate_watts) * 100 * 10) / 10;
-      }
-    }
-  }
-
-  let cost_per_km_ml_o2_kg: number | null = null;
-  if (athlete.sport === 'running') {
-    const subMaxPoints = sorted.filter(p => {
-      if (!p.vo2_ml_kg_min || !vo2max) return false;
-      return (p.vo2_ml_kg_min / vo2max) * 100 < 85 && p.speed_pace;
-    });
-    if (subMaxPoints.length > 0) {
-      const costs = subMaxPoints
-        .map(p => {
-          if (!p.speed_pace || !p.vo2_ml_kg_min) return null;
-          const speed = parseSpeedToKmh(p.speed_pace, 'running');
-          if (!speed || speed <= 0) return null;
-          return (p.vo2_ml_kg_min / speed) * 1000;
-        })
-        .filter((c): c is number => c !== null);
-      if (costs.length > 0) {
-        cost_per_km_ml_o2_kg = Math.round(costs.reduce((a, b) => a + b, 0) / costs.length);
-      }
-    }
-  }
+  const movementEconomy = calculateMovementEconomy(
+    sorted,
+    sportOverride ?? normalizedAthlete.sport,
+    weight,
+    lbm,
+    results.has_vo2 ? vo2max : null,
+  );
 
   const recovery = manualOverrides?.recovery ?? {
     hrv_post_exercise_ms: null,
@@ -1261,10 +1236,7 @@ export function calculateAdvancedMetrics(
 
   return {
     recovery,
-    movementEconomy: {
-      cycling: { watts_per_kg_lbm, efficiency_percent },
-      running: { cost_per_km_ml_o2_kg }
-    },
+    movementEconomy,
     energyProfile: {
       rer_vs_stage,
       percent_fat_vs_stage,

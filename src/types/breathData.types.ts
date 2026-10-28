@@ -1,3 +1,5 @@
+import type { SampleDataProvenance } from './importData.types';
+
 export interface BreathSample {
   time_s: number;
   speed_kmh: number | null;
@@ -13,6 +15,7 @@ export interface BreathSample {
   rer: number | null;
   hrv_ms: number | null;
   rr_ms: number | null;
+  provenance?: SampleDataProvenance;
 }
 
 export interface DeviceProfile {

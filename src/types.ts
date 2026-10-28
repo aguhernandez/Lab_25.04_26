@@ -98,6 +98,9 @@ export interface Test {
   test_date: string;
   sport: Sport;
   test_type: TestType;
+  protocol_id?: string | null;
+  protocol_version?: string | null;
+  protocol_metadata?: Record<string, unknown> | null;
   status: TestStatus;
   anthropometry_source?: AnthropometrySource;
   anthropometry_snapshot?: AnthropometryData;
@@ -153,6 +156,7 @@ export interface TestResults {
   training_zones?: TrainingZone[] | null;
   coach_notes?: string | null;
   data_quality?: string | null;
+  import_metadata?: Record<string, unknown> | null;
   advanced_metrics?: AdvancedMetrics | null;
   created_at: string;
   updated_at: string;
@@ -181,15 +185,27 @@ export interface RecoveryMetrics {
 export interface MovementEconomyCycling {
   watts_per_kg_lbm: number | null;
   efficiency_percent: number | null;
+  vo2_ml_kg_min_per_100w?: number | null;
+  efficiency_basis?: 'measured_rer' | 'oxygen_only_estimate' | null;
+  valid_stage_count?: number;
 }
 
 export interface MovementEconomyRunning {
   cost_per_km_ml_o2_kg: number | null;
+  vo2_slope_ml_kg_min_per_kmh?: number | null;
+  valid_stage_count?: number;
+}
+
+export interface MovementEconomySwimming {
+  cost_per_100m_ml_o2_kg: number | null;
+  vo2_slope_ml_kg_min_per_kmh?: number | null;
+  valid_stage_count?: number;
 }
 
 export interface MovementEconomy {
   cycling: MovementEconomyCycling;
   running: MovementEconomyRunning;
+  swimming?: MovementEconomySwimming;
 }
 
 export interface EnergyProfile {

@@ -175,16 +175,33 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       const snapshot = (testResultsRow as Record<string, unknown>)?.results_snapshot as SavedSnapshot | undefined;
       const savedAt = (testResultsRow as Record<string, unknown>)?.saved_at as string | undefined;
+      let loadedAdvanced: AdvancedMetrics | null = snapshot?.advancedMetrics ?? null;
 
       if (snapshot && snapshot.results) {
-        // Load saved results — do NOT recalculate
+        // Preserve saved results and manual metrics, but refresh economy from measured stages.
+        const athleteForEconomy = { ...athleteData, sport: testData.sport };
+        if (testData.anthropometry_snapshot) {
+          athleteForEconomy.weight_kg = testData.anthropometry_snapshot.weight_kg;
+          athleteForEconomy.body_fat_percent = testData.anthropometry_snapshot.bodyFatPercent;
+          athleteForEconomy.lean_body_mass_kg = testData.anthropometry_snapshot.leanBodyMassKg;
+        }
+        const recalculatedAdvanced = calculateAdvancedMetrics(
+          athleteForEconomy,
+          (dataPointsData || []) as TestDataPoint[],
+          snapshot.results,
+          undefined,
+          testData.sport,
+        );
+        loadedAdvanced = snapshot.advancedMetrics
+          ? { ...snapshot.advancedMetrics, movementEconomy: recalculatedAdvanced.movementEconomy }
+          : recalculatedAdvanced;
         setResults(snapshot.results);
-        setAdvancedMetrics(snapshot.advancedMetrics ?? null);
-        setSavedSnapshot({ results: snapshot.results, advancedMetrics: snapshot.advancedMetrics ?? null, savedAt: savedAt ?? '' });
+        setAdvancedMetrics(loadedAdvanced);
+        setSavedSnapshot({ results: snapshot.results, advancedMetrics: loadedAdvanced, savedAt: savedAt ?? '' });
         setHasSavedResults(true);
         setIsSaved(true);
         setIsDirty(false);
-        regenerateJSON(athleteData, testData, dataPointsData || [], snapshot.results, snapshot.advancedMetrics ?? null);
+        regenerateJSON(athleteData, testData, dataPointsData || [], snapshot.results, loadedAdvanced);
       } else {
         // No saved snapshot — calculate from raw data (first load of a new test)
         const athleteForCalculations = { ...athleteData };
@@ -202,7 +219,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
         const thresholdOverrides = testData.anthropometry_snapshot?.threshold_overrides;
         const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides);
-        const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated);
+        const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated, undefined, testData.sport);
 
         setResults(calculated);
         setAdvancedMetrics(advanced);
@@ -232,10 +249,10 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
           setResults(mergedResults);
           setSavedSnapshot({
             results: mergedResults,
-            advancedMetrics: snapshot.advancedMetrics ?? null,
+            advancedMetrics: loadedAdvanced,
             savedAt: savedAt ?? '',
           });
-          regenerateJSON(athleteData, testData, dataPointsData || [], mergedResults, snapshot.advancedMetrics ?? null);
+          regenerateJSON(athleteData, testData, dataPointsData || [], mergedResults, loadedAdvanced);
         }
       }
 
@@ -268,7 +285,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
     const thresholdOverrides = test.anthropometry_snapshot?.threshold_overrides;
     const calculated = calculatePhysiology(athleteForCalculations, dataPoints, thresholdOverrides);
-    const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPoints, calculated);
+    const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPoints, calculated, undefined, test.sport);
 
     return { results: calculated, advanced };
   }, [test, athlete, dataPoints]);
@@ -870,7 +887,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             athleteId={athlete?.id}
             onSaved={handleZonesSaved}
           />
-          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
+          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg ?? athlete.lean_body_mass_kg} sport={test.sport} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
         </>
       )}
 
@@ -941,7 +958,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
                 }
                 const overrides = ft.anthropometry_snapshot?.threshold_overrides;
                 const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], overrides);
-                const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults);
+                const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults, undefined, ft.sport);
                 setPendingResults(calcResults);
                 setPendingAdvanced(calcAdvanced);
                 setShowRecalculateConfirm(true);

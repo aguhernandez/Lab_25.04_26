@@ -5,11 +5,12 @@ import { parseBreathFile, extractHeaders, autoDetectProfile, hasCO2Data, getDefa
 import { calculateVentilatoryThresholds } from '../../lib/ventilatoryThresholds';
 import type { BreathSample, DeviceProfile } from '../../types/breathData.types';
 import type { UnifiedThresholds } from '../../types';
+import type { CanonicalTimelineField, DataImportMetadata, ImportFormat } from '../../types/importData.types';
 
 interface Props {
   breathData: BreathSample[] | null;
   deviceProfile: DeviceProfile | null;
-  onChange: (breathData: BreathSample[] | null, profile: DeviceProfile | null, vt: UnifiedThresholds | null) => void;
+  onChange: (breathData: BreathSample[] | null, profile: DeviceProfile | null, vt: UnifiedThresholds | null, metadata: DataImportMetadata | null) => void;
   hrmax: number | null;
   vo2max: number | null;
 }
@@ -24,6 +25,10 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
   const [detectedProfile, setDetectedProfile] = useState<DeviceProfile | null>(null);
   const [parsedSamples, setParsedSamples] = useState<BreathSample[] | null>(null);
   const [fileName, setFileName] = useState<string>('');
+  const [deviceName, setDeviceName] = useState('');
+  const [calibrationDate, setCalibrationDate] = useState('');
+  const [calibrationNotes, setCalibrationNotes] = useState('');
+  const [sampleFrequencyHz, setSampleFrequencyHz] = useState('');
 
   const loadProfiles = useCallback(async () => {
     const { data } = await supabase.from('device_profiles').select('*').order('name');
@@ -51,6 +56,7 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
       const profileToUse = autoProfile || profiles[0];
       if (!profileToUse) throw new Error('No device profiles available');
       setSelectedProfileId(profileToUse.id);
+      setDeviceName(profileToUse.name);
       const samples = await parseBreathFile(file, profileToUse);
       setParsedSamples(samples);
       setShowPreview(true);
@@ -83,7 +89,54 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
         };
       }
     }
-    onChange(parsedSamples, profile, vt);
+    const format = fileName.split('.').pop()?.toLowerCase() as ImportFormat;
+    const importId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    const units: DataImportMetadata['units'] = {
+      time_s: 's', speed_kmh: 'km/h', hr_bpm: 'bpm', vo2_rel_mlkgmin: 'ml/kg/min', vo2_abs_mlmin: 'ml/min',
+      rf_bpm: 'breaths/min', tv_l: 'L', ve_lmin: 'L/min', eqo2: 'ratio', feo2_pct: '%',
+      vco2_mlmin: 'ml/min', rer: 'ratio', hrv_ms: 'ms', rr_ms: 'ms',
+    };
+    const intervals = parsedSamples.slice(1).map((sample, index) => sample.time_s - parsedSamples[index].time_s).filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
+    const estimatedFrequency = intervals.length ? Number((1 / intervals[Math.floor(intervals.length / 2)]).toFixed(3)) : null;
+    const frequency = sampleFrequencyHz ? Number(sampleFrequencyHz) : estimatedFrequency;
+    const mapping = profile.column_mapping as Record<string, CanonicalTimelineField>;
+    const metadata: DataImportMetadata = {
+      importId,
+      format: ['csv', 'tsv', 'txt', 'xls', 'xlsx'].includes(format) ? format : 'xlsx',
+      fileName,
+      importedAt: new Date().toISOString(),
+      source: 'file',
+      deviceName: deviceName.trim() || profile.name,
+      deviceProfileId: isUuid(profile.id) ? profile.id : null,
+      sampleFrequencyHz: frequency,
+      units,
+      calibrationDate: calibrationDate || null,
+      calibrationNotes: calibrationNotes.trim() || null,
+      columnMapping: mapping,
+      transformations: ['device_column_mapping', 'canonical_unit_mapping'],
+      recordCount: parsedSamples.length,
+    };
+    const samplesWithProvenance = parsedSamples.map((sample, index) => ({
+      ...sample,
+      provenance: {
+        importId,
+        format: metadata.format,
+        fileName,
+        importedAt: metadata.importedAt,
+        sourceRow: index + 1,
+        sourceTimestamp: sample.time_s,
+        source: 'file' as const,
+        deviceName: metadata.deviceName,
+        deviceProfileId: metadata.deviceProfileId,
+        sampleFrequencyHz: frequency,
+        units,
+        calibrationDate: metadata.calibrationDate,
+        calibrationNotes: metadata.calibrationNotes,
+        columnMapping: metadata.columnMapping,
+        transformations: metadata.transformations,
+      },
+    }));
+    onChange(samplesWithProvenance, profile, vt, metadata);
   };
 
   const handleCancelImport = () => {
@@ -91,10 +144,10 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
     setDetectedProfile(null);
     setShowPreview(false);
     setFileName('');
-    onChange(null, null, null);
+    onChange(null, null, null, null);
   };
 
-  const co2Available = parsedSamples && deviceProfile ? hasCO2Data(deviceProfile) : false;
+  const co2Available = parsedSamples && (detectedProfile || deviceProfile) ? hasCO2Data(detectedProfile || deviceProfile!) : false;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
@@ -148,7 +201,11 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
               </label>
               <select
                 value={selectedProfileId}
-                onChange={(e) => setSelectedProfileId(e.target.value)}
+                onChange={(e) => {
+                  const selected = profiles.find((profile) => profile.id === e.target.value);
+                  setSelectedProfileId(e.target.value);
+                  if (selected) setDeviceName(selected.name);
+                }}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Auto-detect from file headers</option>
@@ -156,6 +213,25 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                Analyzer / device name
+                <input type="text" className="input mt-1" value={deviceName} onChange={(event) => setDeviceName(event.target.value)} placeholder="VO₂ analyzer" />
+              </label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                Sample frequency (Hz, optional)
+                <input type="number" min="0.01" step="0.01" className="input mt-1" value={sampleFrequencyHz} onChange={(event) => setSampleFrequencyHz(event.target.value)} placeholder="Detected from timestamps" />
+              </label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                Last calibration date
+                <input type="date" className="input mt-1" value={calibrationDate} onChange={(event) => setCalibrationDate(event.target.value)} />
+              </label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                Calibration notes
+                <input type="text" className="input mt-1" value={calibrationNotes} onChange={(event) => setCalibrationNotes(event.target.value)} placeholder="Reference or procedure (optional)" />
+              </label>
             </div>
 
             <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
@@ -277,4 +353,8 @@ export default function BreathDataImport({ breathData, deviceProfile, onChange, 
       </div>
     </div>
   );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

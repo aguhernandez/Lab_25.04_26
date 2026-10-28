@@ -343,7 +343,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
               </button>
               {showAdvanced && (
                 <div className="border-t border-gray-100 dark:border-gray-700 p-6">
-                  <AdvancedData dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
+                  <AdvancedData bodyMassKg={session.athlete?.weight_kg} leanBodyMassKg={session.athlete?.lean_body_mass_kg} sport={session.sport ?? undefined} dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
                 </div>
               )}
             </div>

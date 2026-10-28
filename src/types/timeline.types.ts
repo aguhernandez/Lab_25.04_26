@@ -1,16 +1,26 @@
+import type { CanonicalTimelineField, SampleDataProvenance } from './importData.types';
+
 export type TimelineSource = 'manual' | 'imported';
 
 export interface TimelineSample {
   id: string;
   timestamp_s: number;
   speed_pace: string | null;
+  speed_kmh?: number | null;
   heart_rate: number | null;
+  power_watts?: number | null;
+  distance_m?: number | null;
+  latitude_deg?: number | null;
+  longitude_deg?: number | null;
+  cadence_rpm?: number | null;
   lactate: number | null;
   rpe: number | null;
   vo2_ml_kg_min: number | null;
-  raw_data: Record<string, number | string | null>;
+  measurements?: Partial<Record<CanonicalTimelineField, number>>;
+  raw_data: Record<string, unknown>;
   source: TimelineSource;
   edited_fields: string[];
+  provenance?: SampleDataProvenance;
 }
 
 export interface ProtocolStep {

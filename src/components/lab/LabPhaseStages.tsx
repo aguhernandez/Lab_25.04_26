@@ -7,6 +7,8 @@ import TimelineDataInput from './TimelineDataInput';
 import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { TimelineSample } from '../../types/timeline.types';
+import { validateProtocolRun } from '../../lib/protocolEngine';
+import BreathDataImport from './BreathDataImport';
 
 interface Props {
   session: LabSession;
@@ -19,15 +21,22 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
   const sorted = [...samples].sort((a, b) => a.timestamp_s - b.timestamp_s);
   const groups: TimelineSample[][] = [];
   let currentGroup: TimelineSample[] = [];
-  let lastSpeed: string | null = null;
+  const highFrequency = sorted.length > 120 || sorted.some((sample) => (sample.provenance?.sampleFrequencyHz ?? 0) >= 1);
+  let lastStageKey: string | null = null;
 
   for (const s of sorted) {
-    if (s.speed_pace && s.speed_pace !== lastSpeed && currentGroup.length > 0) {
+    const stageKey = s.lactate != null
+      ? `lactate:${s.lactate}`
+      : s.power_watts != null
+        ? `power:${Math.round(s.power_watts / 5) * 5}`
+        : s.speed_pace;
+    const crossedTimeWindow = highFrequency && currentGroup.length > 0 && Math.floor(s.timestamp_s / 180) !== Math.floor(currentGroup[0].timestamp_s / 180);
+    if (currentGroup.length > 0 && (crossedTimeWindow || (!highFrequency && stageKey && stageKey !== lastStageKey))) {
       groups.push(currentGroup);
       currentGroup = [];
     }
     currentGroup.push(s);
-    if (s.speed_pace) lastSpeed = s.speed_pace;
+    if (stageKey) lastStageKey = stageKey;
   }
   if (currentGroup.length > 0) groups.push(currentGroup);
 
@@ -43,6 +52,7 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
       const lactates = group.map(g => g.lactate).filter((v): v is number => v != null);
       const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
       const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
+      const powers = group.map(g => g.power_watts).filter((v): v is number => v != null);
 
       const hr = heartRates.length ? Math.max(...heartRates) : null;
       if (hr == null) return null;
@@ -55,7 +65,7 @@ function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
           ? Math.round(group[group.length - 1].timestamp_s - group[0].timestamp_s)
           : 180,
         heart_rate: hr,
-        power_watts: null,
+        power_watts: avgDec(powers),
         speed_pace: speeds[0] ?? null,
         vo2_ml_kg_min: vo2s.length ? Math.max(...vo2s) : null,
         vco2_ml_kg_min: null,
@@ -95,6 +105,9 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
           test_date: new Date().toISOString().split('T')[0],
           sport: session.sport,
           test_type: session.testType,
+          protocol_id: session.protocolId,
+          protocol_version: session.protocolSettings?.version ?? '1.0',
+          protocol_metadata: makeProtocolMetadata(session),
           status: 'in_progress',
           test_time: preTest?.test_time ?? null,
           city: preTest?.city ?? null,
@@ -130,6 +143,30 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
     try {
       // Convert timeline samples to TestDataPoint format for the existing calculation engine
       const dataPoints = samplesToDataPoints(samples);
+      const imports = collectImports(samples, session.protocolSettings?.imports ?? [], session.breathImportMetadata);
+      const firstImport = imports[0];
+      const environment = makeProtocolMetadata(session).environment as NonNullable<NonNullable<LabSession['protocolSettings']>['environment']>;
+      const validationSettings = session.protocolSettings ? {
+        ...session.protocolSettings,
+        imports,
+        deviceName: session.protocolSettings.deviceName ?? firstImport?.deviceName ?? null,
+        deviceCalibrationDate: session.protocolSettings.deviceCalibrationDate ?? firstImport?.calibrationDate ?? null,
+        samplingFrequencyHz: session.protocolSettings.samplingFrequencyHz ?? firstImport?.sampleFrequencyHz ?? null,
+        environment: session.protocolSettings.environment ?? environment,
+      } : null;
+      const validation = session.protocolId && session.protocolSettings
+        ? validateProtocolRun({ protocolId: session.protocolId, settings: validationSettings!, timelineSamples: samples, breathSamples: session.breathData ?? [] })
+        : null;
+      const updatedProtocolSettings = session.protocolSettings && validation
+        ? { ...validationSettings!, validation }
+        : session.protocolSettings;
+      if (updatedProtocolSettings) {
+        const { error: protocolError } = await supabase.from('tests').update({
+          protocol_version: updatedProtocolSettings.version,
+          protocol_metadata: { ...makeProtocolMetadata(session), ...updatedProtocolSettings, validation },
+        }).eq('id', currentTest.id);
+        if (protocolError) throw protocolError;
+      }
 
       // Also save as test_data_points for backward compatibility
       if (dataPoints.length > 0) {
@@ -156,7 +193,12 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         .update({ status: 'completed' })
         .eq('id', currentTest.id);
 
-      onUpdate({ dataPoints });
+      onUpdate({ dataPoints, protocolSettings: updatedProtocolSettings });
+      if (validation?.status === 'incomplete') {
+        setToast({ message: `Protocol saved for review: ${validation.errors[0]?.replace(/_/g, ' ')}`, type: 'error' });
+      } else if (validation?.status === 'review') {
+        setToast({ message: `Protocol saved with ${validation.warnings.length} quality note(s).`, type: 'success' });
+      }
       onNext();
     } catch (err) {
       console.error('Failed to complete test:', err);
@@ -195,6 +237,14 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
 
+      <BreathDataImport
+        breathData={session.breathData}
+        deviceProfile={session.deviceProfile}
+        onChange={(breathData, deviceProfile, breathVT, importMetadata) => onUpdate({ breathData, deviceProfile, breathVT, breathImportMetadata: importMetadata })}
+        hrmax={null}
+        vo2max={null}
+      />
+
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -232,4 +282,50 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
       />
     </div>
   );
+}
+
+function makeProtocolMetadata(session: LabSession): Record<string, unknown> {
+  const settings = session.protocolSettings;
+  const environment = {
+    temperatureC: session.preTestData?.indoor_temp_c ?? session.preTestData?.outdoor_weather?.temperature_c ?? null,
+    humidityPercent: session.preTestData?.indoor_humidity_percent ?? session.preTestData?.outdoor_weather?.humidity_percent ?? null,
+    altitudeM: session.preTestData?.elevation_m ?? null,
+  };
+  return {
+    ...(settings ?? {}),
+    stageDurationSeconds: session.customProtocol ? null : session.stageDurationSeconds,
+    stageDurationsSeconds: session.customProtocol ? session.customStageDurations : [],
+    environment,
+    imports: collectImports([], settings?.imports ?? [], session.breathImportMetadata),
+  };
+}
+
+function collectImports(
+  samples: TimelineSample[],
+  existing: NonNullable<LabSession['protocolSettings']>['imports'] = [],
+  breathImport: LabSession['breathImportMetadata'] = null,
+) {
+  const imports = new Map((existing ?? []).map((item) => [item.importId, item]));
+  if (breathImport) imports.set(breathImport.importId, breathImport);
+  samples.forEach((sample) => {
+    const provenance = sample.provenance;
+    if (!provenance || imports.has(provenance.importId)) return;
+    imports.set(provenance.importId, {
+      importId: provenance.importId,
+      format: provenance.format,
+      fileName: provenance.fileName,
+      importedAt: provenance.importedAt,
+      source: provenance.source,
+      deviceName: provenance.deviceName,
+      deviceProfileId: provenance.deviceProfileId,
+      sampleFrequencyHz: provenance.sampleFrequencyHz,
+      units: provenance.units,
+      calibrationDate: provenance.calibrationDate,
+      calibrationNotes: provenance.calibrationNotes,
+      columnMapping: provenance.columnMapping,
+      transformations: provenance.transformations,
+      recordCount: samples.filter((row) => row.provenance?.importId === provenance.importId).length,
+    });
+  });
+  return [...imports.values()];
 }

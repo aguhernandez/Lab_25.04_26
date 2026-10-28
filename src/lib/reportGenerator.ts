@@ -1272,10 +1272,20 @@ function renderEconomy(b: PDFBuilder, data: ReportData, options?: ReportOptions)
     items.push({ label: 'W/kg at LT2', value: wpkg, unit: 'W/kg' });
   }
   if (adv?.movementEconomy?.cycling?.watts_per_kg_lbm) {
-    items.push({ label: 'W/kg LBM at LT2', value: adv.movementEconomy.cycling.watts_per_kg_lbm.toFixed(2), unit: 'W/kg LBM' });
+    items.push({ label: 'Peak power relative to lean mass', value: adv.movementEconomy.cycling.watts_per_kg_lbm.toFixed(2), unit: 'W/kg LBM' });
+  }
+  if (adv?.movementEconomy?.cycling?.vo2_ml_kg_min_per_100w) {
+    items.push({ label: 'Cycling VO₂ per 100 W', value: adv.movementEconomy.cycling.vo2_ml_kg_min_per_100w.toFixed(1), unit: 'ml/kg/min' });
+  }
+  if (adv?.movementEconomy?.cycling?.efficiency_percent) {
+    const basis = adv.movementEconomy.cycling.efficiency_basis === 'measured_rer' ? ' (measured RER)' : ' (VO₂ estimate)';
+    items.push({ label: `Cycling gross efficiency${basis}`, value: adv.movementEconomy.cycling.efficiency_percent.toFixed(1), unit: '%' });
   }
   if (adv?.movementEconomy?.running?.cost_per_km_ml_o2_kg) {
     items.push({ label: 'Running Economy', value: adv.movementEconomy.running.cost_per_km_ml_o2_kg.toFixed(1), unit: 'ml/kg/km' });
+  }
+  if (adv?.movementEconomy?.swimming?.cost_per_100m_ml_o2_kg) {
+    items.push({ label: 'Swimming oxygen cost', value: adv.movementEconomy.swimming.cost_per_100m_ml_o2_kg.toFixed(1), unit: 'ml/kg/100 m' });
   }
 
   if (items.length === 0) { b.paragraph('Economy metrics require power meter or VO\u2082 data.'); return; }

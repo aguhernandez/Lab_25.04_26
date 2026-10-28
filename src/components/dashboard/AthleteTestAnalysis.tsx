@@ -149,7 +149,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
               </div>
             ))}
           </div>
-          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} />}
+          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg} sport={test.sport} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} />}
           <MetabolicProfile results={results} />
           {[
             { key: 'LT1', value: results.thresholds?.LT1?.percent_vo2max },
