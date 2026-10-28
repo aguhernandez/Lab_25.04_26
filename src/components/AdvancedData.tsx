@@ -523,7 +523,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
       {activeTab === 'energy' && (
         <div className="space-y-6">
           <SectionCard title="Dinámica de lactato · Producción, oxidación y recuperación">
-            <LactateDynamicsPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} />
+            <LactateDynamicsPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} sport={sport} />
           </SectionCard>
           {(results.lactate_analysis?.fuelProfile.length ?? 0) > 0 && (
             <SectionCard title="Measured Fuel Profile (VO₂ + VCO₂)">

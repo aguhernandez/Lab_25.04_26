@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { TestDataPoint } from '../types';
+import type { Sport, TestDataPoint } from '../types';
 import type { PhysiologyResults } from '../lib/physiology';
-import { parseSpeedKmh } from '../lib/lactateAnalysis';
+import { paceToKmh } from '../lib/trainingZones';
 import {
   buildLactateFluxCurve,
   createLactateDynamicsModel,
@@ -14,12 +14,14 @@ import {
 } from '../lib/lactateDynamics';
 import { supabase } from '../lib/supabase';
 import MLSSMetabolicPanel from './MLSSMetabolicPanel';
+import SessionBuilder from './SessionBuilder';
 
 interface Props {
   testId?: string;
   bodyMassKg?: number | null;
   dataPoints: TestDataPoint[];
   results: PhysiologyResults;
+  sport?: Sport;
 }
 
 interface SavedVLamax {
@@ -30,7 +32,7 @@ interface SavedVLamax {
 const fieldClass = 'mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#5A4E6B] focus:outline-none focus:ring-2 focus:ring-[#5A4E6B]/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white';
 const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.98)', border: '1px solid #e5e7eb', borderRadius: '0.5rem', color: '#1f2937', fontSize: '12px' };
 
-export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, results }: Props) {
+export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, results, sport = 'running' }: Props) {
   const [vlamax, setVlamax] = useState('');
   const [distribution, setDistribution] = useState('0.50');
   const [baseline, setBaseline] = useState('1.0');
@@ -44,12 +46,12 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
   const [source, setSource] = useState<'saved' | 'manual' | 'missing'>('missing');
 
   const powerLoads = useMemo(() => dataPoints.map(point => Number(point.power_watts)).filter(load => Number.isFinite(load) && load > 0), [dataPoints]);
-  const speedLoads = useMemo(() => dataPoints.map(point => parseSpeedKmh(point.speed_pace)).filter((load): load is number => load != null), [dataPoints]);
+  const speedLoads = useMemo(() => dataPoints.map(point => point.speed_pace ? paceToKmh(point.speed_pace, sport) : null).filter((load): load is number => load != null), [dataPoints, sport]);
   const loadUnit: LactateLoadUnit | null = powerLoads.length >= 2 ? 'W' : speedLoads.length >= 2 ? 'km/h' : null;
   const loads = loadUnit === 'W' ? powerLoads : speedLoads;
   const maxLoad = loads.length ? Math.max(...loads) : 0;
-  const lt1Load = loadUnit === 'W' ? results.lt1_power : results.lactate_analysis?.lt1?.speedKmh ?? results.lactate_analysis?.lt1?.load;
-  const lt2Load = loadUnit === 'W' ? results.lt2_power : results.lactate_analysis?.lt2?.speedKmh ?? results.lactate_analysis?.lt2?.load;
+  const lt1Load = loadUnit === 'W' ? results.lt1_power : sport === 'swimming' && results.lt1_pace ? paceToKmh(results.lt1_pace, sport) : results.lactate_analysis?.lt1?.speedKmh ?? results.lactate_analysis?.lt1?.load;
+  const lt2Load = loadUnit === 'W' ? results.lt2_power : sport === 'swimming' && results.lt2_pace ? paceToKmh(results.lt2_pace, sport) : results.lactate_analysis?.lt2?.speedKmh ?? results.lactate_analysis?.lt2?.load;
   const lt2Lactate = results.lactate_analysis?.lt2?.lactate ?? 4;
 
   useEffect(() => {
@@ -143,6 +145,7 @@ export default function LactateDynamicsPanel({ testId, bodyMassKg, dataPoints, r
         </section>
 
         <MLSSMetabolicPanel testId={testId} bodyMassKg={bodyMassKg} dataPoints={dataPoints} results={results} model={model} loadUnit={model.input.loadUnit} />
+        <SessionBuilder model={model} points={dataPoints} sport={sport} />
 
         <section className="border-t border-gray-200 pt-5 dark:border-gray-700">
           <div className="mb-4"><h5 className="text-sm font-semibold text-gray-900 dark:text-white">Simulador de intervalos</h5><p className="text-xs text-gray-500 dark:text-gray-400">Simula el lactato metabólico y el lactato sanguíneo observable con retardo.</p></div>

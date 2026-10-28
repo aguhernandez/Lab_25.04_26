@@ -9,14 +9,17 @@ import {
 import type { DeviceProfile } from '../../types/breathData.types';
 import type { TimelineSample, ProtocolStep } from '../../types/timeline.types';
 import { DEFAULT_PROTOCOL, PRIMARY_COLUMNS, LACTATE_OFFSET_S } from '../../types/timeline.types';
+import { protocolAdvice } from '../../lib/protocolAssistant';
 
 interface Props {
   testId: string;
   onComplete: (samples: TimelineSample[]) => void;
   onCancel: () => void;
+  recordedCalibration?: string | null;
+  plannedStages?: ProtocolStep[];
 }
 
-export default function TimelineDataInput({ testId, onComplete, onCancel }: Props) {
+export default function TimelineDataInput({ testId, onComplete, onCancel, recordedCalibration, plannedStages }: Props) {
   const [samples, setSamples] = useState<TimelineSample[]>([]);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -40,6 +43,8 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
   const [showProtocol, setShowProtocol] = useState(false);
   const [protocol, setProtocol] = useState<ProtocolStep[]>(DEFAULT_PROTOCOL);
   const [protocolLoaded, setProtocolLoaded] = useState(false);
+  const hasPlan = protocolLoaded || Boolean(plannedStages?.length);
+  const advice = protocolAdvice(protocolLoaded ? protocol : plannedStages ?? [], samples, elapsed, hasPlan, Boolean(recordedCalibration || calibrationDate || samples.some(s => s.provenance?.calibrationDate)));
 
   // Column mapping state
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -330,6 +335,8 @@ export default function TimelineDataInput({ testId, onComplete, onCancel }: Prop
           <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
         </div>
       )}
+
+      <section aria-label="Asistente de calidad del protocolo" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100"><strong>Asistente de calidad del protocolo</strong><p className="mt-1 text-xs">{hasPlan ? 'Avisos según el cronómetro y el protocolo configurado. Si no se fijó un horario de muestra, se avisa al finalizar cada estadio. Verifica cada muestra y calibración.' : 'Carga un protocolo para recibir avisos por estadio y muestra; las recomendaciones no sustituyen la revisión del profesional.'}</p>{advice.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-5">{advice.map(item => <li key={item.code}>{item.message}</li>)}</ul>}</section>
 
       {/* Timer + Live Capture */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow border border-gray-100 dark:border-gray-700 p-5">

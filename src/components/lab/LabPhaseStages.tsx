@@ -277,6 +277,8 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
 
       <TimelineDataInput
         testId={currentTest.id}
+        recordedCalibration={session.protocolSettings?.deviceCalibrationDate ?? session.breathImportMetadata?.calibrationDate}
+        plannedStages={session.protocolId === 'incremental_lactate' ? Array.from({ length: session.numStages }, (_, index) => { const duration = session.customProtocol ? session.customStageDurations[index] ?? session.stageDurationSeconds : session.stageDurationSeconds; return { step: index + 1, label: `Estadio ${index + 1}`, speed_pace: '', target_duration_s: duration, lactate_at_s: duration }; }) : undefined}
         onComplete={handleTimelineComplete}
         onCancel={onBack}
       />

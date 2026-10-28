@@ -7,7 +7,8 @@ import Toast from './Toast';
 import PhysiologyProfileCard from './PhysiologyProfileCard';
 import HydrationProfileCard from './hydration/HydrationProfileCard';
 import PushToHubButton from './PushToHubButton';
-import { Pencil, Trash2, Mail, Calendar, User, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Pencil, Trash2, Mail, Calendar, User } from 'lucide-react';
+import LongitudinalComparison from './LongitudinalComparison';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -67,20 +68,7 @@ const SEX_LABELS: Record<string, string> = {
 };
 
 function DeltaBadge({ delta, unit }: { delta: number; unit: string }) {
-  if (Math.abs(delta) < 0.01) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400">
-        <Minus className="w-3 h-3" /> {unit}
-      </span>
-    );
-  }
-  const positive = delta > 0;
-  return (
-    <span className={`inline-flex items-center gap-1 text-xs font-semibold ${positive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-      {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-      {positive ? '+' : ''}{delta % 1 === 0 ? delta : delta.toFixed(1)} {unit}
-    </span>
-  );
+  return <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{delta > 0 ? '+' : ''}{delta % 1 === 0 ? delta : delta.toFixed(1)} {unit}</span>;
 }
 
 export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, onAthleteDeleted }: AthleteDetailProps) {
@@ -360,7 +348,7 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
             {latestTest && previousTest && (
               <div className="border-y border-gray-200 py-5 dark:border-gray-700">
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-4">
-                  Progreso — {formatDate(previousTest.test_date)} → {formatDate(latestTest.test_date)}
+                  Cambio observado — {formatDate(previousTest.test_date)} → {formatDate(latestTest.test_date)}
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {/* VO2max delta */}
@@ -421,8 +409,11 @@ export default function AthleteDetail({ athlete, onViewResults, onEditAthlete, o
                     </div>
                   )}
                 </div>
+                <p className="mt-3 text-xs text-gray-500">Los cambios requieren considerar el error de medición y las diferencias de protocolo antes de interpretarlos como mejora.</p>
               </div>
             )}
+
+            <LongitudinalComparison key={athlete.id} tests={tests} />
 
             {/* VO2max trend chart */}
             {chartData.length >= 2 && (
