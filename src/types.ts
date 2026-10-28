@@ -147,7 +147,7 @@ export interface TrainingZone {
   zone_label?: string;
   power_label?: string;
   pace_label?: string;
-  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; formula: string; source?: string; custom?: boolean };
+  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; referenceSource?: string; referenceIsProxy?: boolean; formula: string; source?: string; custom?: boolean };
 
 }
 

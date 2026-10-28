@@ -1,5 +1,5 @@
 import type { Sport } from '../types';
-import { kmhToPace, type Language, type ZoneDefinition } from './trainingZones';
+import { paceToKmh, kmhToPace, type Language, type ZoneDefinition } from './trainingZones';
 
 export const ZONE_METHODS_VERSION = '1.0.0';
 export type ZoneMethodId = 'physiological' | 'friel_run_hr' | 'friel_bike_hr' | 'coggan_hr' | 'coggan_power' | 'hrmax' | 'karvonen' | 'threshold_speed' | 'running_power';
@@ -108,4 +108,27 @@ export function formatZonePace(zone: ZoneDefinition, sport: Sport): string {
   if (zone.pace_min) return `≥ ${zone.pace_min} ${unit}`;
   if (zone.pace_max) return `< ${zone.pace_max} ${unit}`;
   return '—';
+}
+
+
+export interface ZoneTestReferences {
+  sport: Sport;
+  hrmax?: number | null;
+  lt2_hr?: number | null;
+  lt2_power?: number | null;
+  lt2_pace?: string | null;
+}
+export interface AutomaticZoneReference { value: number | null; source: 'test_hrmax' | 'test_lt2_hr' | 'test_lt2_power' | 'test_lt2_speed' | null; proxy: boolean }
+/** References available directly after a test. A lab LT2 remains an explicit proxy for field FTP/LTHR. */
+export function automaticZoneReference(id: ZoneMethodId, test: ZoneTestReferences): AutomaticZoneReference {
+  const method = ZONE_METHODS.find(m => m.id === id);
+  if (!method || (method.sports && !method.sports.includes(test.sport))) return { value: null, source: null, proxy: false };
+  let value: number | null | undefined = null;
+  let source: AutomaticZoneReference['source'] = null;
+  if (id === 'hrmax' || id === 'karvonen') { value = test.hrmax; source = 'test_hrmax'; }
+  else if (method.metric === 'hr') { value = test.lt2_hr; source = 'test_lt2_hr'; }
+  else if (method.metric === 'power') { value = test.lt2_power; source = 'test_lt2_power'; }
+  else if (method.metric === 'speed') { value = test.lt2_pace ? paceToKmh(test.lt2_pace, test.sport) : null; source = 'test_lt2_speed'; }
+  return finitePositive(value) ? { value, source, proxy: method.metric === 'hr' && source === 'test_lt2_hr' || method.metric === 'power' }
+    : { value: null, source: null, proxy: false };
 }

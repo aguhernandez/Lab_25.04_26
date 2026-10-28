@@ -1137,7 +1137,7 @@ function renderTrainingZones(b: PDFBuilder, data: ReportData, options: ReportOpt
   const render = (zones: TrainingZone[]) => {
     if (!zones.length) return;
     const calc = zones[0]?.calculation;
-    if (calc) b.paragraph(`${calc.method}${calc.custom ? ' (custom)' : ''} · v${calc.version} · ref=${calc.reference ?? 'n/a'}${calc.restingHR ? `; HRrest=${calc.restingHR}` : ''}${calc.maximumHR ? `; HRmax=${calc.maximumHR}` : ''} · ${calc.formula}`);
+    if (calc) b.paragraph(`${calc.method}${calc.custom ? ' (custom)' : ''} · v${calc.version} · ref=${calc.reference ?? 'n/a'}${calc.referenceSource ? ` [${calc.referenceSource}${calc.referenceIsProxy ? '; LT2 proxy' : ''}]` : ''}${calc.restingHR ? `; HRrest=${calc.restingHR}` : ''}${calc.maximumHR ? `; HRmax=${calc.maximumHR}` : ''} · ${calc.formula}`);
     renderZoneTable(b, zones, `${zones.length} ${getCurrentLanguage() === 'es' ? 'zonas' : 'zones'}`,
       zones.some(z => z.power_min != null || z.power_max != null || z.power_label),
       zones.some(z => z.pace_min || z.pace_max), zones.some(z => z.rpe_min != null || z.rpe_max != null), data.test?.sport ?? data.athlete.sport);

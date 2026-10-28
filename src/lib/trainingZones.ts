@@ -21,7 +21,7 @@ export interface ZoneDefinition {
   confidence?: ZoneConfidence;
   speed_min_kmh?: number | null;
   speed_max_kmh?: number | null;
-  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; formula: string; source?: string; custom?: boolean };
+  calculation?: { method: string; version: string; metric: string; reference: number | null; restingHR?: number; maximumHR?: number; referenceSource?: string; referenceIsProxy?: boolean; formula: string; source?: string; custom?: boolean };
   zone_label?: string;
   power_label?: string;
   pace_label?: string;

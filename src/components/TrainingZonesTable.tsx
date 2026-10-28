@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
 import type { Sport } from '../types';
 import { type ZoneDefinition, type ZoneDisplayMode, type TrainingZonesData, getZoneColor, getZoneTextColor, calculateZones7, convertTo5Zones, paceToKmh } from '../lib/trainingZones';
-import { calculateMethodZones, formatZonePace, ZONE_METHODS, type ZoneMethodId } from '../lib/zoneMethods';
+import { automaticZoneReference, calculateMethodZones, formatZonePace, ZONE_METHODS, type ZoneMethodId } from '../lib/zoneMethods';
 import { updateTrainingZonesManual } from '../lib/physiologyProfile';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -32,7 +32,13 @@ export default function TrainingZonesTable(props: TrainingZonesTableProps) {
   const initialMethod: ZoneMethodId = ZONE_METHODS.some(m => m.id === savedMethod) ? savedMethod as ZoneMethodId : 'physiological';
   const [methodId, setMethodId] = useState<ZoneMethodId>(initialMethod);
   const [mode, setMode] = useState<ZoneDisplayMode>(zones?.[0]?.calculation && (zones[0].calculation.custom || savedMethod !== 'LT1_LT2_physiological') ? (zones.length === 7 ? '7' : '5') : props.defaultMode ?? zonesData?.defaultDisplay ?? '5');
-  const [reference, setReference] = useState(String(zones?.[0]?.calculation?.reference ?? ''));
+  const testReferences = { sport, hrmax, lt2_hr, lt2_power, lt2_pace };
+  const [referenceOverride, setReferenceOverride] = useState<string | null>(initialMethod !== 'physiological' && zones?.[0]?.calculation?.reference != null ? String(zones[0].calculation.reference) : null);
+  const [referenceSource, setReferenceSource] = useState(zones?.[0]?.calculation?.referenceSource ?? 'manual');
+  const autoReference = automaticZoneReference(methodId, testReferences);
+  const reference = referenceOverride ?? (autoReference.value == null ? '' : String(autoReference.value));
+  const automatic = referenceOverride === null;
+  const proxy = automatic ? autoReference.proxy : zones?.[0]?.calculation?.referenceIsProxy === true && referenceSource !== 'manual';
   const [resting, setResting] = useState(String(zones?.[0]?.calculation?.restingHR ?? ''));
   const [localZones, setLocalZones] = useState<ZoneDefinition[] | null>(null);
   const [editing, setEditing] = useState(false);
@@ -46,7 +52,8 @@ export default function TrainingZonesTable(props: TrainingZonesTableProps) {
     if (preview || localZones) return;
     if (savedMethod && ZONE_METHODS.some(m => m.id === savedMethod)) {
       setMethodId(savedMethod as ZoneMethodId);
-      setReference(String(zones?.[0]?.calculation?.reference ?? ''));
+      setReferenceOverride(String(zones?.[0]?.calculation?.reference ?? ''));
+      setReferenceSource(zones?.[0]?.calculation?.referenceSource ?? 'manual');
       setResting(String(zones?.[0]?.calculation?.restingHR ?? ''));
       setMode(zones?.length === 7 ? '7' : '5');
     }
@@ -74,15 +81,17 @@ export default function TrainingZonesTable(props: TrainingZonesTableProps) {
   const hasRPE = displayZones.some(z => z.rpe_min != null || z.rpe_max != null);
   const change = (id: ZoneMethodId) => {
     setMethodId(id); setLocalZones(null); setEditing(false); setSaveError(null); setSaved(false); setPreview(true);
-    const next = ZONE_METHODS.find(m => m.id === id)!;
-    setReference(next.metric === 'hr' && ['hrmax', 'karvonen'].includes(id) ? String(hrmax ?? '') : '');
+    setReferenceOverride(null); setReferenceSource('automatic');
   };
   const startEditing = () => {
     setEdited(Object.fromEntries(displayZones.map(z => [z.zone, Object.fromEntries(FIELDS.map(f => [f, z[f] == null ? '' : String(z[f])]))])) as Record<number, Record<EditField, string>>);
     setEditing(true); setSaveError(null); setSaved(false);
   };
   const persist = async () => {
-    let updated = displayZones.map(z => ({ ...z }));
+    let updated = displayZones.map(z => ({ ...z, calculation: z.calculation ? {
+      ...z.calculation,
+      ...(methodId !== 'physiological' ? { referenceSource: automatic ? autoReference.source ?? 'unavailable' : referenceSource, referenceIsProxy: proxy } : {}),
+    } : undefined }));
     if (editing) {
       updated = updated.map(z => {
         const row = edited[z.zone];
@@ -131,18 +140,22 @@ export default function TrainingZonesTable(props: TrainingZonesTableProps) {
   </div>;
   return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-      <div><h3 className="text-lg font-semibold text-gray-900 dark:text-white">{en ? 'Training zones' : 'Zonas de entrenamiento'}</h3><p className="text-xs text-gray-500">{en ? 'Select a method and its reference. Preview before applying.' : 'Elige método y referencia. Compara antes de aplicar.'}</p></div>
+      <div><h3 className="text-lg font-semibold text-gray-900 dark:text-white">{en ? 'Training zones' : 'Zonas de entrenamiento'}</h3><p className="text-xs text-gray-500">{en ? 'Zones calculated from the test. Changing method or limits is optional.' : 'Zonas calculadas desde el test. Cambiar método o límites es opcional.'}</p></div>
       {method.count === 'both' ? <div className="flex gap-1">{(['5', '7'] as const).map(n => <button key={n} disabled={saving} onClick={() => { setMode(n); setLocalZones(null); setEditing(false); setPreview(true); setSaved(false); }} className={`rounded-lg px-4 py-2 text-sm ${mode === n ? 'bg-[#5A4E6B] text-white' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-white'}`}>{n} {en ? 'zones' : 'zonas'}</button>)}</div> : <span className="rounded-lg bg-[#5A4E6B]/10 px-3 py-2 text-sm font-semibold text-[#5A4E6B] dark:text-purple-200">{count} {en ? 'zones · native method' : 'zonas · método original'}</span>}
     </div>
     <div className="space-y-4 p-6">
+      <p className="text-sm text-gray-700 dark:text-gray-200">{en ? 'The default 5/7-zone prescription comes directly from LT1/LT2, with or without measured VO₂. No manual setup is required when the test has sufficient data.' : 'La propuesta inicial de 5/7 zonas sale directamente de LT1/LT2, con o sin VO₂ medido. No requiere configuración manual si el test aporta datos suficientes.'}</p>
       <div className="grid gap-3 md:grid-cols-3">
-        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{en ? 'Calculation method' : 'Método de cálculo'}<select aria-label={en ? 'Calculation method' : 'Método de cálculo'} disabled={saving} className={`${fieldClass} mt-1`} value={methodId} onChange={e => change(e.target.value as ZoneMethodId)}>{methods.map(m => <option key={m.id} value={m.id}>{m.name} · {m.count === 'both' ? '5/7' : m.count}</option>)}</select></label>
-        {methodId !== 'physiological' && <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{method.referenceLabel}<input className={`${fieldClass} mt-1`} type="number" min="1" step="any" disabled={saving} value={reference} onChange={e => { setReference(e.target.value); setLocalZones(null); setPreview(true); setSaved(false); setEditing(false); }} /></label>}
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{en ? 'Calculation method' : 'Método de cálculo'}<select aria-label={en ? 'Calculation method' : 'Método de cálculo'} disabled={saving} className={`${fieldClass} mt-1`} value={methodId} onChange={e => change(e.target.value as ZoneMethodId)}>{methods.map(m => <option key={m.id} value={m.id}>{m.name} · {m.count === 'both' ? '5/7' : m.count}{m.id === 'physiological' || automaticZoneReference(m.id, testReferences).value != null ? (en ? ' · from test' : ' · desde test') : (en ? ' · needs reference' : ' · requiere referencia')}</option>)}</select></label>
+        {methodId !== 'physiological' && <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{proxy ? (method.metric === 'power' ? (en ? 'Test LT2 power (W; FTP proxy)' : 'Potencia LT2 del test (W; proxy FTP)') : (en ? 'Test LT2 HR (bpm; LTHR proxy)' : 'FC LT2 del test (bpm; proxy LTHR)')) : method.referenceLabel}<input className={`${fieldClass} mt-1`} type="number" min="1" step="any" disabled={saving} value={reference} onChange={e => { setReferenceOverride(e.target.value); setReferenceSource('manual'); setLocalZones(null); setPreview(true); setSaved(false); setEditing(false); }} /></label>}
         {methodId === 'karvonen' && <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{en ? 'Resting HR (bpm)' : 'FC reposo (bpm)'}<input className={`${fieldClass} mt-1`} type="number" min="1" disabled={saving} value={resting} onChange={e => { setResting(e.target.value); setLocalZones(null); setPreview(true); setSaved(false); setEditing(false); }} /></label>}
       </div>
+      {methodId !== 'physiological' && <button disabled={saving} className="text-sm font-semibold text-[#5A4E6B] dark:text-purple-200" onClick={() => change('physiological')}>{en ? 'Return to automatic test zones' : 'Volver a las zonas automáticas del test'}</button>}
+      {methodId !== 'physiological' && !automatic && autoReference.value != null && <button disabled={saving} className="ml-3 text-sm underline dark:text-white" onClick={() => { setReferenceOverride(null); setReferenceSource('automatic'); setLocalZones(null); setPreview(true); setEditing(false); }}>{en ? 'Use test reference' : 'Usar referencia del test'}</button>}
+      {methodId === 'karvonen' && !resting && <p className="text-xs text-gray-500">{en ? 'This alternative additionally needs measured resting HR; the default test zones are already available.' : 'Esta alternativa necesita además FC de reposo medida; las zonas predeterminadas del test ya están disponibles.'}</p>}
       <div className="border-l-4 border-[#5A4E6B] bg-gray-50 p-3 text-sm text-gray-700 dark:bg-gray-900/40 dark:text-gray-300"><p>{method.formula}</p>
         <p className="mt-1 text-xs">{en ? 'Calculated estimates. Metric-specific methods do not infer equivalent HR, power or pace zones.' : 'Estimaciones calculadas. Los métodos por métrica no inventan equivalencias de FC, potencia o ritmo.'} {method.source && <a className="underline" href={method.source} target="_blank" rel="noreferrer">{en ? 'Method reference' : 'Referencia del método'}</a>}</p>
-        {methodId !== 'physiological' && <p className="mt-1 text-xs">{en ? 'Enter the reference for this sport. Laboratory LT2 is not automatically FTP or field-test LTHR.' : 'Introduce la referencia de este deporte. LT2 de laboratorio no se convierte automáticamente en FTP ni LTHR de campo.'}</p>}
+        {methodId !== 'physiological' && <p className="mt-1 text-xs">{automatic ? (en ? 'Reference loaded automatically from this test.' : 'Referencia cargada automáticamente desde este test.') : (en ? 'Saved or manually adjusted reference.' : 'Referencia guardada o ajustada manualmente.')} {proxy && (en ? 'Indicative alternative using laboratory LT2; FTP/LTHR has not been independently confirmed.' : 'Alternativa orientativa usando LT2 de laboratorio; FTP/LTHR no confirmado de forma independiente.')}</p>}
         {displayZones.some(z => z.calculation?.custom) && <p className="mt-1 font-semibold">{en ? 'Custom limits edited from this method.' : 'Límites personalizados a partir de este método.'}</p>}
       </div>
       {(error || saveError) && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{saveError ?? error}</p>}
@@ -157,7 +170,7 @@ export default function TrainingZonesTable(props: TrainingZonesTableProps) {
       </tr>)}</tbody></table></div>}
       {!isLocked && !!displayZones.length && <div className="flex flex-wrap items-center gap-2">
         {!editing && <button disabled={saving} onClick={startEditing} className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:text-white"><Pencil size={15} />{en ? 'Edit limits' : 'Editar límites'}</button>}
-        <button disabled={saving} onClick={persist} className="flex items-center gap-1 rounded-lg bg-[#5A4E6B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={15} />{saving ? (en ? 'Saving…' : 'Guardando…') : (en ? 'Apply and save zones' : 'Aplicar y guardar zonas')}</button>
+        <button disabled={saving} onClick={persist} className="flex items-center gap-1 rounded-lg bg-[#5A4E6B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={15} />{saving ? (en ? 'Saving…' : 'Guardando…') : (en ? 'Save athlete prescription (optional)' : 'Guardar prescripción del atleta (opcional)')}</button>
         {editing && <button disabled={saving} onClick={() => { setEditing(false); setSaveError(null); }} className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"><X size={15} />{en ? 'Cancel' : 'Cancelar'}</button>}
         {saved && <span role="status" className="text-sm text-green-700 dark:text-green-300">{en ? 'Zones saved' : 'Zonas guardadas'}</span>}
       </div>}

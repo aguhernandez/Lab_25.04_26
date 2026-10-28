@@ -29,7 +29,7 @@ Las opciones se filtran por deporte. Triatlón ofrece los métodos FC/potencia d
 
 ## Convenciones y límites científicos
 
-- LT2, FTP, LTHR de campo y MLSS son referencias distintas. El usuario debe introducir la referencia del método de autor; no se sustituye automáticamente por LT2.
+- LT2, FTP, LTHR de campo y MLSS son referencias distintas. La propuesta principal LT1/LT2 se genera automáticamente. Las alternativas pueden precargarse desde LT2 como aproximaciones explícitas de FTP/LTHR, con esa procedencia visible y guardada; el usuario puede sustituir la referencia por una medición de campo. No se afirma equivalencia entre ambas referencias.
 - Los porcentajes publicados redondeados se implementan con límites bpm/W enteros contiguos; no se dejan huecos por redondeo de porcentajes. Se muestran las fórmulas exactas utilizadas.
 - En Coggan se usa la tabla original de niveles con techos 55/75/90/105/120% FTP. El calculador automático de TrainingPeaks usa seis zonas numéricas: el séptimo nivel neuromuscular no tiene frontera fija de %FTP. Aquí Z7 aparece descriptiva; no se inventa 150% FTP ni se pretende clasificar sprints por potencia solamente.
 - Las subdivisiones fisiológicas de Asciende (85/92,5% LT1 y 115% PAM/VAM) son convenciones de prescripción, no umbrales metabólicos adicionales medidos. Si falta PAM/VAM válido por encima de LT2 se usa un proxy explícito (1,3×potencia LT2 / 1,2×velocidad LT2) registrado en los metadatos.
@@ -59,3 +59,10 @@ Se detectó que el `dist` previo contenía una excepción incondicional por ause
 - Joe Friel, FC por deporte: https://www.trainingpeaks.com/learn/articles/joe-friel-s-quick-guide-to-setting-zones/
 - Andrew Coggan, niveles por potencia y FC: https://www.trainingpeaks.com/blog/power-training-levels/
 - Calculadores TrainingPeaks, número nativo de zonas y potencia de carrera: https://help.trainingpeaks.com/hc/en-us/articles/360017420092-Zones-Calculator-Overview
+
+
+## Flujo automático posterior al test
+
+Las zonas fisiológicas de 5 y 7 se calculan al procesar la medición; no requieren VO₂ si existen lactato, FC y cargas válidos. El selector de métodos ya no obliga a reescribir referencias disponibles: precarga FCmáx, FC/potencia LT2 o velocidad del ritmo LT2. Las alternativas FTP/LTHR usan LT2 solo como proxy declarado; quedan registrados origen y condición de aproximación, también en PDF. Los cambios manuales y el guardado de una prescripción alternativa son opcionales. Karvonen requiere además FC de reposo real; no se inventa ese dato.
+
+Cinco pruebas dirigidas adicionales verifican el cálculo 5/7 sin VO₂, las referencias de FC/potencia, los ritmos de carrera/natación y el rechazo de datos ausentes o incompatibles. Núcleo: 1.1.1.
