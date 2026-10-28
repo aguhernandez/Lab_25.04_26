@@ -65,32 +65,40 @@ export interface LactateDynamicsModel {
 
 export interface ConstantLoadLactateTrial {
   id: string;
+  athleteId?: string;
+  assessmentId?: string;
+  modality?: string;
+  protocolVersion?: string;
+  durationMinutes?: number;
+  loadUnit?: LactateLoadUnit;
+  stabilityDeltaLimitMmol?: number;
+  maxLoadDeviationPercent?: number;
+  loadConstantVerified?: boolean;
+  actualLoadValues?: number[];
+  samples?: Array<{ timeMinutes: number; lactateMmol: number }>;
+  qualityFlags?: string[];
   load: number;
-  lactate10Mmol: number;
-  lactate20Mmol: number;
-  lactate30Mmol: number;
+  lactate10Mmol?: number;
+  lactate20Mmol?: number;
+  lactate30Mmol?: number;
   date?: string;
 }
 
 export interface EvaluatedConstantLoadTrial extends ConstantLoadLactateTrial {
-  drift10To30Mmol: number;
-  stable: boolean;
+  drift10To30Mmol: number | null;
+  slopeMmolLMin: number | null;
+  stability: 'stable' | 'unstable' | 'inconclusive' | 'invalid';
+  stable: boolean | null;
+  qualityFlags: string[];
 }
 
 export interface MeasuredMLSSResult {
   load: number | null;
   lactateMmol: number | null;
-  status: 'confirmed' | 'lower_bound' | 'not_found';
+  status: 'confirmed' | 'lower_bound' | 'not_found' | 'review';
+  upperLoad: number | null;
+  contradictoryTrials: boolean;
   trials: EvaluatedConstantLoadTrial[];
-}
-
-export interface EstimatedMLSSResult {
-  load: number;
-  lactateMmol: number;
-  drift10To30Mmol: number;
-  productionMmolLMin: number;
-  oxidationMmolLMin: number;
-  confidence: 'moderate' | 'low';
 }
 
 export interface MetabolicDemandSample {
@@ -258,64 +266,60 @@ export function estimateRecoveryMinutes(
   return recovered ? round(recovered.timeSeconds / 60, 1) : null;
 }
 
-/**
- * Estimates the highest load with <=1 mmol/L blood-lactate drift from minute 10
- * to minute 30. This mirrors the operational MLSS confirmation criterion, but
- * remains a model estimate until constant-load trials confirm it.
- */
-export function estimateMLSS(model: LactateDynamicsModel, resolution = 101): EstimatedMLSSResult {
-  let best: EstimatedMLSSResult | null = null;
-  const startLoad = model.input.maxLoad * 0.35;
-  const endLoad = model.input.maxLoad * 0.98;
-  const count = Math.max(20, resolution);
-
-  for (let index = 0; index < count; index += 1) {
-    const load = startLoad + (endLoad - startLoad) * index / (count - 1);
-    const simulation = simulateLactateProtocol(model, [{ label: 'MLSS', load, durationSeconds: 30 * 60 }], model.input.baselineLactateMmol, 10);
-    const at10 = simulation.find(point => point.timeSeconds >= 10 * 60);
-    const at30 = simulation[simulation.length - 1];
-    if (!at10 || !at30) continue;
-    const drift = at30.bloodLactateMmol - at10.bloodLactateMmol;
-    if (drift <= 1 && at30.bloodLactateMmol <= 25) {
-      const flux = lactateFluxAt(model, load, at30.metabolicLactateMmol);
-      best = {
-        load: round(load, 1),
-        lactateMmol: round(at30.bloodLactateMmol, 2),
-        drift10To30Mmol: round(drift, 2),
-        productionMmolLMin: flux.productionMmolLMin,
-        oxidationMmolLMin: flux.oxidationMmolLMin,
-        confidence: model.parameters.inferredThresholds ? 'low' : 'moderate',
-      };
-    }
-  }
-
-  if (best) return best;
-  return {
-    load: round(startLoad, 1),
-    lactateMmol: model.input.baselineLactateMmol,
-    drift10To30Mmol: 0,
-    productionMmolLMin: 0,
-    oxidationMmolLMin: 0,
-    confidence: 'low',
-  };
-}
-
+/** Evaluates direct constant-load confirmation trials. Equality at 1.0 is unstable. */
 export function evaluateConstantLoadTrials(trials: ConstantLoadLactateTrial[]): MeasuredMLSSResult {
-  const evaluated = trials
-    .filter(trial => trial.load > 0 && [trial.lactate10Mmol, trial.lactate20Mmol, trial.lactate30Mmol].every(value => value >= 0.3 && value <= 25))
-    .map(trial => {
-      const drift = trial.lactate30Mmol - trial.lactate10Mmol;
-      return { ...trial, drift10To30Mmol: round(drift, 2), stable: drift <= 1 };
-    })
-    .sort((a, b) => a.load - b.load);
-  const stable = evaluated.filter(trial => trial.stable);
-  if (!stable.length) return { load: null, lactateMmol: null, status: 'not_found', trials: evaluated };
+  const evaluated = trials.map(trial => {
+    const flags = [...(trial.qualityFlags ?? [])];
+    const duration = trial.durationMinutes ?? 30;
+    const limit = trial.stabilityDeltaLimitMmol ?? 1;
+    const samples = trial.samples ?? [
+      ...(trial.lactate10Mmol == null ? [] : [{ timeMinutes: 10, lactateMmol: trial.lactate10Mmol }]),
+      ...(trial.lactate20Mmol == null ? [] : [{ timeMinutes: 20, lactateMmol: trial.lactate20Mmol }]),
+      ...(trial.lactate30Mmol == null ? [] : [{ timeMinutes: 30, lactateMmol: trial.lactate30Mmol }]),
+    ];
+    const ordered = [...samples].sort((a, b) => a.timeMinutes - b.timeMinutes);
+    const invalidSamples = ordered.some(sample => !Number.isFinite(sample.timeMinutes) || !Number.isFinite(sample.lactateMmol) || sample.lactateMmol <= 0 || sample.lactateMmol > 25 || sample.timeMinutes < 0 || sample.timeMinutes > duration);
+    const duplicateTimes = ordered.some((sample, index) => index > 0 && sample.timeMinutes === ordered[index - 1].timeMinutes);
+    if (!(trial.load > 0) || !Number.isFinite(trial.load) || !Number.isFinite(duration) || duration < 30 || !Number.isFinite(limit) || limit <= 0 || invalidSamples || duplicateTimes) flags.push('invalid_protocol_or_measurement');
+    if (trial.actualLoadValues?.length) {
+      const deviationLimit = trial.maxLoadDeviationPercent ?? 3;
+      const deviation = Math.max(...trial.actualLoadValues.map(value => Math.abs(value - trial.load) / trial.load * 100));
+      if (trial.actualLoadValues.some(value => !Number.isFinite(value) || value <= 0) || deviation > deviationLimit) flags.push('load_not_constant');
+    }
+    if (trial.loadConstantVerified !== true) flags.push('load_constancy_unverified');
+    const at10 = ordered.find(sample => sample.timeMinutes === 10)?.lactateMmol;
+    const at30 = ordered.find(sample => sample.timeMinutes === 30)?.lactateMmol;
+    let stability: EvaluatedConstantLoadTrial['stability'] = 'inconclusive';
+    let drift: number | null = null;
+    if (flags.includes('invalid_protocol_or_measurement') || flags.includes('load_not_constant')) stability = 'invalid';
+    else if (at10 == null || at30 == null) flags.push('missing_required_10_or_30_min_sample');
+    else {
+      drift = round(at30 - at10, 2);
+      if (drift < -1) flags.push('unexpected_lactate_decline');
+      else if (trial.loadConstantVerified === true) stability = drift < limit ? 'stable' : 'unstable';
+    }
+    return {
+      ...trial,
+      qualityFlags: [...new Set(flags)],
+      drift10To30Mmol: drift,
+      slopeMmolLMin: drift == null ? null : round(drift / 20, 3),
+      stability,
+      stable: stability === 'stable' ? true : stability === 'unstable' ? false : null,
+    };
+  }).sort((a, b) => a.load - b.load);
+  const stable = evaluated.filter(trial => trial.stability === 'stable');
+  const unstable = evaluated.filter(trial => trial.stability === 'unstable');
+  if (!stable.length) return { load: null, lactateMmol: null, status: 'not_found', upperLoad: null, contradictoryTrials: false, trials: evaluated };
   const highestStable = stable[stable.length - 1];
-  const higherUnstable = evaluated.some(trial => trial.load > highestStable.load && !trial.stable);
+  const lowerUnstable = unstable.some(trial => trial.load <= highestStable.load);
+  const higherUnstable = unstable.filter(trial => trial.load > highestStable.load).sort((a, b) => a.load - b.load)[0];
+  const contradictoryTrials = lowerUnstable;
   return {
     load: highestStable.load,
-    lactateMmol: highestStable.lactate30Mmol,
-    status: higherUnstable ? 'confirmed' : 'lower_bound',
+    lactateMmol: highestStable.samples?.find(sample => sample.timeMinutes === 30)?.lactateMmol ?? highestStable.lactate30Mmol ?? null,
+    status: contradictoryTrials ? 'review' : higherUnstable ? 'confirmed' : 'lower_bound',
+    upperLoad: higherUnstable?.load ?? null,
+    contradictoryTrials,
     trials: evaluated,
   };
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMetabolicDemandCurve,
   createLactateDynamicsModel,
-  estimateMLSS,
   estimateRecoveryMinutes,
   evaluateConstantLoadTrials,
   lactateFluxAt,
@@ -33,20 +32,34 @@ describe('dynamic lactate model', () => {
     expect(estimateRecoveryMinutes(model, peak, 150)).not.toBeNull();
   });
 
-  it('estimates MLSS with the 30-minute stability criterion', () => {
-    const mlss = estimateMLSS(model);
-    expect(mlss.load).toBeGreaterThan(250);
-    expect(mlss.load).toBeLessThan(380);
-    expect(mlss.drift10To30Mmol).toBeLessThanOrEqual(1);
+  it('applies the versioned 30-minute criterion and rejects incomplete or invalid efforts', () => {
+    const exactLimit = evaluateConstantLoadTrials([{ id: 'exact', load: 250, durationMinutes: 30, loadConstantVerified: true, stabilityDeltaLimitMmol: 1, samples: [{ timeMinutes: 10, lactateMmol: 3.2 }, { timeMinutes: 30, lactateMmol: 4.2 }] }]);
+    const missingSample = evaluateConstantLoadTrials([{ id: 'missing', load: 250, durationMinutes: 30, samples: [{ timeMinutes: 5, lactateMmol: 2 }, { timeMinutes: 30, lactateMmol: 3 }] }]);
+    const shortEffort = evaluateConstantLoadTrials([{ id: 'short', load: 250, durationMinutes: 25, samples: [{ timeMinutes: 10, lactateMmol: 3 }, { timeMinutes: 30, lactateMmol: 4 }] }]);
+    const decline = evaluateConstantLoadTrials([{ id: 'decline', load: 250, durationMinutes: 30, loadConstantVerified: true, samples: [{ timeMinutes: 10, lactateMmol: 5 }, { timeMinutes: 30, lactateMmol: 3 }] }]);
+    const unstableLoad = evaluateConstantLoadTrials([{ id: 'variable', load: 250, durationMinutes: 30, loadConstantVerified: true, actualLoadValues: [250, 270], maxLoadDeviationPercent: 3, samples: [{ timeMinutes: 10, lactateMmol: 3 }, { timeMinutes: 30, lactateMmol: 4 }] }]);
+    expect(exactLimit.trials[0].stability).toBe('unstable');
+    expect(missingSample.trials[0].stability).toBe('inconclusive');
+    expect(shortEffort.trials[0].stability).toBe('invalid');
+    expect(decline.trials[0].qualityFlags).toContain('unexpected_lactate_decline');
+    expect(unstableLoad.trials[0].stability).toBe('invalid');
   });
 
   it('only confirms measured MLSS when a higher unstable trial brackets it', () => {
     const result = evaluateConstantLoadTrials([
-      { id: 'stable', load: 300, lactate10Mmol: 3.2, lactate20Mmol: 3.5, lactate30Mmol: 3.9 },
-      { id: 'unstable', load: 315, lactate10Mmol: 3.8, lactate20Mmol: 4.5, lactate30Mmol: 5.2 },
+      { id: 'stable', load: 300, loadConstantVerified: true, lactate10Mmol: 3.2, lactate20Mmol: 3.5, lactate30Mmol: 3.9 },
+      { id: 'unstable', load: 315, loadConstantVerified: true, lactate10Mmol: 3.8, lactate20Mmol: 4.5, lactate30Mmol: 5.2 },
     ]);
     expect(result.status).toBe('confirmed');
     expect(result.load).toBe(300);
+    expect(result.upperLoad).toBe(315);
+    expect(result.contradictoryTrials).toBe(false);
+    const contradiction = evaluateConstantLoadTrials([
+      { id: 'unstable-low', load: 290, loadConstantVerified: true, lactate10Mmol: 3, lactate20Mmol: 4, lactate30Mmol: 5 },
+      { id: 'stable-high', load: 300, loadConstantVerified: true, lactate10Mmol: 3.2, lactate20Mmol: 3.5, lactate30Mmol: 3.9 },
+    ]);
+    expect(contradiction.status).toBe('review');
+    expect(contradiction.contradictoryTrials).toBe(true);
   });
 
   it('separates oxygen demand, uptake and anaerobic contribution', () => {
