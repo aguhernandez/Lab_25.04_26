@@ -2,7 +2,7 @@ import type { Athlete, Test, TestDataPoint, ThresholdOverrides } from '../types'
 
 /** Bump whenever a physiology formula or its interpretation changes. */
 export const PHYSIOLOGY_ALGORITHM_ID = 'asciende-physiology-core';
-export const PHYSIOLOGY_ALGORITHM_VERSION = '1.1.1';
+export const PHYSIOLOGY_ALGORITHM_VERSION = '1.2.0';
 
 export interface PairedObservation {
   subjectId: string;
@@ -41,7 +41,10 @@ const T_975 = [
 
 function t975(degreesOfFreedom: number): number {
   if (degreesOfFreedom <= 0) return Number.NaN;
-  return degreesOfFreedom < T_975.length ? T_975[degreesOfFreedom] : 1.96;
+  if (degreesOfFreedom < T_975.length) return T_975[degreesOfFreedom];
+  // Cornish–Fisher expansion, accurate above 30 df.
+  const z = 1.959963984540054, d = degreesOfFreedom;
+  return z + (z ** 3 + z) / (4 * d) + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * d ** 2) + (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z) / (384 * d ** 3);
 }
 
 function mean(values: number[]): number {
@@ -58,7 +61,9 @@ function sampleSd(values: number[], center = mean(values)): number {
  * Acceptability limits must be set by the study team before looking at results.
  */
 export function calculateBlandAltman(observations: PairedObservation[]): BlandAltmanSummary | null {
-  const valid = observations.filter(row => Number.isFinite(row.candidate) && Number.isFinite(row.reference));
+  if (observations.some(r => !r.subjectId.trim()) || new Set(observations.map(r => r.subjectId.trim())).size !== observations.length) return null;
+  if (observations.some(row => !Number.isFinite(row.candidate) || !Number.isFinite(row.reference))) return null;
+  const valid = observations;
   if (valid.length < 2) return null;
 
   const differences = valid.map(row => row.candidate - row.reference);
@@ -87,7 +92,9 @@ export function calculateBlandAltman(observations: PairedObservation[]): BlandAl
 
 /** Summarizes within-athlete test–retest error from one pair per athlete. */
 export function calculateTestRetest(observations: PairedObservation[]): TestRetestSummary | null {
-  const valid = observations.filter(row => Number.isFinite(row.candidate) && Number.isFinite(row.reference));
+  if (observations.some(r => !r.subjectId.trim()) || new Set(observations.map(r => r.subjectId.trim())).size !== observations.length) return null;
+  if (observations.some(row => !Number.isFinite(row.candidate) || !Number.isFinite(row.reference))) return null;
+  const valid = observations;
   if (valid.length < 2) return null;
 
   const differences = valid.map(row => row.candidate - row.reference);

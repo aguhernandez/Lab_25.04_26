@@ -1,4 +1,4 @@
-import type { LactateThresholdConfig, TestDataPoint } from '../types';
+import type { LactateThresholdConfig, Sport, TestDataPoint } from '../types';
 import { fuelFromGasExchange } from './metabolicFuel';
 
 export type LactateIssueSeverity = 'error' | 'warning' | 'info';
@@ -75,6 +75,7 @@ export interface LongitudinalLactateSession {
   date: string;
   points: TestDataPoint[];
   weightKg?: number | null;
+  sport?: Sport;
 }
 
 export interface NormalizedLactateSession {
@@ -90,13 +91,14 @@ export const DEFAULT_LACTATE_CONFIG: LactateThresholdConfig = {
   iatDeltaMmol: 1.5,
 };
 
-export function parseSpeedKmh(value: string | null | undefined): number | null {
+export function parseSpeedKmh(value: string | null | undefined, sport?: Sport): number | null {
   if (!value) return null;
   const text = value.trim();
   const pace = text.match(/^(\d+):([0-5]\d(?:[.,]\d+)?)\s*(?:\/\s*(km|100\s*m))?$/i);
   if (pace) {
     const minutes = Number(pace[1]) + Number(pace[2].replace(',', '.')) / 60;
-    const distanceKm = pace[3]?.replace(/\s/g, '').toLowerCase() === '100m' ? 0.1 : 1;
+    const suffix = pace[3]?.replace(/\s/g, '').toLowerCase();
+    const distanceKm = suffix === '100m' || (!suffix && sport === 'swimming') ? 0.1 : 1;
     return minutes > 0 ? 60 * distanceKm / minutes : null;
   }
   // Do not interpret an unrecognised pace (e.g. 5:99/km) as a numeric speed.
@@ -106,11 +108,11 @@ export function parseSpeedKmh(value: string | null | undefined): number | null {
   return Number.isFinite(speed) && speed > 0 ? speed : null;
 }
 
-function loadForPoint(point: TestDataPoint): Pick<LactateCurvePoint, 'load' | 'loadType' | 'speedKmh'> {
-  if (point.power_watts != null && Number(point.power_watts) > 0) {
-    return { load: Number(point.power_watts), loadType: 'power', speedKmh: parseSpeedKmh(point.speed_pace) };
+function loadForPoint(point: TestDataPoint, sport?: Sport): Pick<LactateCurvePoint, 'load' | 'loadType' | 'speedKmh'> {
+  if (sport !== 'running' && sport !== 'swimming' && point.power_watts != null && Number(point.power_watts) > 0) {
+    return { load: Number(point.power_watts), loadType: 'power', speedKmh: parseSpeedKmh(point.speed_pace, sport) };
   }
-  const speedKmh = parseSpeedKmh(point.speed_pace);
+  const speedKmh = parseSpeedKmh(point.speed_pace, sport);
   if (speedKmh != null) return { load: speedKmh, loadType: 'speed', speedKmh };
   return { load: Number(point.stage_number), loadType: 'stage', speedKmh: null };
 }
@@ -139,12 +141,12 @@ export function isotonicSmooth(values: number[]): number[] {
   return smoothed;
 }
 
-export function assessLactateQuality(points: TestDataPoint[]): LactateQualityReport {
+export function assessLactateQuality(points: TestDataPoint[], sport?: Sport): LactateQualityReport {
   const issues: LactateQualityIssue[] = [];
   const samples = points
     .filter(point => point.lactate != null && Number.isFinite(Number(point.lactate)))
     .sort((a, b) => Number(a.stage_number) - Number(b.stage_number));
-  const loads = samples.map(point => loadForPoint(point).load);
+  const loads = samples.map(point => loadForPoint(point, sport).load);
   const lactates = samples.map(point => Number(point.lactate));
 
   if (samples.length < 4) issues.push({ code: 'too_few_samples', severity: 'error', message: 'At least 4 valid lactate samples are required for threshold analysis.' });
@@ -237,7 +239,7 @@ function calculateFuelProfile(points: TestDataPoint[], weightKg?: number | null)
   });
 }
 
-export function analyzeLactate(points: TestDataPoint[], weightKg?: number | null, config: Partial<LactateThresholdConfig> = {}): LactateAnalysisResult {
+export function analyzeLactate(points: TestDataPoint[], weightKg?: number | null, config: Partial<LactateThresholdConfig> = {}, sport?: Sport): LactateAnalysisResult {
   const resolvedConfig: LactateThresholdConfig = {
     lt1Method: config.lt1Method ?? DEFAULT_LACTATE_CONFIG.lt1Method,
     lt2Method: config.lt2Method ?? DEFAULT_LACTATE_CONFIG.lt2Method,
@@ -245,7 +247,7 @@ export function analyzeLactate(points: TestDataPoint[], weightKg?: number | null
   };
   const valid = points
     .filter(point => point.lactate != null && Number.isFinite(Number(point.lactate)))
-    .map(point => ({ point, ...loadForPoint(point) }))
+    .map(point => ({ point, ...loadForPoint(point, sport) }))
     .sort((a, b) => a.load - b.load);
   const smooth = isotonicSmooth(valid.map(item => Number(item.point.lactate)));
   const curve: LactateCurvePoint[] = valid.map((item, index) => ({
@@ -256,7 +258,7 @@ export function analyzeLactate(points: TestDataPoint[], weightKg?: number | null
     vo2: item.point.vo2_ml_kg_min != null ? Number(item.point.vo2_ml_kg_min) : null,
     vco2: item.point.vco2_ml_kg_min != null ? Number(item.point.vco2_ml_kg_min) : null,
   }));
-  const quality = assessLactateQuality(points);
+  const quality = assessLactateQuality(points, sport);
   const baseline = curve.length ? Math.min(...curve.map(point => point.smoothed)) : null;
 
   let lt1: LactateThresholdResult | null = null;
@@ -283,7 +285,7 @@ export function normalizeLongitudinalLactate(sessions: LongitudinalLactateSessio
     const usePower = Boolean(session.weightKg && lactatePoints.some(point => point.power_watts != null));
     const normalized = lactatePoints.flatMap(point => {
       if (usePower && point.power_watts != null && session.weightKg) return [{ load: Number(point.power_watts) / session.weightKg, lactate: Number(point.lactate) }];
-      const speed = parseSpeedKmh(point.speed_pace);
+      const speed = parseSpeedKmh(point.speed_pace, session.sport);
       return speed != null ? [{ load: speed, lactate: Number(point.lactate) }] : [];
     });
     return normalized.length ? [{ id: session.id, date: session.date, basis: usePower ? 'W/kg' as const : 'km/h' as const, points: normalized }] : [];

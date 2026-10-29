@@ -79,3 +79,28 @@ describe('dynamic lactate model', () => {
     expect(hard.fatPercent + hard.carbohydratePercent).toBeCloseTo(100, 0);
   });
 });
+
+it('uses the same aerobic substrate equation as the shared engine', async () => {
+  const { fuelFromGasExchange } = await import('./metabolicFuel');
+  const curve = buildMetabolicDemandCurve(model, [{ load: 100, vo2MlKgMin: 20, vco2MlKgMin: 16 }], 36000, 2, 30, [100]);
+  const reference = fuelFromGasExchange(1.4, 1.12)!;
+  expect(curve.points[0].fatPercent).toBeCloseTo(reference.fatPercent, 10);
+  expect(curve.points[0].carbohydratePercent).toBeCloseTo(reference.carbohydratePercent, 10);
+});
+it('does not clip invalid measured RER into valid substrate proportions', () => {
+  const curve = buildMetabolicDemandCurve(model, [{ load: 100, vo2MlKgMin: 20, vco2MlKgMin: 25 }], 180, 2, 30, [100]);
+  expect(curve.points[0]).toMatchObject({ rer: null, fatPercent: null, carbohydratePercent: null, rerSource: 'unavailable' });
+});
+it('preserves a positive regression slope without shifting a negative intercept upward', () => {
+  const curve = buildMetabolicDemandCurve(model, [{ load: 100, vo2MlKgMin: 10 }, { load: 200, vo2MlKgMin: 30 }], 36000, 2, 30, [0, 150, 300]);
+  expect(curve.points[0].actualVo2MlKgMin).toBe(3.5);
+  expect(curve.points[1].actualVo2MlKgMin).toBe(20);
+  expect(curve.points[2].oxygenDemandMlKgMin).toBe(50);
+  for (const p of curve.points) expect(p.aerobicPercent + p.anaerobicPercent + p.unmetPercent).toBeCloseTo(100, 0);
+});
+it('converts model lactate production using the explicit ATP-equivalent assumptions', () => {
+  const point = buildMetabolicDemandCurve(model, [], 10, 2, 30, [400]).points[0];
+  const production = lactateFluxAt(model, 400, 4.1).productionMmolLMin;
+  const capacity = production * 0.5 * (1.5 / 5) * 22.414;
+  expect(point.anaerobicPercent).toBeCloseTo(Math.min(point.oxygenDeficitMlKgMin, capacity) / point.oxygenDemandMlKgMin * 100, 1);
+});

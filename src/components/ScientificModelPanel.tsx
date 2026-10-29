@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PhysiologyResults } from '../lib/physiology';
 import { PHYSIOLOGY_ALGORITHM_VERSION, summarizeInputSensitivity } from '../lib/scientificValidation';
 import type { Sport, TestDataPoint } from '../types';
@@ -25,8 +25,9 @@ function adjustSpeed(value: string | null | undefined, deltaKmh: number, sport?:
   return `${adjusted} km/h`;
 }
 
-function perturb(points: TestDataPoint[], kind: InputKind, delta: number, sport?: Sport): TestDataPoint[] {
-  return points.map(point => {
+function perturb(points: TestDataPoint[], kind: InputKind, delta: number, sport?: Sport, stageIndex?: number): TestDataPoint[] {
+  return points.map((point, index) => {
+    if (stageIndex != null && index !== stageIndex) return { ...point };
     if (kind === 'power' && point.power_watts != null) return { ...point, power_watts: Math.max(0, point.power_watts + delta) };
     if (kind === 'speed' && point.speed_pace) return { ...point, speed_pace: adjustSpeed(point.speed_pace, delta, sport) };
     if (kind === 'lactate' && point.lactate != null) return { ...point, lactate: Math.max(0, point.lactate + delta) };
@@ -37,7 +38,7 @@ function perturb(points: TestDataPoint[], kind: InputKind, delta: number, sport?
 }
 
 function outputMetrics(results: PhysiologyResults, sport?: Sport): Record<string, { value: number | null; unit: string }> {
-  const cycling = results.has_power || sport === 'cycling' || sport?.startsWith('cycling_');
+  const cycling = sport ? sport === 'cycling' || sport.startsWith('cycling_') : results.has_power;
   const load = (power: number | null, pace: string | null): number | null => cycling ? power : pace ? paceToKmh(pace, sport ?? 'running') : null;
   return {
     LT1: { value: load(results.lt1_power, results.lt1_pace), unit: cycling ? 'W' : 'km/h' },
@@ -59,6 +60,8 @@ export default function ScientificModelPanel({ results, points, language, savedA
   const [usedErrors, setUsedErrors] = useState(0);
   const baseMetrics = outputMetrics(results, sport);
 
+  useEffect(() => { setRows([]); setCalculated(false); setUnavailable(0); }, [points, results, sport, errorValues]);
+
   const runSensitivity = () => {
     const nextRows: SensitivityRow[] = [];
     let missing = 0;
@@ -70,12 +73,18 @@ export default function ScientificModelPanel({ results, points, language, savedA
       assumptions += 1;
       const lowMetrics = outputMetrics(calculate(perturb(points, kind, -error, sport)), sport);
       const highMetrics = outputMetrics(calculate(perturb(points, kind, error, sport)), sport);
+      const individualMetrics = points.flatMap((_, index) => [-error, error].map(delta => outputMetrics(calculate(perturb(points, kind, delta, sport, index)), sport)));
       Object.entries(scenarioBaseline).forEach(([label, baseline]) => {
-        if (baseline.value == null) return;
+        if (baseline.value == null || !Number.isFinite(baseline.value)) return;
         const lower = lowMetrics[label]?.value;
         const upper = highMetrics[label]?.value;
-        if (lower == null || upper == null) { missing += 1; return; }
+        if (lower == null || upper == null || !Number.isFinite(lower) || !Number.isFinite(upper)) { missing += 1; return; }
         const summary = summarizeInputSensitivity(baseline.value, lower, upper);
+        const sampled = individualMetrics.map(metrics => metrics[label]?.value);
+        missing += sampled.filter(v => v == null || !Number.isFinite(v)).length;
+        const valid = sampled.filter((v): v is number => v != null && Number.isFinite(v));
+        summary.minimum = Math.min(summary.minimum, ...valid);
+        summary.maximum = Math.max(summary.maximum, ...valid);
         nextRows.push({
           input: kind,
           label,
@@ -120,8 +129,8 @@ export default function ScientificModelPanel({ results, points, language, savedA
         <summary className="cursor-pointer text-xs font-bold text-gray-800 dark:text-gray-100">{en ? 'Explore measurement-error sensitivity' : 'Explorar sensibilidad al error de medición'}</summary>
         <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
           {en
-            ? 'Enter the accuracy from the device specification or calibration. The resulting range is a scenario sensitivity band, not a confidence interval.'
-            : 'Introduce la precisión indicada por el dispositivo o la calibración. Se recalcula la base con el algoritmo actual y cada error se aplica de forma sistemática a todas las etapas, uno por vez. El rango es sensibilidad por escenarios, no un intervalo de confianza.'}
+            ? 'Enter device accuracy or calibration error. We recalculate systematic offsets and one-stage-at-a-time perturbations for each input. These sampled scenarios are not a confidence interval or guaranteed worst-case bounds; combined errors and all possible patterns are not included.'
+            : 'Introduce el error del dispositivo o la calibración. Recalculamos desplazamientos sistemáticos y errores de una etapa por vez, para cada entrada. El rango reúne estos escenarios: no es un intervalo de confianza ni garantiza el peor caso; no incluye errores combinados ni todos los patrones posibles.'}
         </p>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           {results.has_power && <label className="text-[11px] text-gray-600 dark:text-gray-300">{en ? 'Power error ± W' : 'Error de potencia ± W'}<input aria-label={en ? 'Power error in watts' : 'Error de potencia en vatios'} className={`${inputClass} mt-1 block`} min="0" step="0.1" type="number" value={errorValues.power} onChange={event => setErrorValues(current => ({ ...current, power: event.target.value }))} /></label>}

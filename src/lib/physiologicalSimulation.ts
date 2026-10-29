@@ -76,13 +76,13 @@ export function buildPhysiologicalScenario(
     issues: [...baselineModel.issues],
     parameters: {
       ...baselineModel.parameters,
-      maxProductionMmolLMin: round(baselineModel.parameters.maxProductionMmolLMin * productionRatio),
-      maxOxidationMmolLMin: round(baselineModel.parameters.maxOxidationMmolLMin * absoluteVo2Ratio * distributionRatio),
-      distributionVolumeLitres: round(targetDistributionVolume, 1),
-      oxidationPeakLoad: round(baselineModel.parameters.oxidationPeakLoad * economyLoadFactor, 1),
-      oxidationWidth: round(baselineModel.parameters.oxidationWidth * economyLoadFactor, 1),
-      lt1Load: round(baselineModel.parameters.lt1Load * economyLoadFactor, 1),
-      lt2Load: round(baselineModel.parameters.lt2Load * economyLoadFactor, 1),
+      maxProductionMmolLMin: baselineModel.parameters.maxProductionMmolLMin * productionRatio,
+      maxOxidationMmolLMin: baselineModel.parameters.maxOxidationMmolLMin * absoluteVo2Ratio * distributionRatio,
+      distributionVolumeLitres: targetDistributionVolume,
+      oxidationPeakLoad: baselineModel.parameters.oxidationPeakLoad * economyLoadFactor,
+      oxidationWidth: baselineModel.parameters.oxidationWidth * economyLoadFactor,
+      lt1Load: baselineModel.parameters.lt1Load * economyLoadFactor,
+      lt2Load: baselineModel.parameters.lt2Load * economyLoadFactor,
     },
   };
 
@@ -94,7 +94,7 @@ export function buildPhysiologicalScenario(
     baselineRelativeVo2maxMlKgMin: round(baseline.vo2maxMlKgMin, 1),
     scenarioRelativeVo2maxMlKgMin: round(scenarioRelativeVo2, 1),
     baselineDistributionVolumeLitres: baselineModel.parameters.distributionVolumeLitres,
-    scenarioDistributionVolumeLitres: round(targetDistributionVolume, 1),
+    scenarioDistributionVolumeLitres: targetDistributionVolume,
     economyLoadFactor: round(economyLoadFactor, 3),
   };
 }

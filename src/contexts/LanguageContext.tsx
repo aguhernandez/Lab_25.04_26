@@ -629,7 +629,7 @@ const translations: Translations = {
 
   'sim.rec.reducePace': { en: 'Consider reducing target pace 3-5% to stay in a sustainable zone', es: 'Considera reducir el ritmo objetivo un 3-5% para estar en zona sostenible' },
   'sim.rec.drink': { en: 'Drink ~__ML__ml every 15 min to compensate sweating', es: 'Beber ~__ML__ml cada 15 min para compensar sudoración' },
-  'sim.rec.carbIntake': { en: 'Race carb intake: ~__RATE__g/h recommended', es: 'Ingesta de CHO durante carrera: ~__RATE__g/h recomendados' },
+  'sim.rec.carbIntake': { en: 'Estimated carbohydrate oxidation: ~__RATE__ g/h. Intake needs a separate nutrition plan.', es: 'Oxidación estimada de carbohidratos: ~__RATE__ g/h. La ingesta requiere un plan nutricional aparte.' },
   'sim.rec.acclimatize': { en: '10-14 day acclimatization before competing at this altitude', es: 'Aclimatación de 10-14 días antes de competir en esta altitud' },
   'sim.rec.precooling': { en: 'Pre-cooling (ice vest) and pace adjustment in first 5km in heat', es: 'Pre-cooling (chaleco de frío) y ajuste de ritmo primeros 5km en calor' },
   'sim.rec.gels': { en: 'Consume gel/carbs every 30-40 min to prevent bonk (estimated km __KM__)', es: 'Consumir gel/CHO cada 30-40 min para prevenir bonk (estimado km __KM__)' },

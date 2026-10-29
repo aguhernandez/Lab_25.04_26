@@ -340,7 +340,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
           />
 
           <ObjectiveZoneBuilder points={dataPoints} sport={test?.sport ?? 'cycling'} results={activeResults} language={language} />
-          {dataPoints.length > 0 && <ScientificModelPanel results={activeResults} points={dataPoints} language={language} savedAlgorithmVersion={null} saved={false} sport={test?.sport ?? 'cycling'} calculate={points => calculatePhysiology(athlete, points, test?.anthropometry_snapshot?.threshold_overrides)} />}
+          {dataPoints.length > 0 && <ScientificModelPanel results={activeResults} points={dataPoints} language={language} savedAlgorithmVersion={null} saved={false} sport={test?.sport ?? 'cycling'} calculate={points => calculatePhysiology({ ...athlete, sport: test?.sport ?? athlete.sport, weight_kg: test?.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg }, points, test?.anthropometry_snapshot?.threshold_overrides)} />}
 
           {(dataPoints.length > 0 || advancedMetrics) && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">

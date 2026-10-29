@@ -44,7 +44,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
   const [protocol, setProtocol] = useState<ProtocolStep[]>(DEFAULT_PROTOCOL);
   const [protocolLoaded, setProtocolLoaded] = useState(false);
   const hasPlan = protocolLoaded || Boolean(plannedStages?.length);
-  const advice = protocolAdvice(protocolLoaded ? protocol : plannedStages ?? [], samples, elapsed, hasPlan, Boolean(recordedCalibration || calibrationDate || samples.some(s => s.provenance?.calibrationDate)));
+  const advice = protocolAdvice(protocolLoaded ? protocol : plannedStages ?? [], samples, elapsed, hasPlan, [recordedCalibration, calibrationDate, ...samples.map(s => s.provenance?.calibrationDate)].some(date => Boolean(date) && Number.isFinite(Date.parse(date!)) && Date.parse(date!) <= Date.now()));
 
   // Column mapping state
   const [pendingFile, setPendingFile] = useState<File | null>(null);

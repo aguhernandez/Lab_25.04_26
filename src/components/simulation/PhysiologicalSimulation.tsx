@@ -15,6 +15,7 @@ import {
   type MetabolicDemandPoint,
 } from '../../lib/lactateDynamics';
 import { buildPhysiologicalScenario, findLactateBalanceLoad, type PhysiologicalScenarioResult } from '../../lib/physiologicalSimulation';
+import { invertObservedTarget } from '../../lib/objectiveZones';
 import { supabase } from '../../lib/supabase';
 import type { Athlete, TestDataPoint } from '../../types';
 
@@ -54,17 +55,17 @@ interface ObjectiveRow { id: ObjectiveId; label: string; target: string; load: n
 const inputClass = 'mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#5A4E6B] focus:outline-none focus:ring-2 focus:ring-[#5A4E6B]/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white';
 const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.98)', border: '1px solid #e5e7eb', borderRadius: '0.5rem', color: '#1f2937', fontSize: '12px' };
 
-function loadOf(point: TestDataPoint, unit: LactateLoadUnit): number | null {
+function loadOf(point: TestDataPoint, unit: LactateLoadUnit, sport?: Athlete['sport']): number | null {
   if (unit === 'W') {
     const value = point.power_watts == null ? NaN : Number(point.power_watts);
     return Number.isFinite(value) && value > 0 ? value : null;
   }
-  return parseSpeedKmh(point.speed_pace);
+  return parseSpeedKmh(point.speed_pace, sport);
 }
 
-function toStage(points: TestDataPoint[], unit: LactateLoadUnit): Stage[] {
+function toStage(points: TestDataPoint[], unit: LactateLoadUnit, sport?: Athlete['sport']): Stage[] {
   return points.flatMap(point => {
-    const load = loadOf(point, unit);
+    const load = loadOf(point, unit, sport);
     if (load == null) return [];
     return [{
       load,
@@ -89,15 +90,7 @@ function interpolateAtLoad(stages: Stage[], load: number, metric: 'hr' | 'vo2' |
 }
 
 function loadAtMeasuredTarget(stages: Stage[], values: Array<{ load: number; value: number }>, target: number): number | null {
-  const usable = values.filter(item => Number.isFinite(item.load) && Number.isFinite(item.value)).sort((a, b) => a.value - b.value);
-  if (usable.length < 2 || target < usable[0].value || target > usable[usable.length - 1].value) return null;
-  const upperIndex = usable.findIndex(item => item.value >= target);
-  if (upperIndex <= 0) return usable[0].load;
-  const lower = usable[upperIndex - 1];
-  const upper = usable[upperIndex];
-  const fraction = (target - lower.value) / Math.max(0.0001, upper.value - lower.value);
-  const load = lower.load + (upper.load - lower.load) * fraction;
-  return stages.length ? load : null;
+  return stages.length ? invertObservedTarget(values.map(v => ({ load: v.load, metric: v.value })), target) : null;
 }
 
 function nearestLoadForMetric<T>(items: T[], target: number, getMetric: (item: T) => number | null, getLoad: (item: T) => number | null): number | null {
@@ -225,20 +218,20 @@ export default function PhysiologicalSimulation() {
 
   const loadUnit: LactateLoadUnit | null = useMemo(() => {
     if (!loaded) return null;
-    const powerCount = loaded.points.filter(point => loadOf(point, 'W') != null).length;
-    const speedCount = loaded.points.filter(point => loadOf(point, 'km/h') != null).length;
+    const powerCount = loaded.points.filter(point => loadOf(point, 'W', loaded.test?.sport) != null).length;
+    const speedCount = loaded.points.filter(point => loadOf(point, 'km/h', loaded.test?.sport) != null).length;
     if (loaded.test?.sport === 'running' || loaded.test?.sport === 'swimming') return speedCount >= 2 ? 'km/h' : powerCount >= 2 ? 'W' : null;
     if (loaded.test?.sport === 'cycling') return powerCount >= 2 ? 'W' : speedCount >= 2 ? 'km/h' : null;
     return powerCount >= 2 ? 'W' : speedCount >= 2 ? 'km/h' : null;
   }, [loaded]);
 
-  const stages = useMemo(() => loaded && loadUnit ? toStage(loaded.points, loadUnit) : [], [loaded, loadUnit]);
+  const stages = useMemo(() => loaded && loadUnit ? toStage(loaded.points, loadUnit, loaded.test?.sport) : [], [loaded, loadUnit]);
   const massKg = loaded?.bodyMassKg ?? 0;
   const profileRelativeVo2 = Number(loaded?.result?.vo2max ?? loaded?.profile?.vo2max_relative_ml_kg_min ?? 0);
   const baselineAbsoluteVo2LMin = Number(loaded?.profile?.last_test_id === loaded?.test?.id && loaded?.profile?.vo2max_absolute_l_min
     ? loaded.profile?.vo2max_absolute_l_min
     : (profileRelativeVo2 > 0 && massKg > 0 ? profileRelativeVo2 * massKg / 1000 : 0));
-  const lactateAnalysis: LactateAnalysisResult | null = useMemo(() => loaded ? analyzeLactate(loaded.points, massKg) : null, [loaded, massKg]);
+  const lactateAnalysis: LactateAnalysisResult | null = useMemo(() => loaded ? analyzeLactate(loaded.points, massKg, {}, loaded.test?.sport) : null, [loaded, massKg]);
   const baselineLactate = useMemo(() => {
     const values = loaded?.points.flatMap(point => point.lactate == null ? [] : [Number(point.lactate)]).filter(value => value > 0 && Number.isFinite(value)) ?? [];
     return values.length ? Math.min(...values) : 1;
@@ -301,7 +294,7 @@ export default function PhysiologicalSimulation() {
   const baselineMetabolicSamples = useMemo(() => {
     if (!loaded || !loadUnit) return [];
     return loaded.points.flatMap(point => {
-      const load = loadOf(point, loadUnit);
+      const load = loadOf(point, loadUnit, loaded.test?.sport);
       if (load == null) return [];
       return [{ load, vo2MlKgMin: point.vo2_ml_kg_min, vco2MlKgMin: point.vco2_ml_kg_min }];
     });
@@ -368,7 +361,7 @@ export default function PhysiologicalSimulation() {
       ? measuredMLSS.status === 'confirmed' ? (en ? 'MLSS measured · confirmed' : 'MLSS medido · confirmado') : (en ? 'MLSS measured · lower bound' : 'MLSS medido · límite inferior')
       : (en ? 'LT2 proxy · no MLSS confirmation' : 'Proxy LT2 · sin confirmación MLSS');
     const selectedMlssLoad = mlssLoad == null ? null : mlssLoad * Number(zoneTargets.mlss) / 100;
-    const carbLoad = nearestLoadForMetric(lactateAnalysis?.fuelProfile ?? [], Number(zoneTargets.carbs), item => item.carbohydrateGramsPerMin, item => stages.find(stage => stage.stage === item.stage)?.load ?? null);
+    const carbLoad = nearestLoadForMetric(lactateAnalysis?.fuelProfile ?? [], Number(zoneTargets.carbs) / 60, item => item.carbohydrateGramsPerMin, item => stages.find(stage => stage.stage === item.stage)?.load ?? null);
     const demandForZones = baselineModel ? buildMetabolicDemandCurve(baselineModel, baselineMetabolicSamples, Math.max(10, Number(zoneDuration) || 180)) : null;
     const aerobicLoad = demandForZones ? nearestLoadForMetric(demandForZones.points, Number(zoneTargets.aerobic), item => item.aerobicPercent, item => item.load) : null;
     const accumulationLoad = baselineModel ? nearestLoadForMetric(
@@ -385,7 +378,7 @@ export default function PhysiologicalSimulation() {
       { id: 'lactate', label: en ? 'Lactate concentration' : 'Concentración de lactato', target: `${zoneTargets.lactate} mmol/L`, load: lactateLoad, source: en ? 'Interpolated from measured curve' : 'Interpolado en curva medida' },
       { id: 'vo2', label: '% VO₂max', target: `${zoneTargets.vo2}% · ${vo2Target.toFixed(1)} ml/kg/min`, load: vo2Load, source: en ? 'Measured VO₂ stages' : 'Etapas VO₂ medidas' },
       { id: 'mlss', label: '% MLSS', target: `${zoneTargets.mlss}%`, load: selectedMlssLoad, source: mlssSource },
-      { id: 'carbs', label: en ? 'Carbohydrate use' : 'Consumo de carbohidratos', target: `${zoneTargets.carbs} g/min${carbMax ? ` · max ${carbMax.carbohydrateGramsPerMin.toFixed(1)}` : ''}`, load: carbLoad, source: en ? 'Measured VO₂/VCO₂' : 'VO₂/VCO₂ medidos' },
+      { id: 'carbs', label: en ? 'Carbohydrate oxidation (not intake)' : 'Carbohidratos oxidados (no ingeridos)', target: `${zoneTargets.carbs} g/h${carbMax ? ` · max ${(carbMax.carbohydrateGramsPerMin * 60).toFixed(1)} g/h` : ''}`, load: carbLoad, source: en ? 'Measured VO₂/VCO₂' : 'VO₂/VCO₂ medidos' },
       { id: 'aerobic', label: en ? 'Aerobic contribution' : 'Contribución aeróbica', target: `${zoneTargets.aerobic}% · ${Math.max(10, Number(zoneDuration) || 180)} s`, load: aerobicLoad, source: en ? 'Model · test-calibrated when gases exist' : 'Modelo · calibrado con test si hay gases' },
       { id: 'accumulation', label: en ? 'Lactate accumulation rate' : 'Tasa de acumulación de lactato', target: `${zoneTargets.accumulation} mmol/L/min @ ${referenceLactate} mmol/L`, load: accumulationLoad, source: en ? 'Model estimate' : 'Estimación del modelo' },
     ];
@@ -452,7 +445,7 @@ export default function PhysiologicalSimulation() {
               <NumberField label={en ? 'Lactate target (mmol/L)' : 'Lactato objetivo (mmol/L)'} value={zoneTargets.lactate} onChange={value => updateZoneTarget('lactate', value)} min="0.5" max="20" step="0.1" />
               <NumberField label="% VO₂max" value={zoneTargets.vo2} onChange={value => updateZoneTarget('vo2', value)} min="1" max="120" step="1" />
               <NumberField label="% MLSS" value={zoneTargets.mlss} onChange={value => updateZoneTarget('mlss', value)} min="1" max="150" step="1" />
-              <NumberField label={en ? 'Carbohydrate (g/min)' : 'Carbohidratos (g/min)'} value={zoneTargets.carbs} onChange={value => updateZoneTarget('carbs', value)} min="0" max="200" step="0.5" />
+              <NumberField label={en ? 'Carbohydrate oxidation (g/h)' : 'Carbohidratos oxidados (g/h)'} value={zoneTargets.carbs} onChange={value => updateZoneTarget('carbs', value)} min="0" max="200" step="0.5" />
               <NumberField label={en ? 'Aerobic contribution (%)' : 'Contribución aeróbica (%)'} value={zoneTargets.aerobic} onChange={value => updateZoneTarget('aerobic', value)} min="0" max="100" step="1" />
               <NumberField label={en ? 'Net lactate rate (mmol/L/min)' : 'Tasa neta de lactato (mmol/L/min)'} value={zoneTargets.accumulation} onChange={value => updateZoneTarget('accumulation', value)} min="-5" max="10" step="0.05" />
               <NumberField label={en ? 'Effort duration for energy split (s)' : 'Duración para reparto energético (s)'} value={zoneDuration} onChange={setZoneDuration} min="10" max="3600" step="10" />
@@ -461,13 +454,13 @@ export default function PhysiologicalSimulation() {
             <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
               <table className="min-w-[1120px] w-full text-left text-xs">
                 <thead className="bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-300"><tr>
-                  <th className="px-3 py-3">{en ? 'Objective' : 'Objetivo'}</th><th className="px-3 py-3">{en ? 'Target' : 'Objetivo'}</th><th className="px-3 py-3">{en ? 'Power / speed' : 'Potencia / velocidad'}</th><th className="px-3 py-3">FC</th><th className="px-3 py-3">VO₂</th><th className="px-3 py-3">{en ? 'Lactate' : 'Lactato'}</th><th className="px-3 py-3">{en ? 'Fat / CHO' : 'Grasa / CHO'}</th><th className="px-3 py-3">{en ? 'Aerobic / anaerobic' : 'Aeróbico / anaeróbico'}</th><th className="px-3 py-3">{en ? 'Duration' : 'Duración'}</th><th className="px-3 py-3">{en ? 'Basis' : 'Base'}</th>
+                  <th className="px-3 py-3">{en ? 'Objective' : 'Objetivo'}</th><th className="px-3 py-3">{en ? 'Target' : 'Objetivo'}</th><th className="px-3 py-3">{en ? 'Power / speed' : 'Potencia / velocidad'}</th><th className="px-3 py-3">FC</th><th className="px-3 py-3">VO₂</th><th className="px-3 py-3">{en ? 'Lactate' : 'Lactato'}</th><th className="px-3 py-3">{en ? 'Fat / CHO' : 'Grasa / CHO'}</th><th className="px-3 py-3">{en ? 'Aerobic / glycolytic scenario' : 'Aeróbico / glucolítico estimado'}</th><th className="px-3 py-3">{en ? 'Duration' : 'Duración'}</th><th className="px-3 py-3">{en ? 'Basis' : 'Base'}</th>
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">{zoneTableRows.map(row => {
                   const targetLoad = row.load ?? 0;
                   const demand = row.load == null || !baselineModel ? null : buildMetabolicDemandCurve(baselineModel, baselineMetabolicSamples, Math.max(10, Number(zoneDuration) || 180)).points.reduce((best, point) => Math.abs(point.load - targetLoad) < Math.abs(best.load - targetLoad) ? point : best);
                   return <tr key={row.id} className="text-gray-700 dark:text-gray-200">
-                    <td className="px-3 py-3 font-semibold">{row.label}</td><td className="px-3 py-3">{row.target}</td><td className="px-3 py-3 font-semibold">{formatLoad(row.load, loadUnit)}</td><td className="px-3 py-3">{row.hr == null ? '—' : `${Math.round(row.hr)} bpm`}</td><td className="px-3 py-3">{row.vo2 == null ? '—' : `${row.vo2.toFixed(1)} ml/kg/min`}</td><td className="px-3 py-3">{row.lactate == null ? '—' : `${row.lactate.toFixed(2)} mmol/L`}</td><td className="px-3 py-3">{row.fuel ? `${row.fuel.fatGramsPerMin.toFixed(1)} / ${row.fuel.carbohydrateGramsPerMin.toFixed(1)} g/min` : '—'}</td><td className="px-3 py-3">{demand ? `${demand.aerobicPercent.toFixed(0)} / ${demand.anaerobicPercent.toFixed(0)}%` : '—'}</td><td className="px-3 py-3">{row.sustainable}</td><td className="px-3 py-3 text-gray-500">{row.source}</td>
+                    <td className="px-3 py-3 font-semibold">{row.label}</td><td className="px-3 py-3">{row.target}</td><td className="px-3 py-3 font-semibold">{formatLoad(row.load, loadUnit)}</td><td className="px-3 py-3">{row.hr == null ? '—' : `${Math.round(row.hr)} bpm`}</td><td className="px-3 py-3">{row.vo2 == null ? '—' : `${row.vo2.toFixed(1)} ml/kg/min`}</td><td className="px-3 py-3">{row.lactate == null ? '—' : `${row.lactate.toFixed(2)} mmol/L`}</td><td className="px-3 py-3">{row.fuel ? `${(row.fuel.fatGramsPerMin * 60).toFixed(1)} / ${(row.fuel.carbohydrateGramsPerMin * 60).toFixed(1)} g/h` : '—'}</td><td className="px-3 py-3">{demand ? `${demand.aerobicPercent.toFixed(0)} / ${demand.anaerobicPercent.toFixed(0)}%` : '—'}</td><td className="px-3 py-3">{row.sustainable}</td><td className="px-3 py-3 text-gray-500">{row.source}</td>
                   </tr>;
                 })}</tbody>
               </table>
@@ -563,13 +556,13 @@ function ComparisonMetric({ label, before, after, detail }: { label: string; bef
 }
 
 function DemandSummary({ title, point, en, scenario = false }: { title: string; point: MetabolicDemandPoint | null; en: boolean; scenario?: boolean }) {
-  const rerSource = scenario && point?.rerSource === 'measured'
+  const rerSource = point?.rerSource === 'unavailable' ? (en ? 'unavailable' : 'no disponible') : scenario && point?.rerSource === 'measured'
     ? (en ? 'measured at baseline; held constant' : 'medido en test base; se asume constante')
     : point?.rerSource === 'measured' ? (en ? 'measured' : 'medido') : (en ? 'estimated' : 'estimado');
   return <div className="space-y-2"><p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{title}</p>{point ? <>
     <div className="text-xs text-gray-500">VO₂ demand <strong className="text-gray-800 dark:text-gray-200">{point.oxygenDemandMlKgMin.toFixed(1)} ml/kg/min</strong></div>
-    <div className="text-xs text-gray-500">Aerobic / anaerobic <strong className="text-gray-800 dark:text-gray-200">{point.aerobicPercent.toFixed(0)} / {point.anaerobicPercent.toFixed(0)}%</strong></div>
-    <div className="text-xs text-gray-500">Deficit / unmet <strong className="text-gray-800 dark:text-gray-200">{point.oxygenDeficitMlKgMin.toFixed(1)} / {point.unmetPercent.toFixed(0)}%</strong></div>
-    <div className="text-xs text-gray-500">RER <strong className="text-gray-800 dark:text-gray-200">{point.rer.toFixed(2)} · {rerSource}</strong></div>
+    <div className="text-xs text-gray-500">Aeróbico / glucolítico estimado <strong className="text-gray-800 dark:text-gray-200">{point.aerobicPercent.toFixed(0)} / {point.anaerobicPercent.toFixed(0)}%</strong></div>
+    <div className="text-xs text-gray-500">Déficit O₂ / no cubierto <strong className="text-gray-800 dark:text-gray-200">{point.oxygenDeficitMlKgMin.toFixed(1)} ml/kg/min / {point.unmetPercent.toFixed(0)}%</strong></div>
+    <div className="text-xs text-gray-500">RER <strong className="text-gray-800 dark:text-gray-200">{point.rer?.toFixed(2) ?? '—'} · {rerSource}</strong></div>
   </> : <p className="text-xs text-gray-400">—</p>}</div>;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { TestDataPoint } from '../types';
+import type { Sport, TestDataPoint } from '../types';
 import type { PhysiologyResults } from '../lib/physiology';
 import { analyzeLactate, parseSpeedKmh } from '../lib/lactateAnalysis';
 import {
@@ -90,21 +90,21 @@ export default function MLSSMetabolicPanel({ testId, bodyMassKg, dataPoints, res
     const iatDeltaMmol = results.lactate_analysis?.config.iatDeltaMmol ?? 1.5;
     const baseConfig = { lt1Method: results.lactate_analysis?.config.lt1Method ?? 'baseline_plus_0_5' as const, iatDeltaMmol };
     return {
-      dmax: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'dmax' }).lt2,
-      obla: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'obla_4mmol' }).lt2,
-      iat: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'iat' }).lt2,
+      dmax: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'dmax' }, testContext.modality as Sport | undefined).lt2,
+      obla: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'obla_4mmol' }, testContext.modality as Sport | undefined).lt2,
+      iat: analyzeLactate(dataPoints, bodyMassKg, { ...baseConfig, lt2Method: 'iat' }, testContext.modality as Sport | undefined).lt2,
       active: results.lactate_analysis?.config.lt2Method ?? 'dmax',
       iatDeltaMmol,
     };
-  }, [dataPoints, bodyMassKg, results.lactate_analysis]);
+  }, [dataPoints, bodyMassKg, results.lactate_analysis, testContext.modality]);
 
   const measuredMLSS = useMemo(() => evaluateConstantLoadTrials(trials.filter(trial =>
     (!trial.modality || !testContext.modality || trial.modality === testContext.modality) && (!trial.loadUnit || trial.loadUnit === loadUnit))), [trials, testContext.modality, loadUnit]);
   const metabolicSamples = useMemo(() => dataPoints.flatMap(point => {
-    const load = loadUnit === 'W' ? Number(point.power_watts) : parseSpeedKmh(point.speed_pace);
+    const load = loadUnit === 'W' ? Number(point.power_watts) : parseSpeedKmh(point.speed_pace, testContext.modality as Sport | undefined);
     if (!(load != null && Number.isFinite(load) && load >= 0)) return [];
     return [{ load, vo2MlKgMin: point.vo2_ml_kg_min, vco2MlKgMin: point.vco2_ml_kg_min }];
-  }), [dataPoints, loadUnit]);
+  }), [dataPoints, loadUnit, testContext.modality]);
   const demand = useMemo(() => buildMetabolicDemandCurve(model, metabolicSamples, Math.max(10, Number(durationSeconds) || 180)), [model, metabolicSamples, durationSeconds]);
   const selectedDemand = useMemo(() => demand.points.reduce((best, point) => Math.abs(point.load - Number(selectedLoad)) < Math.abs(best.load - Number(selectedLoad)) ? point : best, demand.points[0]), [demand, selectedLoad]);
 
@@ -217,14 +217,14 @@ export default function MLSSMetabolicPanel({ testId, bodyMassKg, dataPoints, res
           <DemandMetric label="VO₂ alcanzado" value={selectedDemand.actualVo2MlKgMin} unit="ml/kg/min" />
           <DemandMetric label="Déficit O₂" value={selectedDemand.oxygenDeficitMlKgMin} unit="ml/kg/min" />
           <DemandMetric label="Aeróbico" value={selectedDemand.aerobicPercent} unit="%" color="text-blue-600" />
-          <DemandMetric label="Anaeróbico" value={selectedDemand.anaerobicPercent} unit="%" color="text-rose-600" />
+          <DemandMetric label="Glucolítico estimado" value={selectedDemand.anaerobicPercent} unit="%" color="text-rose-600" />
           <DemandMetric label="No cubierto" value={selectedDemand.unmetPercent} unit="%" color={selectedDemand.unmetPercent > 0 ? 'text-amber-600' : 'text-emerald-600'} />
         </div>
         <div className="mt-4 grid grid-cols-1 gap-5 xl:grid-cols-2">
           <ResponsiveContainer width="100%" height={290}><LineChart data={demand.points}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="load" stroke="#9ca3af" unit={` ${loadUnit}`} /><YAxis stroke="#9ca3af" unit=" ml/kg/min" /><Tooltip contentStyle={tooltipStyle} /><Legend />{proxyLoad != null && <ReferenceLine x={proxyLoad} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: `Proxy ${proxyMethod.toUpperCase()}`, fill: '#7c3aed', fontSize: 11 }} />}{measuredMLSS.load != null && <ReferenceLine x={measuredMLSS.load} stroke="#059669" strokeDasharray="2 2" label={{ value: 'MLSS medido', fill: '#059669', fontSize: 11 }} />}<ReferenceLine x={selectedDemand.load} stroke="#5A4E6B" strokeDasharray="2 3" /><Line type="monotone" dataKey="oxygenDemandMlKgMin" name="Demanda O₂" stroke="#111827" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="actualVo2MlKgMin" name="VO₂ alcanzado" stroke="#2563eb" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="oxygenDeficitMlKgMin" name="Déficit O₂" stroke="#e11d48" strokeDasharray="5 3" dot={false} /></LineChart></ResponsiveContainer>
-          <ResponsiveContainer width="100%" height={290}><LineChart data={demand.points}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="load" stroke="#9ca3af" unit={` ${loadUnit}`} /><YAxis domain={[0, 100]} stroke="#9ca3af" unit="%" /><Tooltip contentStyle={tooltipStyle} /><Legend /><ReferenceLine x={selectedDemand.load} stroke="#5A4E6B" strokeDasharray="2 3" /><Line type="monotone" dataKey="aerobicPercent" name="Aeróbico" stroke="#2563eb" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="anaerobicPercent" name="Anaeróbico" stroke="#e11d48" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="fatPercent" name="Grasas" stroke="#10b981" strokeDasharray="5 3" dot={false} /><Line type="monotone" dataKey="carbohydratePercent" name="Carbohidratos" stroke="#f59e0b" strokeDasharray="5 3" dot={false} /></LineChart></ResponsiveContainer>
+          <ResponsiveContainer width="100%" height={290}><LineChart data={demand.points}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="load" stroke="#9ca3af" unit={` ${loadUnit}`} /><YAxis domain={[0, 100]} stroke="#9ca3af" unit="%" /><Tooltip contentStyle={tooltipStyle} /><Legend /><ReferenceLine x={selectedDemand.load} stroke="#5A4E6B" strokeDasharray="2 3" /><Line type="monotone" dataKey="aerobicPercent" name="Aeróbico" stroke="#2563eb" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="anaerobicPercent" name="Glucolítico estimado" stroke="#e11d48" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="fatPercent" name="Grasas" stroke="#10b981" strokeDasharray="5 3" dot={false} /><Line type="monotone" dataKey="carbohydratePercent" name="Carbohidratos" stroke="#f59e0b" strokeDasharray="5 3" dot={false} /></LineChart></ResponsiveContainer>
         </div>
-        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Demanda: {demand.demandSource === 'measured_regression' ? 'regresión de VO₂ medido frente a carga' : 'inferida por VO₂max y carga máxima'} · RER en la carga seleccionada: {selectedDemand.rer.toFixed(2)} ({selectedDemand.rerSource === 'measured' ? 'VO₂/VCO₂ medidos' : 'estimado'}) · constante temporal VO₂: {demand.vo2TimeConstantSeconds}s. Los porcentajes son equivalentes energéticos del modelo, no calorimetría directa durante el esfuerzo.</p>
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Demanda: {demand.demandSource === 'measured_regression' ? 'regresión de VO₂ medido frente a carga' : 'inferida por VO₂max y carga máxima'} · RER en la carga seleccionada: {selectedDemand.rer?.toFixed(2) ?? '—'} ({selectedDemand.rerSource === 'unavailable' ? 'no disponible' : selectedDemand.rerSource === 'measured' ? 'interpolado de gases por etapa' : 'estimado'}) · constante temporal VO₂: {demand.vo2TimeConstantSeconds}s. Reparto energético de escenario: la glucólisis usa 1,5 ATP/lactato y 5 ATP/O₂ como supuestos; no incluye fosfocreatina ni equivale a calorimetría durante el esfuerzo. Grasa/CHO corresponden solo a oxidación aeróbica.</p>
       </section>
     </div>
   );

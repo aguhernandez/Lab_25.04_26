@@ -51,3 +51,16 @@ it('rejects invalid gas inputs and bounds the estimated scenario RER', () => {
   expect(estimatedRerFromVo2Percent(120)).toBe(1);
   expect(estimatedRerFromVo2Percent(-1)).toBeNull();
 });
+
+it('keeps the scenario RER continuous and monotonic at all piecewise boundaries', () => {
+  for (const boundary of [50, 70, 85]) {
+    expect(estimatedRerFromVo2Percent(boundary)! - estimatedRerFromVo2Percent(boundary - 1e-7)!).toBeGreaterThanOrEqual(0);
+    expect(estimatedRerFromVo2Percent(boundary)! - estimatedRerFromVo2Percent(boundary - 1e-7)!).toBeLessThan(1e-6);
+  }
+});
+
+it('excludes an invalid low RER from the FatMax selection as well as the fuel chart', () => {
+  const invalid = points.map((p, i) => i ? p : { ...p, vco2_ml_kg_min: p.vo2_ml_kg_min! * 0.4 });
+  const physiology = calculatePhysiology(athlete, invalid);
+  expect(physiology.fatmax_power).not.toBe(invalid[0].power_watts);
+});

@@ -13,3 +13,14 @@ it('asks for a scheduled sample when absent and clears it after recording', () =
 });
 it('warns when a configured stage is short', () => expect(protocolAdvice([{ ...steps[0], target_duration_s: 90 }], [], 0, true, true).map(x => x.code)).toContain('short_0'));
 it('suggests more data after finishing with insufficient samples', () => expect(protocolAdvice(steps, [sample], 180, true, true).map(x => x.code)).toContain('additional'));
+
+it('does not let future or early baseline samples satisfy an end-stage sample', () => {
+  expect(protocolAdvice(steps, [{ ...sample, timestamp_s: 175 }], 170, true, true).map(x => x.code)).toContain('pending_0');
+  expect(protocolAdvice(steps, [{ ...sample, timestamp_s: 10 }], 170, true, true).map(x => x.code)).toContain('pending_0');
+});
+it('does not count duplicated samples from one stage as four sampled stages', () => {
+  expect(protocolAdvice(steps, [sample, sample, sample, sample], 180, true, true).map(x => x.code)).toContain('additional');
+});
+it('does not request extra lactate tests for a protocol with no lactate schedule', () => {
+  expect(protocolAdvice([{ ...steps[0], lactate_at_s: null }], [], 180, true, true).map(x => x.code)).not.toContain('additional');
+});

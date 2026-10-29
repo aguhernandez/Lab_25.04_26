@@ -54,3 +54,15 @@ describe('scientific validation summaries', () => {
     });
   });
 });
+
+it('uses finite-df Student intervals above 30 df instead of jumping to a normal interval', () => {
+  const rows = Array.from({ length: 32 }, (_, i) => ({ subjectId: String(i), candidate: 100 + i % 3, reference: 100 }));
+  const s = calculateBlandAltman(rows)!;
+  expect((s.biasCi95[1] - s.bias) * Math.sqrt(32) / s.standardDeviationOfDifferences).toBeCloseTo(2.039513446, 5);
+});
+it('rejects repeated participants and non-finite measurements in statistical cohorts', () => {
+  const duplicate = [{ subjectId: 'a', candidate: 1, reference: 2 }, { subjectId: 'a', candidate: 3, reference: 2 }];
+  expect(calculateBlandAltman(duplicate)).toBeNull();
+  expect(calculateTestRetest(duplicate)).toBeNull();
+  expect(calculateBlandAltman([...duplicate.slice(0, 1), { subjectId: 'b', candidate: NaN, reference: 1 }])).toBeNull();
+});

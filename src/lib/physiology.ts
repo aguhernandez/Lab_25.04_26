@@ -1,5 +1,5 @@
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
-import { paceToKmh, buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
+import { kmhToPace, paceToKmh, buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
 import { analyzeLactate, type LactateAnalysisResult } from './lactateAnalysis';
 import { calculateMovementEconomy } from './movementEconomy';
@@ -135,7 +135,7 @@ export function calculatePhysiology(
     lt1Method: overrides?.lactate_lt1_method,
     lt2Method: overrides?.lactate_lt2_method,
     iatDeltaMmol: overrides?.lactate_iat_delta_mmol,
-  }) : null;
+  }, athlete.sport) : null;
   const valid_lactate_for_thresholds = lactate_analysis?.quality.validForThresholds ?? false;
 
   const leanBodyMassKg = calculateLeanBodyMass(athlete);
@@ -171,7 +171,7 @@ export function calculatePhysiology(
     const threshold = lactate_analysis.lt1;
     lt1_hr = threshold.heartRate;
     lt1_power = threshold.power;
-    lt1_pace = threshold.pace;
+    lt1_pace = threshold.speedKmh ? kmhToPace(threshold.speedKmh, athlete.sport) : threshold.pace;
     lt1_vo2 = threshold.vo2 && athlete.weight_kg ? convertVO2ToAbsolute(threshold.vo2, athlete.weight_kg) : null;
     lt1_percent_vo2max = threshold.vo2 && vo2max ? Math.round((threshold.vo2 / vo2max) * 1000) / 10 : null;
     lt1_percent_hrmax = Math.round((threshold.heartRate / hrmax) * 1000) / 10;
@@ -181,7 +181,7 @@ export function calculatePhysiology(
     const threshold = lactate_analysis.lt2;
     lt2_hr = threshold.heartRate;
     lt2_power = threshold.power;
-    lt2_pace = threshold.pace;
+    lt2_pace = threshold.speedKmh ? kmhToPace(threshold.speedKmh, athlete.sport) : threshold.pace;
     lt2_vo2 = threshold.vo2 && athlete.weight_kg ? convertVO2ToAbsolute(threshold.vo2, athlete.weight_kg) : null;
     lt2_percent_vo2max = threshold.vo2 && vo2max ? Math.round((threshold.vo2 / vo2max) * 1000) / 10 : null;
     lt2_percent_hrmax = Math.round((threshold.heartRate / hrmax) * 1000) / 10;
@@ -852,7 +852,9 @@ function calculateFatMax(
       if (!point.vo2_ml_kg_min || !point.vco2_ml_kg_min) continue;
       const vo2_L_min = (point.vo2_ml_kg_min * (weightKg ?? 1)) / 1000;
       const vco2_L_min = (point.vco2_ml_kg_min * (weightKg ?? 1)) / 1000;
-      const fatOxidation = 1.695 * vo2_L_min - 1.701 * vco2_L_min;
+      const fuel = fuelFromGasExchange(vo2_L_min, vco2_L_min);
+      if (!fuel) continue;
+      const fatOxidation = fuel.fatGramsPerMin;
       if (fatOxidation > maxFatOxidation) {
         maxFatOxidation = fatOxidation;
         fatMaxPoint = point;

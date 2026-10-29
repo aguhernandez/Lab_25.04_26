@@ -26,3 +26,21 @@ it('converts swimming pace with 100m units to speed', () => {
   const result = calculateObjectiveZone(swim, 'swimming', 20, true, { ...target, minimum: 75, maximum: 75 });
   expect(result).toMatchObject({ unit: 'km/h', minLoad: 3.5 });
 });
+
+it('uses duration and explicit initial VO2 in the endpoint kinetic scenario', () => {
+  const scenario = { ...target, durationSeconds: 60, responseMode: 'end_vo2' as const, tauSeconds: 30, initialVo2Percent: 10, minimum: 70, maximum: 70 };
+  const result = calculateObjectiveZone(points, 'cycling', 40, true, scenario);
+  if ('error' in result) throw Error(result.error);
+  expect(result.minLoad).toBeCloseTo((4 + (28 - 4) / (1 - Math.exp(-2))) * 10, 8);
+  expect(calculateObjectiveZone(points, 'cycling', 40, true, { ...scenario, durationSeconds: 1 })).toEqual({ error: 'unreachable_target' });
+});
+it('rejects multiple crossings but allows a unique crossing despite unrelated noise', () => {
+  const curve = points.map((p, i) => ({ ...p, lactate: [1, 3, 2, 4][i] }));
+  expect(calculateObjectiveZone(curve, 'cycling', null, false, { ...target, kind: 'lactate', minimum: 2.5, maximum: 2.5 })).toEqual({ error: 'ambiguous_curve' });
+  expect(calculateObjectiveZone(curve, 'cycling', null, false, { ...target, kind: 'lactate', minimum: 3.5, maximum: 3.5 })).toMatchObject({ minLoad: 375, maxLoad: 375 });
+});
+
+it('rejects a range whose interior includes ambiguous crossings', () => {
+  const curve = points.map((p, i) => ({ ...p, lactate: [1, 3, 2, 4][i] }));
+  expect(calculateObjectiveZone(curve, 'cycling', null, false, { ...target, kind: 'lactate', minimum: 1.5, maximum: 3.5 })).toEqual({ error: 'ambiguous_curve' });
+});
