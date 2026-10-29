@@ -62,21 +62,39 @@ function extractUserFromPayload(payload: Record<string, unknown>): HubUser | nul
   };
 }
 
+const SSO_EXCHANGE_URL = 'https://ngkcbygyoobqhlmlnuvl.supabase.co/functions/v1/exchange-satellite-code';
+
+async function exchangeSatelliteCode(code: string): Promise<string> {
+  const response = await fetch(SSO_EXCHANGE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data?.token) throw new Error(data?.error || 'Could not exchange Hub SSO code');
+  return data.token as string;
+}
+
 export function useSatelliteAuth() {
   const [user, setUser] = useState<HubUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get('session_token');
-    if (tokenFromUrl) {
-      console.log('[Auth] session_token found in URL, storing...');
-      localStorage.setItem(SESSION_TOKEN_KEY, tokenFromUrl);
-      const cleanUrl = window.location.href.split('?')[0];
-      window.history.replaceState({}, '', cleanUrl);
-    }
-    checkAuth();
+    void (async () => {
+      try {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const code = hashParams.get('sso_code');
+        if (code) {
+          // Remove the one-time code before any network request or third-party resource loads.
+          window.history.replaceState({}, '', \`${window.location.pathname}${window.location.search}\`);
+          localStorage.setItem(SESSION_TOKEN_KEY, await exchangeSatelliteCode(code));
+        }
+      } catch (error) {
+        setAuthError(error instanceof Error ? error.message : String(error));
+      }
+      await checkAuth();
+    })();
   }, []);
 
   const checkAuth = async () => {
