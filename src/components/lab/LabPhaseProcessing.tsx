@@ -1,3 +1,4 @@
+import { measuredBreathPeak } from '../../lib/labImportPipeline';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { LabSession } from '../../lib/labSession';
@@ -84,6 +85,8 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         duration_seconds: Number(point.duration_seconds),
         heart_rate: Number(point.heart_rate),
       }));
+      const breathStages = session.dataPoints;
+      dataPoints.forEach(p => { const staged = breathStages.find(s => s.stage_number === p.stage_number); if (staged?.vco2_ml_kg_min != null) p.vco2_ml_kg_min = staged.vco2_ml_kg_min; });
       const protocolMetadata = (testData?.protocol_metadata ?? {}) as Record<string, any>;
       const protocolValidation = protocolMetadata.validation;
       const protocolOnlyDataIsValid = Boolean(
@@ -122,7 +125,7 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         }
       }
 
-      const athleteForCalc = { ...athlete };
+      const athleteForCalc = { ...athlete, sport: session.sport ?? athlete.sport };
       if (testData?.anthropometry_snapshot) {
         const snap = testData.anthropometry_snapshot;
         athleteForCalc.weight_kg = snap.weight_kg;
@@ -151,7 +154,8 @@ export default function LabPhaseProcessing({ session, onUpdate, onNext }: Props)
         athleteForCalc,
         dataPoints,
         undefined,
-        breathVT
+        breathVT,
+        { testType: session.testType ?? undefined, protocolId: session.protocolId, measuredVo2Peak: measuredBreathPeak(session.breathData ?? []), sport: session.sport ?? athlete.sport }
       );
       markStep(1);
       await delay(350);

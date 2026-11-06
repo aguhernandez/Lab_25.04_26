@@ -2,7 +2,7 @@ import type { Athlete, Test, TestDataPoint, ThresholdOverrides } from '../types'
 
 /** Bump whenever a physiology formula or its interpretation changes. */
 export const PHYSIOLOGY_ALGORITHM_ID = 'asciende-physiology-core';
-export const PHYSIOLOGY_ALGORITHM_VERSION = '1.2.0';
+export const PHYSIOLOGY_ALGORITHM_VERSION = '1.3.0';
 
 export interface PairedObservation {
   subjectId: string;

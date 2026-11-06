@@ -87,7 +87,7 @@ export function useSatelliteAuth() {
         const code = hashParams.get('sso_code');
         if (code) {
           // Remove the one-time code before any network request or third-party resource loads.
-          window.history.replaceState({}, '', \`${window.location.pathname}${window.location.search}\`);
+          window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
           localStorage.setItem(SESSION_TOKEN_KEY, await exchangeSatelliteCode(code));
         }
       } catch (error) {

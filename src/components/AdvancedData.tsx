@@ -1,3 +1,5 @@
+import { incrementalWorkStages, isIncremental } from '../lib/testInterpretation';
+import { paceToKmh } from '../lib/trainingZones';
 import { createContext, useContext, useMemo, useState } from 'react';
 import { TestDataPoint, AdvancedMetrics, Sport } from '../types';
 import { PhysiologyResults, computeStageHRFromTimeline, computeHRLoadRegression, STAGE_HR_WINDOW_S, type TimelineHRSample, type StageHRResult } from '../lib/physiology';
@@ -14,6 +16,8 @@ type AnalysisSurface = 'results' | 'dashboard';
 
 interface AdvancedDataProps {
   testId?: string;
+  testType?: import('../types').TestType;
+  protocolId?: string | null;
   bodyMassKg?: number | null;
   leanBodyMassKg?: number | null;
   sport?: Sport;
@@ -81,26 +85,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function parseSpeedKmh(value: string | null | undefined, sport?: Sport): number | null {
-  if (!value) return null;
-  if (sport === 'other') {
-    const unit = value.trim().match(/^(-?\d+(?:[.,]\d+)?)\s*(km\/h|kmh|m\/s)$/i);
-    if (!unit) return null;
-    const speed = Number(unit[1].replace(',', '.'));
-    return speed > 0 ? (unit[2].toLowerCase() === 'm/s' ? speed * 3.6 : speed) : null;
-  }
-  // Accept both a speed (12.5 km/h) and a running pace (5:00/km).
-  const pace = value.match(/^(\d+):([0-5]\d)(?:\.([0-9]+))?\s*(?:\/\s*(km|100\s*m))?$/i);
-  if (pace) {
-    const minutes = Number(pace[1]) + Number(`${pace[2]}.${pace[3] ?? '0'}`) / 60;
-    if (minutes <= 0) return null;
-    return sport === 'swimming' || pace[4]?.replace(/\s/g, '').toLowerCase() === '100m'
-      ? 6 / minutes
-      : 60 / minutes;
-  }
-  const match = value.match(/-?\d+(?:[.,]\d+)?/);
-  return match ? Number(match[0].replace(',', '.')) : null;
-}
+function parseSpeedKmh(value: string | null | undefined, sport: Sport = 'running'): number | null { return value ? paceToKmh(value,sport) : null; }
 
 function MetricTile({ 
   label, value, unit, note
@@ -126,7 +111,7 @@ function MetricTile({
   );
 }
 
-export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
+export default function AdvancedData({ testId, testType, protocolId, bodyMassKg, leanBodyMassKg, sport, dataPoints, results, advancedMetrics, timelineSamples, surface = 'dashboard' }: AdvancedDataProps) {
   const { language } = useLanguage();
   const en = language === 'en';
   const [activeTab, setActiveTab] = useState<Tab>('charts');
@@ -134,6 +119,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
   const [overlayKeys, setOverlayKeys] = useState<OverlayKey[]>(['lactate', 'hr', 'vo2']);
   const [overlayXAxis, setOverlayXAxis] = useState<'stage' | 'load'>('load');
   const sorted = [...dataPoints].sort((a, b) => a.stage_number - b.stage_number);
+  const workingStages = isIncremental({testType,protocolId}) ? new Set(incrementalWorkStages(sorted,sport ?? 'running').map(p=>p.stage_number)) : null;
 
   // Compute per-stage HR from timeline samples (last 30s window)
   const stageHR: StageHRResult[] = useMemo(() => {
@@ -164,7 +150,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
   const hrRegression = useMemo(() => {
     if (!hasLoad) return null;
     const loadValues = sorted.map(p => hasPower ? (p.power_watts ?? 0) : (parseSpeedKmh(p.speed_pace, sport) ?? 0));
-    const validPairs = loadValues.map((load, i) => ({ load, hr: effectiveHR[i] })).filter(p => p.load > 0 && p.hr > 0);
+    const validPairs = loadValues.map((load, i) => ({ load, hr: effectiveHR[i], stage: sorted[i].stage_number })).filter(p => p.load > 0 && p.hr > 0 && (!workingStages || workingStages.has(p.stage)));
     if (validPairs.length < 3) return null;
     return computeHRLoadRegression(validPairs.map(p => p.load), validPairs.map(p => p.hr), loadUnit);
   }, [sorted, effectiveHR, hasLoad, hasPower, loadUnit, sport]);
@@ -175,7 +161,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
 
   const chartData = sorted.map((p, i) => ({
     stage: p.stage_number,
-    hr: effectiveHR[i] ?? p.heart_rate,
+    hr: (effectiveHR[i] ?? p.heart_rate) > 0 ? effectiveHR[i] ?? p.heart_rate : null,
     hr_timeline: stageHR[i]?.hr_last_window ?? null,
     power: p.power_watts ?? null,
     load: hasPower ? (p.power_watts ?? null) : parseSpeedKmh(p.speed_pace, sport),
@@ -192,13 +178,14 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
     fat_pct: advancedMetrics?.energyProfile.percent_fat_vs_stage[i] ?? null,
     carb_pct: advancedMetrics?.energyProfile.percent_carb_vs_stage[i] ?? null,
   }));
+  const workloadChartData = chartData.filter(p => p.load != null && p.load > 0 && (!workingStages || workingStages.has(p.stage))).sort((a,b)=>a.load!-b.load! || a.stage-b.stage);
   const availableOverlaySeries = OVERLAY_SERIES.filter(series => chartData.some(point => point[series.key] != null));
   const selectedOverlaySeries = availableOverlaySeries.filter(series => overlayKeys.includes(series.key));
   const overlayRanges = new Map<OverlayKey, { min: number; max: number }>(selectedOverlaySeries.map(series => {
-    const values = chartData.flatMap(point => point[series.key] == null ? [] : [Number(point[series.key])]).filter(Number.isFinite);
+    const values = (overlayXAxis === 'load' ? workloadChartData : chartData).flatMap(point => point[series.key] == null ? [] : [Number(point[series.key])]).filter(Number.isFinite);
     return [series.key, { min: Math.min(...values), max: Math.max(...values) }];
   }));
-  const overlayData = chartData.map(point => {
+  const overlayData = (overlayXAxis === 'load' ? workloadChartData : chartData).map(point => {
     const scaled: Record<string, number | null> = { stage: point.stage, load: point.load, original: point as any };
     selectedOverlaySeries.forEach(series => {
       const value = point[series.key];
@@ -219,12 +206,12 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
     }
   };
 
-  const lactatePoints = chartData.filter(d => d.lactate != null && d.load != null);
+  const lactatePoints = workloadChartData.filter(d => d.lactate != null && d.load != null);
   const lactateCurve = results.lactate_analysis?.curve.map(point => ({
     load: point.load,
     measured: point.measured,
     smoothed: point.smoothed,
-  })) ?? lactatePoints.map(point => ({ load: Number(point.load), measured: Number(point.lactate), smoothed: Number(point.lactate) }));
+  })).filter(p=>p.load>0 && workloadChartData.some(c=>c.load===p.load)).sort((a,b)=>a.load-b.load) ?? lactatePoints.map(point => ({ load: Number(point.load), measured: Number(point.lactate), smoothed: Number(point.lactate) }));
   const lt1Point = results.lactate_analysis?.lt1 ?? null;
   const lt2Point = results.lactate_analysis?.lt2 ?? null;
 
@@ -296,7 +283,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
           <XAxis type="number" dataKey="load" name={hasPower ? (en ? 'Power' : 'Potencia') : (en ? 'Speed' : 'Velocidad')} unit={hasPower ? ' W' : ' km/h'} domain={['dataMin', 'dataMax']} label={{ value: hasPower ? (en ? 'Power (W)' : 'Potencia (W)') : (en ? 'Speed (km/h)' : 'Velocidad (km/h)'), position: 'insideBottom', offset: -5 }} stroke="#9ca3af" />
           <YAxis type="number" dataKey="hr" name={en ? 'Heart rate' : 'Frecuencia cardíaca'} unit=" bpm" label={{ value: en ? 'Heart rate (bpm)' : 'Frecuencia cardíaca (bpm)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
           <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, name]} />
-          <Scatter data={chartData.filter(point => point.load != null && point.hr != null)} name={en ? 'Measured stages' : 'Estadios medidos'} fill="#5A4E6B" />
+          <Scatter data={workloadChartData.filter(point => point.hr != null)} name={en ? 'Measured stages' : 'Estadios medidos'} fill="#5A4E6B" />
           {lt1Load != null && <ReferenceLine x={lt1Load} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: 'LT1', fill: '#b45309', fontSize: 11, position: 'top' }} />}
           {lt2Load != null && <ReferenceLine x={lt2Load} stroke="#dc2626" strokeDasharray="5 4" label={{ value: 'LT2', fill: '#dc2626', fontSize: 11, position: 'top' }} />}
           {hrMax > 0 && <ReferenceLine y={hrMax} stroke="#ef4444" strokeDasharray="2 4" strokeOpacity={0.4} label={{ value: `${en ? 'HR max' : 'FC máx.'} ${hrMax}`, fill: '#ef4444', fontSize: 10, position: 'right' }} />}
@@ -386,6 +373,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                 );
               })}
             </div>
+            <p className="mt-2 text-xs text-gray-500">{overlayXAxis === 'load' && workingStages && workloadChartData.length < chartData.length ? (en ? 'Rest and recovery are excluded from the incremental workload curves. Switch to Stage to inspect the complete chronological record.' : 'Reposo y recuperación quedan fuera de las curvas incrementales por carga. Cambia a Estadio para ver el registro cronológico completo.') : ''}</p>
             <div className="mt-4 h-72">
               {selectedOverlaySeries.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -408,7 +396,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                       </div>;
                     }} />
                     {selectedPoint && <ReferenceLine x={overlayXAxis === 'load' ? selectedPoint.load ?? undefined : selectedPoint.stage} stroke="#514163" strokeDasharray="2 3" />}
-                    {selectedOverlaySeries.map(series => <Line key={series.key} type="monotone" dataKey={`${series.key}_scaled`} name={en ? series.en : series.es} stroke={series.color} strokeWidth={2.5} dot={{ r: 3, fill: series.color }} activeDot={{ r: 6 }} connectNulls />)}
+                    {selectedOverlaySeries.map(series => <Line key={series.key} type="linear" dataKey={`${series.key}_scaled`} name={en ? series.en : series.es} stroke={series.color} strokeWidth={2.5} dot={{ r: 3, fill: series.color }} activeDot={{ r: 6 }} connectNulls />)}
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
@@ -431,7 +419,7 @@ export default function AdvancedData({ testId, bodyMassKg, leanBodyMassKg, sport
                   <YAxis dataKey="vo2" type="number" name="VO₂"
                     label={{ value: 'VO₂ (ml/kg/min)', angle: -90, position: 'insideLeft' }} stroke="#9ca3af" />
                   <Tooltip contentStyle={tooltipStyle} />
-                  <Scatter data={chartData.filter(d => d.power && d.vo2)} fill="#3b82f6"
+                  <Scatter data={workloadChartData.filter(d => d.power && d.vo2)} fill="#3b82f6"
                     line={{ stroke: '#3b82f6', strokeWidth: 2 }} />
                   {selectedPoint?.power != null && <ReferenceLine x={selectedPoint.power} stroke="#5A4E6B" strokeDasharray="2 3" />}
                 </ScatterChart>

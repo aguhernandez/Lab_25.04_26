@@ -3,7 +3,7 @@ import { Athlete } from '../types';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../contexts/LanguageContext';
 import AthleteDetail from './AthleteDetail';
-import ResultsView from './ResultsView';
+import AthletePhysiologyHistory from './AthletePhysiologyHistory';
 import AnthropometryPage from '../pages/AnthropometryPage';
 import EnvironmentalPhysiology from '../pages/EnvironmentalPhysiology';
 import ForceVelocityLab from '../pages/ForceVelocityLab';
@@ -85,7 +85,7 @@ export default function ProfessionalAthleteView(props: Props) {
           }
         }
         const lactatePoints = [ ...(pointsRes.data || []), ...(timelinePointsRes.data || []) ].filter(p => p.test_id === latestCompleted?.id);
-        hasLactate = lactatePoints.length > 0;
+        hasLactate = [...(pointsRes.data ?? []),...(timelinePointsRes.data ?? [])].some(p=>p.lactate != null);
         if (hasLactate) {
           const missingHR = lactatePoints.some(p => p.heart_rate == null);
           const missingRpe = lactatePoints.some(p => p.rpe == null);
@@ -181,12 +181,11 @@ export default function ProfessionalAthleteView(props: Props) {
         setLoading(false);
       }
     }
-    void loadAvailability();
+    void loadAvailability().catch(()=>{if(!cancelled)setLoading(false);});
     return () => { cancelled = true; };
   }, [athlete.id]);
 
   const latestTest = tests[0];
-  const latestCompletedTest = tests.find(test => test.status === 'completed');
   const status = !latestTest
     ? (es ? 'Sin test' : 'No test')
     : tests.some(test => test.status === 'in_progress')
@@ -206,15 +205,15 @@ export default function ProfessionalAthleteView(props: Props) {
   ];
 
   const empty = <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">{es ? 'Módulo no evaluado' : 'Module not evaluated'}</div>;
-  const confidencePanel = tab !== 'passport' && content[tab] ? <div className="mb-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+  const confidencePanel = tab !== 'passport' && tab !== 'vo2' && tab !== 'lactate' && content[tab] ? <div className="mb-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
     <span>{es ? 'Confianza del dato' : 'Data confidence'}</span>
     <DataConfidenceBadge level={confidence[tab].level} reason={confidence[tab].reason} />
   </div> : null;
 
   function renderTab() {
-    if (tab === 'passport') return <AthleteDetail key={athlete.id} athlete={athlete} onStartTest={props.onStartTest} onViewResults={props.onViewResults} onEditAthlete={props.onEditAthlete} onAthleteDeleted={props.onAthleteDeleted} />;
-    if (tab === 'vo2' || tab === 'lactate') return content[tab] && latestCompletedTest ? <ResultsView key={`${athlete.id}-${latestCompletedTest.id}-${tab}`} testId={latestCompletedTest.id} /> : empty;
-    if (tab === 'isak') return content.isak ? <AnthropometryPage key={athlete.id} initialAthlete={athlete} lockAthlete /> : empty;
+    if (tab === 'passport') return <><AthletePhysiologyHistory athlete={athlete} onViewResults={props.onViewResults}/><AthleteDetail key={athlete.id} athlete={athlete} onStartTest={props.onStartTest} onViewResults={props.onViewResults} onEditAthlete={props.onEditAthlete} onAthleteDeleted={props.onAthleteDeleted} /></>;
+    if (tab === 'vo2' || tab === 'lactate') return <AthletePhysiologyHistory key={`${athlete.id}-${tab}`} athlete={athlete} domain={tab} onViewResults={props.onViewResults}/>;
+    if (tab === 'isak') return content.isak ? <AnthropometryPage key={athlete.id} initialAthlete={athlete} lockAthlete openLatestResult /> : empty;
     if (tab === 'environment') return content.environment ? <EnvironmentalPhysiology key={athlete.id} initialAthlete={athlete} /> : empty;
     if (tab === 'force') return content.force ? <ForceVelocityLab key={athlete.id} initialAthlete={athlete} /> : empty;
     return content.biochemistry ? <BiochemicalLab key={athlete.id} initialAthlete={athlete} lockAthlete /> : empty;

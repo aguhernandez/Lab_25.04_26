@@ -7,6 +7,9 @@ export type ColumnMapping = Record<string, CanonicalTimelineField>;
 
 export interface ImportOptions {
   deviceName?: string;
+  sheetName?: string;
+  headerRow?: number;
+  units?: Partial<Record<CanonicalTimelineField, string>>;
   deviceProfileId?: string | null;
   calibrationDate?: string | null;
   calibrationNotes?: string | null;
@@ -59,10 +62,11 @@ export async function parseTimelineFile(
   const buffer = await file.arrayBuffer();
   const rows = format === 'csv' || format === 'tsv' || format === 'txt'
     ? parseDelimitedText(new TextDecoder().decode(buffer), format)
-    : parseWorkbook(buffer);
+    : parseWorkbook(buffer, options);
   if (rows.length === 0) throw new Error('No data rows found in file');
 
-  const rawSamples = rows.map((row, index) => mapToTimeline(row, mapping, offsetSeconds, index));
+  const rawSamples = rows.map((row, index) => mapToTimeline(row, mapping, offsetSeconds, index, options)).filter(s => Object.entries(s.measurements ?? {}).some(([k,v]) => k !== 'time_s' && Number.isFinite(v)) && (!Object.values(mapping).includes('time_s') || s.measurements?.time_s != null));
+  if (!rawSamples.length) throw new Error('No usable measurements match the selected columns. Check the header row, time format and units.');
   return addProvenance(rawSamples, {
     format,
     fileName: file.name,
@@ -70,7 +74,7 @@ export async function parseTimelineFile(
     mapping,
     recordCount: rows.length,
     sourceTimestamps: rawSamples.map((sample) => sample.timestamp_s),
-    transformations: ['column_mapping', ...(offsetSeconds ? [`time_offset_${offsetSeconds}s`] : [])],
+    transformations: ['column_mapping', ...Object.entries(options.units ?? {}).filter(([,v])=>v).map(([k,v])=>`source_unit_${k}_${v}`), ...(offsetSeconds ? [`time_offset_${offsetSeconds}s`] : [])],
   });
 }
 
@@ -191,7 +195,7 @@ export function parseTcxFile(
   });
 }
 
-export function extractHeaders(file: File): Promise<string[]> {
+export function extractHeaders(file: File, options: ImportOptions = {}): Promise<string[]> {
   const extension = file.name.split('.').pop()?.toLowerCase();
   if (extension === 'fit' || extension === 'tcx') return Promise.resolve([]);
   return new Promise((resolve, reject) => {
@@ -203,10 +207,7 @@ export function extractHeaders(file: File): Promise<string[]> {
         const headers = extension === 'csv' || extension === 'tsv' || extension === 'txt'
           ? parseDelimitedHeaders(new TextDecoder().decode(data as ArrayBuffer), extension)
           : (() => {
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            return (sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1 })[0] as unknown[] | undefined : undefined)
-              ?.map((value) => String(value ?? ''));
+            return readWorkbookTable(data as ArrayBuffer, options).headers;
           })();
         if (!headers?.length) throw new Error('No headers found in file');
         resolve(headers);
@@ -245,13 +246,13 @@ export function getRawColumnKeys(samples: TimelineSample[]): string[] {
   return [...keys];
 }
 
-function mapToTimeline(row: Record<string, unknown>, mapping: ColumnMapping, offsetSeconds: number, index: number): TimelineSample {
+function mapToTimeline(row: Record<string, unknown>, mapping: ColumnMapping, offsetSeconds: number, index: number, options: ImportOptions = {}): TimelineSample {
   const measurements: Partial<Record<CanonicalTimelineField, number>> = {};
   const raw: Record<string, unknown> = {};
   for (const [fileColumn, canonicalField] of Object.entries(mapping)) {
     const value = findColumnValue(row, fileColumn);
     raw[fileColumn] = serializableValue(value);
-    const parsed = convertValue(value, canonicalField, fileColumn);
+    const parsed = convertValue(value, canonicalField, fileColumn, options.units?.[canonicalField]);
     if (parsed != null && Number.isFinite(parsed)) measurements[canonicalField] = parsed;
   }
   const timestamp = measurements.time_s ?? index;
@@ -387,26 +388,41 @@ function parseDelimitedRecords(text: string, format: ImportFormat): string[][] {
   return records;
 }
 
-function parseWorkbook(buffer: ArrayBuffer): Record<string, unknown>[] {
-  const workbook = XLSX.read(buffer, { type: 'array' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { raw: true, defval: null }) : [];
+export function readWorkbookTable(buffer: ArrayBuffer, options: ImportOptions = {}): { headers: string[]; rows: Record<string,unknown>[]; sheets: string[]; sheetName: string; headerRow: number } {
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+  let best: { sheetName: string; data: unknown[][]; row: number; score: number } | null = null;
+  for (const name of options.sheetName ? [options.sheetName] : workbook.SheetNames) {
+    const sheet = workbook.Sheets[name]; if (!sheet) continue;
+    const data = XLSX.utils.sheet_to_json<unknown[]>(sheet,{header:1,raw:true,defval:null,blankrows:true});
+    for (const row of options.headerRow != null ? [options.headerRow] : Array.from({length:Math.min(50,data.length)},(_,i)=>i)) {
+      const headers = (data[row] ?? []).map(v=>String(v ?? '').trim());
+      const score = Object.keys(guessMapping(headers)).length;
+      if (!best || score > best.score) best={sheetName:name,data,row,score};
+    }
+  }
+  if (!best) throw new Error('No spreadsheet data found.');
+  const headers = best.data[best.row].map(v=>String(v ?? '').trim());
+  if (new Set(headers.filter(Boolean)).size !== headers.filter(Boolean).length) throw new Error('The selected header row contains duplicate column names. Select another header row.');
+  return { headers:headers.filter(Boolean), rows:best.data.slice(best.row+1).filter(row=>row.some(v=>v!=null && v!=='')).map(row=>Object.fromEntries(headers.flatMap((h,i)=>h?[[h,row[i] ?? null]]:[]))), sheets:workbook.SheetNames, sheetName:best.sheetName, headerRow:best.row };
 }
+function parseWorkbook(buffer: ArrayBuffer, options: ImportOptions): Record<string, unknown>[] { return readWorkbookTable(buffer,options).rows; }
 
 function guessMapping(headers: string[]): ColumnMapping {
   const mapping: ColumnMapping = {};
   headers.forEach((header) => {
     const name = normalizeHeader(header);
-    if (name.includes('power') || name.includes('watts') || name === 'w') mapping[header] = 'power_watts';
+    if (name.includes('hrv')) mapping[header] = 'hrv_ms';
+    else if (name.includes('rr') && name.includes('ms')) mapping[header] = 'rr_ms';
+    else if (name.includes('power') || name.includes('watts') || name === 'w') mapping[header] = 'power_watts';
     else if (name.includes('latitude') || name === 'lat') mapping[header] = 'latitude_deg';
     else if (name.includes('longitude') || name === 'lon' || name === 'lng') mapping[header] = 'longitude_deg';
     else if (name.includes('distance') || name.includes('distancem')) mapping[header] = 'distance_m';
     else if (name.includes('cadence') || name.includes('rpm')) mapping[header] = 'cadence_rpm';
     else if (name.includes('lactate') || name.includes('mmol')) mapping[header] = 'lactate_mmol';
     else if (name === 'rpe') mapping[header] = 'rpe';
-    else if (name.includes('time') || name === 't' || name.includes('tempo') || name === 'elapsed') mapping[header] = 'time_s';
+    else if (name.includes('time') || name === 't' || name.includes('tempo') || name === 'elapsed' || name === 'ts' || name === 'tmin' || name === 'tiempo' || name === 'zeit') mapping[header] = 'time_s';
     else if (name.includes('hr') || name.includes('heartrate') || name.includes('pulse')) mapping[header] = 'hr_bpm';
-    else if (name.includes('vo2') && name.includes('kg')) mapping[header] = 'vo2_rel_mlkgmin';
+    else if (name.includes('vo2') && (name.includes('kg') || name.includes('rel'))) mapping[header] = 'vo2_rel_mlkgmin';
     else if (name.includes('vo2')) mapping[header] = 'vo2_abs_mlmin';
     else if (name.includes('speed') || name.includes('velocity') || name.includes('pace')) mapping[header] = 'speed_kmh';
     else if (name.includes('respiratoryfrequency') || name === 'rf' || name.includes('respiratoryrate')) mapping[header] = 'rf_bpm';
@@ -427,7 +443,7 @@ function scoreMappingMatch(headers: string[], mapping: Record<string, string>): 
   return Object.keys(mapping).filter((column) => normalizedHeaders.includes(normalizeHeader(column))).length;
 }
 
-function convertValue(value: unknown, field: CanonicalTimelineField, header: string): number | null {
+function convertValue(value: unknown, field: CanonicalTimelineField, header: string, unitOverride?: string): number | null {
   if (typeof value === 'string' && field === 'speed_kmh') {
     const paceSpeed = parsePaceSpeed(value);
     if (paceSpeed != null) return paceSpeed;
@@ -435,7 +451,12 @@ function convertValue(value: unknown, field: CanonicalTimelineField, header: str
   let numeric = parseNumeric(value);
   if (numeric == null) return null;
   const normalizedHeader = normalizeHeader(header);
-  if (field === 'time_s' && normalizedHeader.includes('ms')) numeric /= 1000;
+  const unit = unitOverride ?? header;
+  if (field === 'time_s') {
+    if (/ms|millisecond/i.test(unit)) numeric /= 1000;
+    else if ((unitOverride === 'min' || /(?:\[|\(|\s)min(?:\]|\)|$)/i.test(unit)) && !(typeof value === 'string' && value.includes(':'))) numeric *= 60;
+    else if (unitOverride === 'Excel days') numeric *= 86400;
+  }
   if (field === 'speed_kmh') {
     if (normalizedHeader.includes('mph')) numeric *= 1.609344;
     else if (normalizedHeader.includes('mps') || /\bm\/s\b/i.test(header)) numeric *= 3.6;
@@ -445,7 +466,7 @@ function convertValue(value: unknown, field: CanonicalTimelineField, header: str
     }
   }
   if ((field === 'distance_m') && normalizedHeader.includes('km')) numeric *= 1000;
-  if ((field === 'vo2_rel_mlkgmin' || field === 'vo2_abs_mlmin' || field === 'vco2_mlmin') && normalizedHeader.includes('lmin')) numeric *= 1000;
+  if ((field === 'vo2_abs_mlmin' || field === 'vco2_mlmin') && (unitOverride === 'L/min' || (!unitOverride && /(?:^|[\[(\s])L\s*\/\s*min/i.test(header)))) numeric *= 1000;
   return numeric;
 }
 
@@ -462,7 +483,9 @@ function parseNumeric(value: unknown): number | null {
   const normalized = value.trim().replace(/\s/g, '').replace(',', '.');
   const time = normalized.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (time) return time[3] != null ? Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3]) : Number(time[1]) * 60 + Number(time[2]);
-  const parsed = Number(normalized.replace(/[^\d.+-]/g, ''));
+  const cleaned = normalized.replace(/[^\d.+-]/g, '');
+  if (!/\d/.test(cleaned)) return null;
+  const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -479,7 +502,7 @@ function defaultDeviceName(format: ImportFormat): string {
 }
 
 function getFormat(extension: string): ImportFormat {
-  if (['csv', 'tsv', 'txt', 'xls', 'xlsx', 'fit', 'tcx'].includes(extension)) return extension as ImportFormat;
+  if (['csv', 'tsv', 'txt', 'xls', 'xlsx', 'xlsm', 'fit', 'tcx'].includes(extension)) return extension as ImportFormat;
   throw new Error(`Unsupported file format: .${extension || 'unknown'}`);
 }
 
@@ -492,7 +515,7 @@ function findColumnValue(row: Record<string, unknown>, column: string): unknown 
 }
 
 function normalizeHeader(header: string): string {
-  return header.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return header.replace(/₂/g,'2').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function tagText(xml: string, name: string): string | null {

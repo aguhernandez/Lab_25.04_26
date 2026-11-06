@@ -1,3 +1,4 @@
+import { isIncremental, incrementalWorkStages, loadForStage, type TestCalculationContext } from './testInterpretation';
 import { Athlete, TestDataPoint, TrainingZone, Sport, AdvancedMetrics, ThresholdOverrides, UnifiedThresholds, VTSource, ThresholdData } from '../types';
 import { kmhToPace, paceToKmh, buildTrainingZonesData, calculateZones7, convertTo5Zones, TrainingZonesData, ZoneCalculationOptions } from './trainingZones';
 import { getCurrentLanguage } from '../contexts/LanguageContext';
@@ -114,13 +115,16 @@ export function calculatePhysiology(
   athlete: Athlete,
   dataPoints: TestDataPoint[],
   overrides?: ThresholdOverrides,
-  breathVT?: { VT1: ThresholdData; VT2: ThresholdData; vt_source: VTSource } | null
+  breathVT?: { VT1: ThresholdData; VT2: ThresholdData; vt_source: VTSource } | null,
+  context?: TestCalculationContext
 ): PhysiologyResults {
   const athlete_ = normalizeAthlete(athlete);
   const sortedPoints = normalizeDataPoints([...dataPoints]).sort((a, b) => a.stage_number - b.stage_number);
 
   if (sortedPoints.length === 0) {
-    return emptyPhysiologyResults();
+    const empty=emptyPhysiologyResults();
+    const peak=context?.measuredVo2Peak;
+    return peak != null && Number.isFinite(peak) && peak > 0 ? { ...empty, vo2max: peak, vo2max_ml_kg_min: peak, vo2max_ml_min: athlete_.weight_kg ? peak*athlete_.weight_kg : null, vo2max_confidence: 'measured', has_vo2: true, data_quality: 'Limited · respiratory data without stage heart rate' } : empty;
   }
   // shadow original parameters so all downstream code uses normalized values
   athlete = athlete_;
@@ -131,7 +135,7 @@ export function calculatePhysiology(
   const has_vo2 = sortedPoints.some(p => p.vo2_ml_kg_min !== null && p.vo2_ml_kg_min !== undefined);
   const has_rer = sortedPoints.some(p => p.vco2_ml_kg_min != null && p.vco2_ml_kg_min > 0);
   const has_pace = sortedPoints.some(p => p.speed_pace !== null && p.speed_pace !== undefined && p.speed_pace !== '');
-  const lactate_analysis = (has_lactate || (has_vo2 && has_rer)) ? analyzeLactate(sortedPoints, athlete.weight_kg, {
+  const lactate_analysis = (has_lactate || (has_vo2 && has_rer)) ? analyzeLactate(isIncremental(context) ? incrementalWorkStages(sortedPoints, athlete.sport) : sortedPoints, athlete.weight_kg, {
     lt1Method: overrides?.lactate_lt1_method,
     lt2Method: overrides?.lactate_lt2_method,
     iatDeltaMmol: overrides?.lactate_iat_delta_mmol,
@@ -240,7 +244,7 @@ export function calculatePhysiology(
 
   const { vam_kmh, pam_watts } = calculateVAMandPAM(sortedPoints, has_power, athlete.sport);
 
-  const hr_drift_percent = calculateHRDrift(sortedPoints);
+  const hr_drift_percent = calculateHRDrift(sortedPoints, { ...context, sport: athlete.sport });
 
   const thresholdSource: 'ventilatory' | 'lactate' = valid_lactate_for_thresholds ? 'lactate' : 'ventilatory';
   const zoneOptions: ZoneCalculationOptions = {
@@ -1029,25 +1033,27 @@ export function parseSpeedToKmh(speedPace: string, sport: Sport): number | null 
   return null;
 }
 
-function calculateHRDrift(points: TestDataPoint[]): number | null {
+export function calculateHRDrift(points: TestDataPoint[], context?: TestCalculationContext): number | null {
+  if (context?.testType !== 'steady_state' || points.length < 4) return null;
+  const loads = points.map(p => loadForStage(p, context.sport ?? 'cycling'));
+  const reference = loads[0];
+  if (reference == null || loads.some(load => load == null || Math.abs(load-reference)/reference > 0.03) || points.some(p => !Number.isFinite(p.heart_rate) || p.heart_rate <= 0)) return null;
   if (points.length < 4) return null;
 
   const totalDuration = points.reduce((sum, p) => sum + p.duration_seconds, 0);
 
   if (totalDuration < 1200) return null;
 
-  const midPoint = Math.floor(points.length / 2);
-  const first10min = points.slice(0, Math.max(2, midPoint));
-  const last10min = points.slice(-Math.max(2, points.length - midPoint));
-
-  if (first10min.length === 0 || last10min.length === 0) return null;
-
-  const avgFirst = first10min.reduce((sum, p) => sum + p.heart_rate, 0) / first10min.length;
-  const avgLast = last10min.reduce((sum, p) => sum + p.heart_rate, 0) / last10min.length;
-
-  const drift = ((avgLast - avgFirst) / avgFirst) * 100;
-
-  return Math.abs(drift) > 0.5 ? Math.round(drift * 10) / 10 : null;
+  let elapsed=0, firstSum=0, secondSum=0;
+  for (const p of points) {
+    if (!Number.isFinite(p.duration_seconds) || p.duration_seconds <= 0) return null;
+    const firstDuration=Math.max(0,Math.min(elapsed+p.duration_seconds,totalDuration/2)-elapsed);
+    firstSum+=p.heart_rate*firstDuration;
+    secondSum+=p.heart_rate*(p.duration_seconds-firstDuration);
+    elapsed+=p.duration_seconds;
+  }
+  const avgFirst=firstSum/(totalDuration/2), avgLast=secondSum/(totalDuration/2);
+  return avgFirst > 0 ? Math.round((avgLast-avgFirst)/avgFirst*1000)/10 : null;
 }
 
 
@@ -1120,7 +1126,7 @@ function generateMetabolicProfile(
     else anaerobic_contribution = 'Low';
   }
 
-  let durability = 'Moderate';
+  let durability = 'Not assessed';
   if (hr_drift !== null) {
     if (Math.abs(hr_drift) < 5) durability = 'High';
     else if (Math.abs(hr_drift) < 8) durability = 'Moderate';

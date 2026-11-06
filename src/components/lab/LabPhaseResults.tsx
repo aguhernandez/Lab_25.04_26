@@ -340,7 +340,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
           />
 
           <ObjectiveZoneBuilder points={dataPoints} sport={test?.sport ?? 'cycling'} results={activeResults} language={language} />
-          {dataPoints.length > 0 && <ScientificModelPanel results={activeResults} points={dataPoints} language={language} savedAlgorithmVersion={null} saved={false} sport={test?.sport ?? 'cycling'} calculate={points => calculatePhysiology({ ...athlete, sport: test?.sport ?? athlete.sport, weight_kg: test?.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg }, points, test?.anthropometry_snapshot?.threshold_overrides)} />}
+          {dataPoints.length > 0 && <ScientificModelPanel results={activeResults} points={dataPoints} language={language} savedAlgorithmVersion={null} saved={false} sport={test?.sport ?? 'cycling'} calculate={points => calculatePhysiology({ ...athlete, sport: test?.sport ?? athlete.sport, weight_kg: test?.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg }, points, test?.anthropometry_snapshot?.threshold_overrides, undefined, { testType: test?.test_type, protocolId: test?.protocol_id })} />}
 
           {(dataPoints.length > 0 || advancedMetrics) && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
@@ -358,7 +358,7 @@ export default function LabPhaseResults({ session, onUpdate, onNext }: Props) {
               </button>
               {showAdvanced && (
                 <div className="border-t border-gray-100 dark:border-gray-700 p-6">
-                  <AdvancedData bodyMassKg={session.athlete?.weight_kg} leanBodyMassKg={session.athlete?.lean_body_mass_kg} sport={session.sport ?? undefined} dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
+                  <AdvancedData testType={test?.test_type} protocolId={test?.protocol_id} bodyMassKg={session.athlete?.weight_kg} leanBodyMassKg={session.athlete?.lean_body_mass_kg} sport={session.sport ?? undefined} dataPoints={dataPoints} results={activeResults} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} />
                 </div>
               )}
             </div>

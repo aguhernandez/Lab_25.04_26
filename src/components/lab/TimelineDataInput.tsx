@@ -9,18 +9,22 @@ import {
 import type { DeviceProfile } from '../../types/breathData.types';
 import type { TimelineSample, ProtocolStep } from '../../types/timeline.types';
 import { DEFAULT_PROTOCOL, PRIMARY_COLUMNS, LACTATE_OFFSET_S } from '../../types/timeline.types';
+import { readWorkbookTable } from '../../lib/deviceImporters';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { protocolAdvice } from '../../lib/protocolAssistant';
 
 interface Props {
   testId: string;
-  onComplete: (samples: TimelineSample[]) => void;
+  onComplete: (samples: TimelineSample[]) => Promise<void>;
+  initialSamples?: TimelineSample[];
   onCancel: () => void;
   recordedCalibration?: string | null;
   plannedStages?: ProtocolStep[];
 }
 
-export default function TimelineDataInput({ testId, onComplete, onCancel, recordedCalibration, plannedStages }: Props) {
-  const [samples, setSamples] = useState<TimelineSample[]>([]);
+export default function TimelineDataInput({ testId, onComplete, onCancel, recordedCalibration, plannedStages, initialSamples }: Props) {
+  const { language } = useLanguage(); const es = language === 'es';
+  const [samples, setSamples] = useState<TimelineSample[]>(initialSamples ?? []);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [showAllColumns, setShowAllColumns] = useState(false);
@@ -49,6 +53,8 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
   // Column mapping state
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingHeaders, setPendingHeaders] = useState<string[]>([]);
+  const [spreadsheet, setSpreadsheet] = useState<{sheets: string[]; sheetName: string; headerRow: number} | null>(null);
+  const [unitOverrides, setUnitOverrides] = useState<ImportOptions['units']>({});
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [showMapper, setShowMapper] = useState(false);
 
@@ -190,7 +196,9 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
         setPendingFile(null);
         return;
       }
-      const headers = await extractHeaders(file);
+      const layout = ['xls','xlsx','xlsm'].includes(extension ?? '') ? readWorkbookTable(await file.arrayBuffer()) : null;
+      setSpreadsheet(layout); setUnitOverrides({});
+      const headers = layout?.headers ?? await extractHeaders(file);
       const { profile, mapping } = autoDetectMapping(headers, profiles);
       setDeviceProfileId(profile && isUuid(profile.id) ? profile.id : null);
       if (profile && !deviceName.trim()) setDeviceName(profile.name);
@@ -228,6 +236,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
   };
 
   const buildImportOptions = (): ImportOptions => ({
+    sheetName: spreadsheet?.sheetName, headerRow: spreadsheet?.headerRow, units: unitOverrides,
     deviceName: deviceName.trim() || undefined,
     deviceProfileId,
     calibrationDate: calibrationDate || null,
@@ -285,11 +294,13 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
 
   // --- Save ---
   const handleSave = async () => {
+    if (showMapper) { setError(es ? 'Confirma el mapeo y la importación antes de finalizar.' : 'Confirm the mapping and import before completing.'); return; }
     if (samples.length === 0) { setError('Add at least one data point before saving.'); return; }
     setSaving(true);
     setError(null);
     try {
-      await supabase.from('test_timeline_samples').delete().eq('test_id', testId);
+      const { error: deleteError } = await supabase.from('test_timeline_samples').delete().eq('test_id', testId);
+      if (deleteError) throw deleteError;
       const rows = samples.map((s) => ({
         test_id: testId,
         timestamp_s: s.timestamp_s,
@@ -306,10 +317,11 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
         source: s.source,
         edited_fields: s.edited_fields,
       }));
-      const { error: insErr } = await supabase.from('test_timeline_samples').insert(rows);
-      if (insErr) throw insErr;
-      await supabase.from('tests').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', testId);
-      onComplete(samples);
+      for (let start = 0; start < rows.length; start += 500) {
+        const { error: insErr } = await supabase.from('test_timeline_samples').insert(rows.slice(start, start + 500));
+        if (insErr) throw insErr;
+      }
+      await onComplete(samples);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -452,7 +464,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow border border-gray-100 dark:border-gray-700 p-5">
         <div className="flex items-center gap-2 mb-3">
           <Upload className="w-5 h-5 text-gray-400" />
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Import from Device</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{es ? 'Importar datos del test · cualquier marca' : 'Import test data · any manufacturer'}</h3>
         </div>
 
         {importError && (
@@ -479,6 +491,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
             <p className="text-xs text-blue-600 dark:text-blue-400 mb-3">
               We auto-detected the mapping. Verify or fix each column, then click Import.
             </p>
+            {spreadsheet && <div className="mb-3 flex flex-wrap gap-3"><label className="text-xs">{es ? 'Hoja' : 'Sheet'}<select className="input" value={spreadsheet.sheetName} onChange={async e => { if(!pendingFile)return; const layout=readWorkbookTable(await pendingFile.arrayBuffer(),{sheetName:e.target.value}); setSpreadsheet(layout); setPendingHeaders(layout.headers); setColumnMapping(autoDetectMapping(layout.headers,profiles).mapping); }} >{spreadsheet.sheets.map(name=><option key={name}>{name}</option>)}</select></label><label className="text-xs">{es ? 'Fila de encabezados' : 'Header row'}<input className="input w-24" type="number" min="1" value={spreadsheet.headerRow+1} onChange={async e=>{if(!pendingFile)return;const row=Number(e.target.value)-1;if(row<0)return;try {const layout=readWorkbookTable(await pendingFile.arrayBuffer(),{sheetName:spreadsheet.sheetName,headerRow:row});setSpreadsheet(layout);setPendingHeaders(layout.headers);setColumnMapping(autoDetectMapping(layout.headers,profiles).mapping);}catch(err){setImportError(String(err));}}}/></label></div>}
             <div className="space-y-1.5 max-h-64 overflow-y-auto">
               {pendingHeaders.map((header) => (
                 <div key={header} className="grid grid-cols-2 gap-2 items-center text-xs">
@@ -494,6 +507,7 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
                       <option key={f.key} value={f.key}>{f.label}</option>
                     ))}
                   </select>
+                  {['time_s','vo2_abs_mlmin','vco2_mlmin'].includes(columnMapping[header]) && <label className="col-span-2 text-xs">{es ? 'Unidad de origen' : 'Source unit'}<select className="input ml-2" value={unitOverrides?.[columnMapping[header]] ?? ''} onChange={e => setUnitOverrides(current=>({...current,[columnMapping[header]]:e.target.value || undefined}))}><option value="">{es ? 'Según encabezado' : 'From header'}</option>{(columnMapping[header] === 'time_s' ? ['s','min','Excel days'] : ['ml/min','L/min']).map(unit=><option key={unit}>{unit}</option>)}</select></label>}
                 </div>
               ))}
             </div>
@@ -543,13 +557,13 @@ export default function TimelineDataInput({ testId, onComplete, onCancel, record
               <label className="flex items-center gap-2 px-4 py-2 bg-yellow-400 text-gray-800 rounded-lg text-sm font-medium cursor-pointer hover:bg-yellow-300 transition-colors">
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 {importing ? 'Reading...' : 'Browse files'}
-                <input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt,.fit,.tcx" onChange={handleFileSelect} className="hidden" disabled={importing} />
+                <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt,.fit,.tcx" onChange={handleFileSelect} className="hidden" disabled={importing} />
               </label>
             </div>
           </div>
         )}
         <p className="text-xs text-gray-400 mt-2">
-          Supports XLSX, CSV/TSV, Garmin FIT and TCX. CSV columns can map lactate, VO₂, power, pace, GPS and respiratory fields.
+          {es ? 'Un solo archivo para gases, lactato, pulso y carga. Excel XLSX/XLS/XLSM, CSV/TSV/TXT, FIT y TCX. Mapea las columnas de VO₂ Master, COSMED, Cortex, Vyntus, MetaMax u otro equipo según tu exportación; el nombre de la marca no limita las columnas.' : 'One file for gases, lactate, heart rate and workload. Excel XLSX/XLS/XLSM, CSV/TSV/TXT, FIT and TCX. Map columns from VO₂ Master, COSMED, Cortex, Vyntus, MetaMax or any other analyzer according to its export; no brand-specific file is required.'}
         </p>
       </div>
 

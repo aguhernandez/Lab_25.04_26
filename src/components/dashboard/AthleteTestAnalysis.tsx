@@ -1,3 +1,4 @@
+import { sanitizeTestResults } from '../../lib/testInterpretation';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -61,7 +62,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
             test: row as SavedTestAnalysis['test'],
             points: ((pointsRes.data ?? []).filter(point => point.test_id === row.id) as TestDataPoint[]),
             timeline: ((timelineRes.data ?? []).filter(sample => sample.test_id === row.id) as TimelineHRSample[]),
-            results: snapshot.results,
+            results: sanitizeTestResults(snapshot.results, row as any, ((pointsRes.data ?? []).filter(point => point.test_id === row.id) as TestDataPoint[])),
             advanced: snapshot.advancedMetrics ?? null,
           }];
         });
@@ -86,6 +87,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
     const normalized = normalizeLongitudinalLactate(lactateHistory.map(test => ({
       id: test.test.id,
       date: test.test.test_date,
+      sport: test.test.sport,
       points: test.points,
       weightKg: test.test.anthropometry_snapshot?.weight_kg,
     })));
@@ -154,7 +156,7 @@ export default function AthleteTestAnalysis({ athleteId }: { athleteId: string }
               </div>
             ))}
           </div>
-          {points.length > 0 && <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg} sport={test.sport} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} surface="results" />}
+          {points.length > 0 && <AdvancedData testType={test.test_type} testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg} sport={test.sport} dataPoints={points} results={results} advancedMetrics={advanced} timelineSamples={timeline} surface="results" />}
           <MetabolicProfile results={results} />
           {[
             { key: 'LT1', value: results.thresholds?.LT1?.percent_vo2max },

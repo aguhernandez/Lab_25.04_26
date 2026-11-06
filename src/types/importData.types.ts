@@ -1,4 +1,4 @@
-export type ImportFormat = 'csv' | 'tsv' | 'txt' | 'xlsx' | 'xls' | 'fit' | 'tcx' | 'manual';
+export type ImportFormat = 'csv' | 'tsv' | 'txt' | 'xlsx' | 'xls' | 'xlsm' | 'fit' | 'tcx' | 'manual';
 
 export type CanonicalTimelineField =
   | 'time_s'

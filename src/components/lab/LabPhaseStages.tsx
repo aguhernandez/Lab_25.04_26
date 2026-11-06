@@ -2,81 +2,20 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { saveTestAnthropometry } from '../../lib/anthropometry';
 import { LabSession } from '../../lib/labSession';
-import { Test, TestDataPoint } from '../../types';
+import { Test } from '../../types';
 import TimelineDataInput from './TimelineDataInput';
 import Toast from '../Toast';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { TimelineSample } from '../../types/timeline.types';
 import { validateProtocolRun } from '../../lib/protocolEngine';
-import BreathDataImport from './BreathDataImport';
+import { timelineToStages, timelineToBreath, breathToTimeline } from '../../lib/labImportPipeline';
+import { calculateVentilatoryThresholds } from '../../lib/ventilatoryThresholds';
 
 interface Props {
   session: LabSession;
   onUpdate: (updates: Partial<LabSession>) => void;
   onNext: () => void;
   onBack: () => void;
-}
-
-function samplesToDataPoints(samples: TimelineSample[]): TestDataPoint[] {
-  const sorted = [...samples].sort((a, b) => a.timestamp_s - b.timestamp_s);
-  const groups: TimelineSample[][] = [];
-  let currentGroup: TimelineSample[] = [];
-  const highFrequency = sorted.length > 120 || sorted.some((sample) => (sample.provenance?.sampleFrequencyHz ?? 0) >= 1);
-  let lastStageKey: string | null = null;
-
-  for (const s of sorted) {
-    const stageKey = s.lactate != null
-      ? `lactate:${s.lactate}`
-      : s.power_watts != null
-        ? `power:${Math.round(s.power_watts / 5) * 5}`
-        : s.speed_pace;
-    const crossedTimeWindow = highFrequency && currentGroup.length > 0 && Math.floor(s.timestamp_s / 180) !== Math.floor(currentGroup[0].timestamp_s / 180);
-    if (currentGroup.length > 0 && (crossedTimeWindow || (!highFrequency && stageKey && stageKey !== lastStageKey))) {
-      groups.push(currentGroup);
-      currentGroup = [];
-    }
-    currentGroup.push(s);
-    if (stageKey) lastStageKey = stageKey;
-  }
-  if (currentGroup.length > 0) groups.push(currentGroup);
-
-  const avgInt = (arr: number[]) =>
-    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
-  const avgDec = (arr: number[]) =>
-    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
-
-  return groups
-    .map((group, idx) => {
-      const heartRates = group.map(g => g.heart_rate).filter((v): v is number => v != null);
-      const vo2s = group.map(g => g.vo2_ml_kg_min).filter((v): v is number => v != null);
-      const lactates = group.map(g => g.lactate).filter((v): v is number => v != null);
-      const rpes = group.map(g => g.rpe).filter((v): v is number => v != null);
-      const speeds = group.map(g => g.speed_pace).filter((v): v is string => v != null);
-      const powers = group.map(g => g.power_watts).filter((v): v is number => v != null);
-
-      const hr = heartRates.length ? Math.max(...heartRates) : null;
-      if (hr == null) return null;
-
-      return {
-        id: crypto.randomUUID(),
-        test_id: '',
-        stage_number: idx + 1,
-        duration_seconds: group.length > 1
-          ? Math.round(group[group.length - 1].timestamp_s - group[0].timestamp_s)
-          : 180,
-        heart_rate: hr,
-        power_watts: avgDec(powers),
-        speed_pace: speeds[0] ?? null,
-        vo2_ml_kg_min: vo2s.length ? Math.max(...vo2s) : null,
-        vco2_ml_kg_min: null,
-        lactate: avgDec(lactates),
-        rpe: avgInt(rpes),
-        vt1_marker: false,
-        vt2_marker: false,
-        created_at: new Date().toISOString(),
-      } as TestDataPoint;
-    })
-    .filter((p): p is TestDataPoint => p !== null);
 }
 
 export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Props) {
@@ -142,7 +81,14 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
 
     try {
       // Convert timeline samples to TestDataPoint format for the existing calculation engine
-      const dataPoints = samplesToDataPoints(samples);
+      const mass = session.preTestData?.anthropometry.weight_kg ?? athlete.weight_kg;
+      const breathData = timelineToBreath(samples, mass);
+      const dataPoints = timelineToStages(samples, session.sport ?? athlete.sport, mass, session.stageDurationSeconds, session.customProtocol ? session.customStageDurations : undefined);
+      if (!dataPoints.length && !breathData.some(s => s.vo2_rel_mlkgmin != null || s.vo2_abs_mlmin != null)) throw new Error('No usable measurements. Map time and at least heart rate, lactate, VO₂ or external load.');
+      const maxHR = Math.max(0, ...samples.map(s => s.heart_rate ?? 0));
+      const vt = maxHR > 0 && breathData.length >= 4 ? calculateVentilatoryThresholds(breathData, maxHR, null, breathData.some(s => s.vco2_mlmin != null)) : null;
+      const emptyThreshold = { hr: null, vo2: null, power: null, pace: null, percent_vo2max: null, percent_hrmax: null, confidence: 'estimated' as const };
+      const breathVT: LabSession['breathVT'] = vt ? { LT1: emptyThreshold, LT2: emptyThreshold, VT1: vt.VT1, VT2: vt.VT2, vt_source: 'direct_measurement', delta_lt1_vt1_hr: null, delta_lt2_vt2_hr: null } : null;
       const imports = collectImports(samples, session.protocolSettings?.imports ?? [], session.breathImportMetadata);
       const firstImport = imports[0];
       const environment = makeProtocolMetadata(session).environment as NonNullable<NonNullable<LabSession['protocolSettings']>['environment']>;
@@ -155,7 +101,7 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         environment: session.protocolSettings.environment ?? environment,
       } : null;
       const validation = session.protocolId && session.protocolSettings
-        ? validateProtocolRun({ protocolId: session.protocolId, settings: validationSettings!, timelineSamples: samples, breathSamples: session.breathData ?? [] })
+        ? validateProtocolRun({ protocolId: session.protocolId, settings: validationSettings!, timelineSamples: samples, breathSamples: breathData })
         : null;
       const updatedProtocolSettings = session.protocolSettings && validation
         ? { ...validationSettings!, validation }
@@ -170,7 +116,8 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
 
       // Also save as test_data_points for backward compatibility
       if (dataPoints.length > 0) {
-        await supabase.from('test_data_points').delete().eq('test_id', currentTest.id);
+        const { error: deleteError } = await supabase.from('test_data_points').delete().eq('test_id', currentTest.id);
+        if (deleteError) throw deleteError;
         const pointsToInsert = dataPoints.map(p => ({
           test_id: currentTest.id,
           stage_number: Math.max(1, Math.round(Number(p.stage_number))),
@@ -188,12 +135,10 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         if (insertErr) throw insertErr;
       }
 
-      await supabase
-        .from('tests')
-        .update({ status: 'completed' })
-        .eq('id', currentTest.id);
+      const { error: completeError } = await supabase.from('tests').update({ status: 'completed' }).eq('id', currentTest.id);
+      if (completeError) throw completeError;
 
-      onUpdate({ dataPoints, protocolSettings: updatedProtocolSettings });
+      onUpdate({ dataPoints, breathData: breathData.length ? breathData : null, breathVT, protocolSettings: updatedProtocolSettings });
       if (validation?.status === 'incomplete') {
         setToast({ message: `Protocol saved for review: ${validation.errors[0]?.replace(/_/g, ' ')}`, type: 'error' });
       } else if (validation?.status === 'review') {
@@ -237,14 +182,6 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
 
-      <BreathDataImport
-        breathData={session.breathData}
-        deviceProfile={session.deviceProfile}
-        onChange={(breathData, deviceProfile, breathVT, importMetadata) => onUpdate({ breathData, deviceProfile, breathVT, breathImportMetadata: importMetadata })}
-        hrmax={null}
-        vo2max={null}
-      />
-
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -277,6 +214,7 @@ export default function LabPhaseStages({ session, onUpdate, onNext, onBack }: Pr
 
       <TimelineDataInput
         testId={currentTest.id}
+        initialSamples={session.breathData?.length ? breathToTimeline(session.breathData, session.preTestData?.anthropometry.weight_kg ?? athlete.weight_kg) : undefined}
         recordedCalibration={session.protocolSettings?.deviceCalibrationDate ?? session.breathImportMetadata?.calibrationDate}
         plannedStages={session.protocolId === 'incremental_lactate' ? Array.from({ length: session.numStages }, (_, index) => { const duration = session.customProtocol ? session.customStageDurations[index] ?? session.stageDurationSeconds : session.stageDurationSeconds; return { step: index + 1, label: `Estadio ${index + 1}`, speed_pace: '', target_duration_s: duration, lactate_at_s: duration }; }) : undefined}
         onComplete={handleTimelineComplete}

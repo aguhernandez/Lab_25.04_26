@@ -1,6 +1,9 @@
+import { hydrateStageGases, timelineToBreath, measuredBreathPeak } from '../lib/labImportPipeline';
+import type { TimelineSample } from '../types/timeline.types';
+import { sanitizeTestResults } from '../lib/testInterpretation';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Athlete, Test, TestDataPoint, TrainingZone, AdvancedMetrics } from '../types';
+import { Athlete, Test, TestDataPoint, AdvancedMetrics } from '../types';
 import { calculatePhysiology, calculateAdvancedMetrics, PhysiologyResults, type TimelineHRSample } from '../lib/physiology';
 import ReportBuilder from './reports/ReportBuilder';
 import type { ReportData } from '../lib/reportGenerator';
@@ -26,6 +29,7 @@ import ObjectiveZoneBuilder from './ObjectiveZoneBuilder';
 
 interface ResultsViewProps {
   testId: string;
+  initialSection?: 'overview' | 'curves' | 'thresholds' | 'quality';
   onTestDeleted?: () => void;
 }
 
@@ -41,7 +45,7 @@ interface SavedSnapshot {
   modelProvenance?: ModelResultProvenance;
 }
 
-export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps) {
+export default function ResultsView({ testId, onTestDeleted, initialSection = 'overview' }: ResultsViewProps) {
   const { language } = useLanguage();
   const [test, setTest] = useState<Test | null>(null);
   const [athlete, setAthlete] = useState<Athlete | null>(null);
@@ -50,7 +54,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [advancedMetrics, setAdvancedMetrics] = useState<AdvancedMetrics | null>(null);
   const [completeJSON, setCompleteJSON] = useState<MetabolicLabJSON | null>(null);
   const [showJSONSummary, setShowJSONSummary] = useState(false);
-  const [activeSection, setActiveSection] = useState<'overview' | 'curves' | 'thresholds' | 'quality'>('overview');
+  const [activeSection, setActiveSection] = useState<'overview' | 'curves' | 'thresholds' | 'quality'>(initialSection);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -62,6 +66,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   const [preTestData, setPreTestData] = useState<PreTestData | null>(null);
   const [anthropometryMeasurement, setAnthropometryMeasurement] = useState<AnthropometryMeasurement | null>(null);
   const [kerrResults, setKerrResults] = useState<KerrResults | null>(null);
+  const [measuredPeak, setMeasuredPeak] = useState<number | null>(null);
   const [timelineSamples, setTimelineSamples] = useState<TimelineHRSample[] | null>(null);
 
   // Persisted state tracking
@@ -132,7 +137,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       setAthlete(athleteData);
 
-      const { data: dataPointsData, error: dataPointsError } = await supabase
+      let { data: dataPointsData, error: dataPointsError } = await supabase
         .from('test_data_points')
         .select('*')
         .eq('test_id', testId)
@@ -140,14 +145,19 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
 
       if (dataPointsError) throw dataPointsError;
 
-      setDataPoints(dataPointsData || []);
 
-      const { data: timelineData } = await supabase
-        .from('test_timeline_samples')
-        .select('timestamp_s, heart_rate, speed_pace, lactate, rpe, vo2_ml_kg_min')
-        .eq('test_id', testId)
-        .order('timestamp_s', { ascending: true });
+      const timelineData: any[] = [];
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase.from('test_timeline_samples').select('*')
+          .eq('test_id', testId).order('timestamp_s', { ascending: true }).range(page * 1000, page * 1000 + 999);
+        if (error) throw error;
+        timelineData.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
       setTimelineSamples((timelineData as TimelineHRSample[]) ?? null);
+      const canonical=(timelineData ?? []).map(row=>({...row,measurements:row.raw_data?.__canonicalMeasurements ?? {}})) as TimelineSample[];
+      dataPointsData=hydrateStageGases(dataPointsData ?? [],canonical,testData.anthropometry_snapshot?.weight_kg ?? athleteData.weight_kg);
+      setDataPoints(dataPointsData ?? []);
 
       // Load anthropometry for report
       const [{ data: anthroRow }, { data: kerrRow }] = await Promise.all([
@@ -178,7 +188,10 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         console.error('Failed to fetch test_results:', trError);
       }
 
+      const peak = measuredBreathPeak(timelineToBreath(canonical, testData.anthropometry_snapshot?.weight_kg ?? athleteData.weight_kg));
+      setMeasuredPeak(peak);
       const snapshot = (testResultsRow as Record<string, unknown>)?.results_snapshot as SavedSnapshot | undefined;
+      if (snapshot?.results) snapshot.results = sanitizeTestResults(snapshot.results, testData, dataPointsData ?? []);
       const savedAt = (testResultsRow as Record<string, unknown>)?.saved_at as string | undefined;
       let loadedAdvanced: AdvancedMetrics | null = snapshot?.advancedMetrics ?? null;
 
@@ -209,7 +222,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         regenerateJSON(athleteData, testData, dataPointsData || [], snapshot.results, loadedAdvanced);
       } else {
         // No saved snapshot — calculate from raw data (first load of a new test)
-        const athleteForCalculations = { ...athleteData };
+        const athleteForCalculations = { ...athleteData, sport: testData.sport };
 
         if (testData.anthropometry_snapshot) {
           athleteForCalculations.weight_kg = testData.anthropometry_snapshot.weight_kg;
@@ -223,7 +236,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         }
 
         const thresholdOverrides = testData.anthropometry_snapshot?.threshold_overrides;
-        const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides);
+        const calculated = calculatePhysiology(athleteForCalculations, dataPointsData || [], thresholdOverrides, undefined, { testType: testData.test_type, protocolId: testData.protocol_id, measuredVo2Peak: peak });
         const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPointsData || [], calculated, undefined, testData.sport);
 
         setResults(calculated);
@@ -234,33 +247,9 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
         regenerateJSON(athleteData, testData, dataPointsData || [], calculated, advanced);
       }
 
-      // Load training zones. Manual profile zones are authoritative for the test display.
+      // Load the current profile zones separately from the historical test snapshot.
       const zones = await fetchAthleteTrainingZones(athleteData.id);
       setTrainingZones(zones);
-
-      if (zones?.mode === 'manual_override' && zones.heart_rate_zones.length > 0) {
-        const currentResults = snapshot?.results;
-        if (currentResults) {
-          const profileZones = zones.heart_rate_zones as TrainingZone[];
-          const mergedResults: PhysiologyResults = {
-            ...currentResults,
-            training_zones: profileZones,
-            zones_data: {
-              ...currentResults.zones_data,
-              zones5: profileZones,
-              defaultDisplay: '5',
-            },
-          };
-          setResults(mergedResults);
-          setSavedSnapshot({
-            results: mergedResults,
-            advancedMetrics: loadedAdvanced,
-            savedAt: savedAt ?? '',
-            modelProvenance: snapshot?.modelProvenance,
-          });
-          regenerateJSON(athleteData, testData, dataPointsData || [], mergedResults, loadedAdvanced);
-        }
-      }
 
       // Check if profile was previously synced
       if (testResultsRow) {
@@ -274,9 +263,9 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
   };
 
   const doCalculation = useCallback((): { results: PhysiologyResults; advanced: AdvancedMetrics } | null => {
-    if (!test || !athlete || dataPoints.length === 0) return null;
+    if (!test || !athlete || (dataPoints.length === 0 && measuredPeak == null)) return null;
 
-    const athleteForCalculations = { ...athlete };
+    const athleteForCalculations = { ...athlete, sport: test.sport };
 
     if (test.anthropometry_snapshot) {
       athleteForCalculations.weight_kg = test.anthropometry_snapshot.weight_kg;
@@ -290,11 +279,11 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
     }
 
     const thresholdOverrides = test.anthropometry_snapshot?.threshold_overrides;
-    const calculated = calculatePhysiology(athleteForCalculations, dataPoints, thresholdOverrides);
+    const calculated = calculatePhysiology(athleteForCalculations, dataPoints, thresholdOverrides, undefined, { testType: test?.test_type, protocolId: test?.protocol_id, measuredVo2Peak: measuredPeak });
     const advanced = calculateAdvancedMetrics(athleteForCalculations, dataPoints, calculated, undefined, test.sport);
 
     return { results: calculated, advanced };
-  }, [test, athlete, dataPoints]);
+  }, [test, athlete, dataPoints, measuredPeak]);
 
   const handleRecalculate = () => {
     if (!test || !athlete) return;
@@ -645,7 +634,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{language === 'es' ? 'Perfil metabólico' : 'Metabolic profile'}</h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{language === 'es' ? 'Explora las respuestas por carga. Al seleccionar una muestra, se sincroniza la lectura entre gráficos.' : 'Explore responses by workload. Selecting a sample synchronizes the readout across charts.'}</p>
           </div>
-          <AdvancedData testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg ?? athlete.lean_body_mass_kg} sport={test.sport} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
+          <AdvancedData testType={test.test_type} protocolId={test.protocol_id} testId={test.id} bodyMassKg={test.anthropometry_snapshot?.weight_kg ?? athlete.weight_kg} leanBodyMassKg={test.anthropometry_snapshot?.leanBodyMassKg ?? athlete.lean_body_mass_kg} sport={test.sport} dataPoints={dataPoints} results={results} advancedMetrics={advancedMetrics} timelineSamples={timelineSamples} surface="results" />
         </section>
       )}
 
@@ -727,7 +716,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
               athleteForSensitivity.body_fat_percent = test.anthropometry_snapshot.bodyFatPercent;
               athleteForSensitivity.lean_body_mass_kg = test.anthropometry_snapshot.leanBodyMassKg;
             }
-            return calculatePhysiology(athleteForSensitivity, points, test.anthropometry_snapshot?.threshold_overrides);
+            return calculatePhysiology(athleteForSensitivity, points, test.anthropometry_snapshot?.threshold_overrides, undefined, { testType: test.test_type, protocolId: test.protocol_id });
           }} />
           <CoachNotes testId={test.id} />
         </section>
@@ -756,7 +745,7 @@ export default function ResultsView({ testId, onTestDeleted }: ResultsViewProps)
                 const birthYear = new Date().getFullYear() - ft.anthropometry_snapshot.age;
                 athleteForCalc.date_of_birth = `${birthYear}-01-01`;
               }
-              const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], ft.anthropometry_snapshot?.threshold_overrides);
+              const calcResults = calculatePhysiology(athleteForCalc, freshPoints as TestDataPoint[], ft.anthropometry_snapshot?.threshold_overrides, undefined, { testType: ft.test_type, protocolId: ft.protocol_id });
               const calcAdvanced = calculateAdvancedMetrics(athleteForCalc, freshPoints as TestDataPoint[], calcResults, undefined, ft.sport);
               setPendingResults(calcResults);
               setPendingAdvanced(calcAdvanced);
